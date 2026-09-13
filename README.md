@@ -8,7 +8,7 @@ Graph-Memex (`me-mex`) is an agentic research assistant and personal long-term m
 
 ## 🏗️ The Grand Architecture
 
-The architecture of Graph-Memex is synthesized from 15 state-of-the-art papers across Knowledge Graph RAG, agentic memory, automated scientific discovery, and control systems:
+The architecture of Graph-Memex is synthesized from various papers across Knowledge Graph RAG, agentic memory, automated scientific discovery, and control systems:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
