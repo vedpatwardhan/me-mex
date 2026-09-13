@@ -1359,16 +1359,22 @@ Graph-Memex instantiates Nested Learning's continuum memory at the agent system 
 * **FSM Workflow Architecture for FastMCP Tools:** Models Graph-Memex agent workflows (data intake, connection discovery, morning review queue generation) as explicit **Finite State Machines (FSMs)** with clear state transitions, preventing unconstrained agent loops or prompt drift.
 * **Trajectory Priors in MongoDB:** Successful graph traversal paths and research synthesis trajectories are saved in MongoDB as **reusable workflow priors**, optimizing future deep research queries over the knowledge graph.
 
+---
 
+## Summary
 
-
-
-
-
-
-
-
-
-
-
-
+1. GraphRAG has triplet graphs for each chunk followed by community detection at multiple levels with corresponding community report, searched using map-reduce for global and entity-anchored (seeds) for local, but need to re-index everytime.
+2. HippoRAG uses LLM as the neocortex, a knowledge graph made with passages and phrases (nouns and entities) as the hippocampus and a mapper from query to seeds as the parahippocampal cortex. These seeds are then used to perform pagerank on the graph from phrase to phrase and phrase to passage.
+3. HippoRAG 2 tries to fix bias towards high entity count in HippoRAG leading to poor single-hop performance using RAG as non-parametric continual memory with factual memory for single-hop, associative memory for multi-hop and sensemaking for global. It includes passage-passage for context similarity on top of phrase-phrase and passage-phrase in HippoRAG.
+4. LightRAG makes storage faster by KV profiling followed by efficient retrieval using the high-level and low-level separation followed by merging, doesn't require global re-clustering. Good for ingestion, not for retrieval.
+5. Graphiti uses a bi-temporal schema (valid time and transaction time) where obsolete facts are invalidated rather than deleted to avoid being stuck in a loop. Not good at retrieval, uses BM25 and vector search.
+6. fastbmRAG first processes abstract to get baseline graph and then improves with the full details, good idea for processing long contexts correctly and without duplicates.
+7. A-MEM also focuses on static memory bottleneck by organizing memory into an interconnected graph of self-contained zettelkasten notes by first getting json, then dynamic link and retroactive memory evolution for future dynamic link computation. Still uses vector similarity and tag overlap.
+8. Cognee uses extract for chunking and metadata tagging, then cognify using pydantic, entity disambiguation and vector embedding and load across relational, vector and graph stores.
+9. PaperQA2 parses pdfs into XML using grobid, then get passages matching query, score them using LLMs with reranking contextual summarization, loop back for more evidence and answer once ready.
+10. STORM is for automated writing performing pre-writing research based on expert personas followed by multi-turn interviews between agents with those personas to compute an information tree followed by content generation.
+11. Co-Scientist uses a generation agent to formulate hypothesis, proximity agent clusters it in the embedding state, reflection agent performs peer reviews, ranking agent hosts LLM debates about it and the evolution agent ranks them to perform meta-review using the meta-review agent to compute briefs.
+12. Nested learning is more focused on optimizers as associative memory, sequence models to improve update algorithms and multi-level memory.
+13. ARTS improves upon MCTS for automated discovery to inspect prior logs for failure diagnosis and test-time training to distill memory into model weights, to avoid missing out on those failures as the logs expand beyond context limit.
+14. ScientistOne improves upon the sakana scientist containing integrity failures by relying on chain of evidence be it code logs, metric JSONs or verified papers, can be used with the graph links we constructed to require every statement, metric and citation to be hard-linked to underlying source.
+15. EvoFSM is a self-evolving research framework using a finite state machine with state-transition graph logic for macroscopic flow and state-specific promts and tools for microscopic skill optimization.
