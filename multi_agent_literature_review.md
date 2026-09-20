@@ -8,12 +8,7 @@ Implementing production-grade multi-agent architectures requires unifying severa
 
 Multi-agent orchestration governs how distributed agents allocate tasks, share intermediate context, resolve state divergence, and transition toward verified execution termination1. Unstructured agent interactions typically experience exponential communication overhead and cascading failures1. Consequently, production-grade systems rely on four primary coordination topologies: hierarchical supervision, state machine governance, decentralized swarms, and competitive evolutionary consensus2.
 
-&nbsp;
-
-&nbsp;
-
-&nbsp;
-
+```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐  
 │ Coordination Topologies & Control Characteristics                                     │  
 ├──────────────────────────┬─────────────────────────────┬───────────────────────────────┤  
@@ -24,6 +19,7 @@ Multi-agent orchestration governs how distributed agents allocate tasks, share i
 │ Decentralized Swarms     │ Dynamic peer handoffs       │ Non-convergent cycling        │  
 │ Evolutionary Consensus   │ Tournament debate & Elo     │ High inference compute cost   │  
 └──────────────────────────┴─────────────────────────────┴───────────────────────────────┘
+```
 
 Hierarchical orchestration models follow a centralized command structure where a supervisor agent receives the global objective, synthesizes an execution plan, dynamically allocates sub-tasks to subordinate worker agents, and aggregates results2. Worker agents operate with narrow context windows and isolated tool scopes, returning structured outputs directly to the supervisor rather than communicating horizontally2. This pattern isolates sub-task failures and prevents execution loops from exhausting available API tokens2. However, the supervisor remains a single point of failure; inaccuracies in initial goal decomposition or progress evaluation cascade downstream into invalid worker actions3.
 
@@ -210,12 +206,7 @@ This multi-adapter infrastructure allows a single workstation GPU (such as an RT
 
 Deploying multi-agent architectures introduces distinct systems-level failure modes that do not manifest in single-model chat applications1. Managing these trade-offs requires formal defensive systems engineering2.
 
-&nbsp;
-
-&nbsp;
-
-&nbsp;
-
+```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐  
 │ Multi-Agent Systemic Vulnerabilities & Engineering Mitigations                        │  
 ├──────────────────────────┬─────────────────────────────┬───────────────────────────────┤  
@@ -226,6 +217,7 @@ Deploying multi-agent architectures introduces distinct systems-level failure mo
 │ Indirect Prompt Hijack   │ Unsanitized tool inputs     │ Ephemeral container sandboxes │  
 │ Privilege Escalation     │ Unrestricted host execution │ Kernel-level proxy whitelists │  
 └──────────────────────────┴─────────────────────────────┴───────────────────────────────┘
+```
 
 In multi-agent systems, the probability of successful trajectory completion degrades exponentially as sequential path lengths expand1. If an individual sub-agent operates with an independent execution reliability of ![][image16] (95% accuracy per single step), an agent workflow requiring ![][image17] sequential operations achieves a cumulative system reliability of:
 

@@ -235,12 +235,7 @@ This algorithm eliminates linear file scrolling45. The user reviews a focused da
 
 Graph-Memex unifies multi-source ingestion, edge-scale LLM extraction, FastMCP agent tooling, and hybrid MongoDB storage into a coherent knowledge engine45.
 
-&nbsp;
-
-&nbsp;
-
-&nbsp;
-
+```
 Multi-Source Intake  
 (Papers, YouTube, Lectures, Markdown Notes)  
                        |  
@@ -281,6 +276,7 @@ Multi-Source Intake
 \- nodes collection          \- deeper\_read\_notes.md  
 \- edges collection          \- overall\_insights.md  
 \- $vectorSearch HNSW        \- select\_papers.md
+```
 
 The multi-source ingestion pipeline handles heterogeneous technical inputs through specialized parsing stages45. Academic papers in PDF format pass through Grobid to extract TEI/XML structures, isolating title, abstract, body sections, and bibliography32.
 
