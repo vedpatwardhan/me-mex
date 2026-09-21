@@ -21,7 +21,7 @@ export const Navbar: React.FC = () => {
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 font-bold text-lg text-[#3fb950] tracking-wide">
           <Network className="w-5 h-5 text-cyan-400 animate-pulse" />
-          <span>Graph-Memex</span>
+          <span>Me-Mex</span>
           <span className="text-xs font-mono text-slate-400 bg-[#21262d] px-2 py-0.5 rounded border border-[#30363d]">
             me-mex v0.1
           </span>
@@ -50,11 +50,10 @@ export const Navbar: React.FC = () => {
       <div className="flex items-center bg-[#0d1117] p-1 rounded-lg border border-[#30363d] shadow-inner">
         <button
           onClick={() => setViewMode('global')}
-          className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
-            viewMode === 'global'
+          className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${viewMode === 'global'
               ? 'bg-[#21262d] text-cyan-400 border border-[#30363d] shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
-          }`}
+            }`}
         >
           <Globe className="w-3.5 h-3.5" />
           <span>Global Graph</span>
@@ -62,11 +61,10 @@ export const Navbar: React.FC = () => {
 
         <button
           onClick={() => setViewMode('workspace')}
-          className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
-            viewMode === 'workspace'
+          className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${viewMode === 'workspace'
               ? 'bg-[#21262d] text-emerald-400 border border-[#30363d] shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
-          }`}
+            }`}
         >
           <FolderGit2 className="w-3.5 h-3.5" />
           <span>Project Workspace</span>
@@ -74,11 +72,10 @@ export const Navbar: React.FC = () => {
 
         <button
           onClick={() => setViewMode('report')}
-          className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
-            viewMode === 'report'
+          className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${viewMode === 'report'
               ? 'bg-[#21262d] text-purple-400 border border-[#30363d] shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
-          }`}
+            }`}
         >
           <FileText className="w-3.5 h-3.5" />
           <span>Report Studio</span>
@@ -86,11 +83,10 @@ export const Navbar: React.FC = () => {
 
         <button
           onClick={() => setViewMode('intake')}
-          className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
-            viewMode === 'intake'
+          className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${viewMode === 'intake'
               ? 'bg-[#21262d] text-amber-400 border border-[#30363d] shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
-          }`}
+            }`}
         >
           <Download className="w-3.5 h-3.5" />
           <span>Intake Stream</span>
@@ -114,11 +110,10 @@ export const Navbar: React.FC = () => {
           onClick={() =>
             simulateVoiceCommand('Synthesize recent skeletal prior voice notes with Co-Scientist Hypothesis #4')
           }
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all border ${
-            isVoiceListening
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all border ${isVoiceListening
               ? 'bg-red-500/20 text-red-400 border-red-500 animate-pulse'
               : 'bg-gradient-to-r from-emerald-600/20 to-cyan-600/20 text-cyan-300 border-cyan-500/30 hover:border-cyan-400'
-          }`}
+            }`}
         >
           <Mic className={`w-3.5 h-3.5 ${isVoiceListening ? 'animate-bounce' : ''}`} />
           <span>{isVoiceListening ? 'Listening...' : 'Speak Insight'}</span>

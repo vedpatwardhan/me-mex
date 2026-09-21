@@ -15,7 +15,7 @@ from models import (
     ReportResponse,
 )
 
-app = FastAPI(title="Graph-Memex (me-mex) Backend Engine", version="0.1.0")
+app = FastAPI(title="Me-Mex (me-mex) Backend Engine", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,7 +29,7 @@ app.add_middleware(
 def read_root():
     return {
         "status": "online",
-        "system": "Graph-Memex (me-mex) Engine",
+        "system": "Me-Mex (me-mex) Engine",
         "nodes_count": len(db.nodes),
         "edges_count": len(db.edges),
         "projects_count": len(db.projects),
