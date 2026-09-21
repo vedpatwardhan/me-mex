@@ -72,7 +72,7 @@ export const useMemexStore = create<MemexState>((set, get) => ({
     currentAction: 'Idle',
     visitedNodeIds: []
   },
-  selectedNodeId: 'node_1',
+  selectedNodeId: null,
   hoveredNodeId: null,
   searchQuery: '',
   selectedNodeTypeFilter: 'all',

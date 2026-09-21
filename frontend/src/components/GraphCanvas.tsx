@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useMemo } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { useMemexStore } from '../store/useMemexStore';
 import { GraphNode, NodeType } from '../types';
@@ -23,33 +23,34 @@ export const GraphCanvas: React.FC = () => {
 
   const fgRef = useRef<any>(null);
 
-  // Filter nodes based on search and type filter
-  const filteredNodes = nodes.filter((n) => {
-    const matchesSearch =
-      !searchQuery ||
-      n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.takeaway_2line.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = selectedNodeTypeFilter === 'all' || n.node_type === selectedNodeTypeFilter;
-    return matchesSearch && matchesType;
-  });
+  // MEMOIZE graphData so hovering/selecting nodes DOES NOT re-trigger D3 force simulation or expand nodes!
+  const graphData = useMemo(() => {
+    const filteredNodes = nodes.filter((n) => {
+      const matchesSearch =
+        !searchQuery ||
+        n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        n.takeaway_2line.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesType = selectedNodeTypeFilter === 'all' || n.node_type === selectedNodeTypeFilter;
+      return matchesSearch && matchesType;
+    });
 
-  const filteredNodeIds = new Set(filteredNodes.map((n) => n.id));
+    const filteredNodeIds = new Set(filteredNodes.map((n) => n.id));
 
-  // Format graph data for react-force-graph
-  const graphData = {
-    nodes: filteredNodes,
-    links: edges
-      .filter((e) => {
-        const sourceId = typeof e.source === 'object' ? (e.source as any).id : e.source;
-        const targetId = typeof e.target === 'object' ? (e.target as any).id : e.target;
-        return filteredNodeIds.has(sourceId) && filteredNodeIds.has(targetId);
-      })
-      .map((e) => ({
-        ...e,
-        source: typeof e.source === 'object' ? (e.source as any).id : e.source,
-        target: typeof e.target === 'object' ? (e.target as any).id : e.target,
-      })),
-  };
+    return {
+      nodes: filteredNodes,
+      links: edges
+        .filter((e) => {
+          const sourceId = typeof e.source === 'object' ? (e.source as any).id : e.source;
+          const targetId = typeof e.target === 'object' ? (e.target as any).id : e.target;
+          return filteredNodeIds.has(sourceId) && filteredNodeIds.has(targetId);
+        })
+        .map((e) => ({
+          ...e,
+          source: typeof e.source === 'object' ? (e.source as any).id : e.source,
+          target: typeof e.target === 'object' ? (e.target as any).id : e.target,
+        })),
+    };
+  }, [nodes, edges, searchQuery, selectedNodeTypeFilter]);
 
   // Node Color taxonomy mapping
   const getNodeColor = (node: GraphNode) => {
@@ -168,6 +169,8 @@ export const GraphCanvas: React.FC = () => {
         ref={fgRef}
         graphData={graphData}
         nodeCanvasObject={drawNode}
+        cooldownTicks={100}
+        d3AlphaDecay={0.05}
         nodePointerAreaPaint={(node: any, color, ctx) => {
           ctx.fillStyle = color;
           ctx.beginPath();
@@ -183,10 +186,26 @@ export const GraphCanvas: React.FC = () => {
         linkDirectionalArrowLength={4}
         linkDirectionalArrowRelPos={0.9}
         linkWidth={(link: any) => (link.edge_type === 'BUILDS_UPON' ? 2 : 1)}
-        onNodeClick={(node: any) => {
-          setSelectedNodeId(node.id);
+        onEngineStop={() => {
           if (fgRef.current) {
-            fgRef.current.centerAt(node.x, node.y, 400);
+            // Disable charge repulsion and link forces after initial layout completes so other nodes stay static
+            fgRef.current.d3Force('charge')?.strength(0);
+            fgRef.current.d3Force('link')?.strength(0);
+          }
+        }}
+        onNodeDrag={(node: any) => {
+          node.fx = node.x;
+          node.fy = node.y;
+        }}
+        onNodeDragEnd={(node: any) => {
+          node.fx = node.x;
+          node.fy = node.y;
+        }}
+        onNodeClick={(node: any) => {
+          if (selectedNodeId === node.id) {
+            setSelectedNodeId(null);
+          } else {
+            setSelectedNodeId(node.id);
           }
         }}
         onNodeHover={(node: any) => setHoveredNodeId(node ? node.id : null)}
