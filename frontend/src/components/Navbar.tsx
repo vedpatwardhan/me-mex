@@ -1,6 +1,7 @@
 import React from 'react';
 import { useMemexStore } from '../store/useMemexStore';
-import { Globe, FolderGit2, FileText, Download, Mic, Sparkles, Network } from 'lucide-react';
+import { Logo } from './Logo';
+import { Globe, FolderGit2, FileText, Download, Mic, Sparkles } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const {
@@ -19,11 +20,13 @@ export const Navbar: React.FC = () => {
     <header className="h-14 bg-[#161b22] border-b border-[#30363d] px-4 flex items-center justify-between gap-4 select-none z-30 relative">
       {/* Brand & Project Selector */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2 font-bold text-lg text-[#3fb950] tracking-wide">
-          <Network className="w-5 h-5 text-cyan-400 animate-pulse" />
-          <span>Me-Mex</span>
-          <span className="text-xs font-mono text-slate-400 bg-[#21262d] px-2 py-0.5 rounded border border-[#30363d]">
-            me-mex v0.1
+        <div className="flex items-center gap-2 font-bold text-lg tracking-wide">
+          <Logo size={26} />
+          <span className="bg-gradient-to-r from-cyan-400 via-purple-400 to-emerald-400 bg-clip-text text-transparent font-extrabold">
+            Me-Mex
+          </span>
+          <span className="text-[10px] font-mono text-slate-400 bg-[#21262d] px-2 py-0.5 rounded border border-[#30363d]">
+            v0.1
           </span>
         </div>
 
