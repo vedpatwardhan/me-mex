@@ -32,6 +32,15 @@
   background: #3b82f6;
 }
 
+/* No Scrollbar Utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Custom Glassmorphism Cards */
 .glass-panel {
   background: rgba(18, 24, 36, 0.85);

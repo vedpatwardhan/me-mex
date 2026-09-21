@@ -50,32 +50,32 @@ export const Navbar: React.FC = () => {
         </div>
       </div>
 
-      {/* CENTERED Top Project Tabs (Expands symmetrically from center) */}
-      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 bg-[#090d16]/90 p-1.5 rounded-2xl border border-white/10 shadow-inner max-w-3xl overflow-x-auto no-scrollbar">
+      {/* CENTERED Top Project Tabs (Clean row with dashed project borders, no outer container border) */}
+      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2.5">
         {/* Global Master Tab */}
         <button
           onClick={() => setActiveProjectId('global')}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl transition-all whitespace-nowrap ${
             activeProjectId === 'global'
               ? 'bg-gradient-to-r from-sky-500/20 to-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-glow-cyan font-bold'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-slate-800'
           }`}
         >
           <Globe className="w-4 h-4 text-sky-400" />
           <span>Global Graph</span>
         </button>
 
-        {/* Individual Project Tabs */}
+        {/* Individual Project Tabs with Dashed Borders */}
         {projects
           .filter((p) => p.id !== 'global')
           .map((p) => (
             <button
               key={p.id}
               onClick={() => setActiveProjectId(p.id)}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl transition-all whitespace-nowrap ${
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl transition-all whitespace-nowrap border border-dashed ${
                 activeProjectId === p.id
-                  ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/60 shadow-sm font-bold'
+                  : 'text-slate-400 border-slate-700/80 hover:text-slate-200 hover:border-emerald-500/40 hover:bg-white/5'
               }`}
             >
               <FolderGit2 className="w-4 h-4 text-emerald-400" />
