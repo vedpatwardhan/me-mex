@@ -16,8 +16,10 @@ export const GraphCanvas: React.FC = () => {
     setSearchQuery,
     selectedNodeTypeFilter,
     setSelectedNodeTypeFilter,
-    traversingNodeIds,
+    thinkingState,
   } = useMemexStore();
+
+  const traversingNodeIds = thinkingState.visitedNodeIds || [];
 
   const fgRef = useRef<any>(null);
 

@@ -23,7 +23,6 @@ export interface GraphNode {
   metadata: Record<string, any>;
   created_at: string;
   updated_at: string;
-  // Canvas force simulation properties
   x?: number;
   y?: number;
   vx?: number;
@@ -52,22 +51,22 @@ export interface ProjectWorkspace {
   created_at: string;
 }
 
-export interface AgentProposal {
+export interface ChatMessage {
   id: string;
-  proposal_type: 'link' | 'node' | 'hypothesis' | 'merge';
-  title: string;
-  description: string;
-  source_node_id?: string;
-  target_node_id?: string;
-  suggested_edge_type?: EdgeType;
-  status: 'pending' | 'accepted' | 'rejected';
-  created_at: string;
+  sender: 'user' | 'agent';
+  text: string;
+  is_voice?: boolean;
+  timestamp: string;
+  grounded_node_ids?: string[];
+  report?: {
+    id: string;
+    title: string;
+    markdown_content: string;
+  };
 }
 
-export interface ReportResponse {
-  id: string;
-  title: string;
-  markdown_content: string;
-  provenance_mappings: Record<string, string>;
-  created_at: string;
+export interface AgentThinkingState {
+  isThinking: boolean;
+  currentAction: string;
+  visitedNodeIds: string[];
 }
