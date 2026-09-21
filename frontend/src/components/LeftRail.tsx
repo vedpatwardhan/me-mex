@@ -12,7 +12,8 @@ import {
   Clock,
   Zap,
   Sparkles,
-  Plus
+  Plus,
+  Radio
 } from 'lucide-react';
 
 export const LeftRail: React.FC = () => {
@@ -44,81 +45,84 @@ export const LeftRail: React.FC = () => {
   };
 
   return (
-    <aside className="w-80 bg-[#161b22] border-r border-[#30363d] flex flex-col h-[calc(100vh-3.5rem)] text-xs select-none">
+    <aside className="w-80 glass-panel border-r border-white/10 flex flex-col h-[calc(100vh-4rem)] text-xs select-none z-20 shadow-2xl">
       {/* Pane 1 Sub-Navigation Tabs */}
-      <div className="flex items-center border-b border-[#30363d] bg-[#0d1117] p-1 gap-1">
+      <div className="flex items-center border-b border-white/10 bg-[#090d16]/70 p-1.5 gap-1.5">
         <button
           onClick={() => setActiveTab('intake')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md font-medium transition-all ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-semibold transition-all ${
             activeTab === 'intake'
-              ? 'bg-[#21262d] text-amber-400 border border-[#30363d]'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-[#1a2332] text-amber-300 border border-amber-500/30 shadow-glow-amber'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
         >
-          <Download className="w-3.5 h-3.5" />
+          <Download className="w-3.5 h-3.5 text-amber-400" />
           <span>Intake</span>
         </button>
 
         <button
           onClick={() => setActiveTab('proposals')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md font-medium transition-all relative ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-semibold transition-all relative ${
             activeTab === 'proposals'
-              ? 'bg-[#21262d] text-cyan-400 border border-[#30363d]'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-[#1a2332] text-cyan-300 border border-cyan-500/30 shadow-glow-cyan'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
         >
-          <Inbox className="w-3.5 h-3.5" />
+          <Inbox className="w-3.5 h-3.5 text-cyan-400" />
           <span>Proposals</span>
-          {proposals.filter(p => p.status === 'pending').length > 0 && (
-            <span className="w-4 h-4 bg-cyan-500 text-black font-bold text-[10px] rounded-full flex items-center justify-center">
-              {proposals.filter(p => p.status === 'pending').length}
+          {proposals.filter((p) => p.status === 'pending').length > 0 && (
+            <span className="w-4 h-4 bg-cyan-400 text-slate-950 font-bold text-[10px] rounded-full flex items-center justify-center shadow-md">
+              {proposals.filter((p) => p.status === 'pending').length}
             </span>
           )}
         </button>
 
         <button
           onClick={() => setActiveTab('fsrs')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md font-medium transition-all ${
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-semibold transition-all ${
             activeTab === 'fsrs'
-              ? 'bg-[#21262d] text-emerald-400 border border-[#30363d]'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-[#1a2332] text-emerald-300 border border-emerald-500/30'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
           }`}
         >
-          <BrainCircuit className="w-3.5 h-3.5" />
+          <BrainCircuit className="w-3.5 h-3.5 text-emerald-400" />
           <span>FSRS</span>
         </button>
       </div>
 
       {/* Pane 1 Scrollable Content Area */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+      <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
         {/* INTAKE TAB */}
         {activeTab === 'intake' && (
           <div className="space-y-4">
             {/* Voice Epiphany Card */}
-            <div className="bg-[#0d1117] p-3 rounded-lg border border-amber-500/30 space-y-2">
+            <div className="bg-[#121824]/90 p-3.5 rounded-xl border border-amber-500/30 space-y-2.5 shadow-lg relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-xl pointer-events-none group-hover:bg-amber-500/10 transition-colors" />
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-amber-300 flex items-center gap-1.5">
-                  <Mic className="w-3.5 h-3.5 text-amber-400" /> Spoken Insight Stream
+                <span className="font-display font-semibold text-amber-300 flex items-center gap-1.5">
+                  <Mic className="w-4 h-4 text-amber-400" /> Spoken Insight Stream
                 </span>
-                <span className="text-[10px] text-slate-400 font-mono">Whisper AI</span>
+                <span className="text-[10px] text-amber-400/80 font-mono bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-500/30">
+                  Fast-Whisper
+                </span>
               </div>
               <p className="text-slate-400 text-[11px] leading-relaxed">
-                Speak insights or thoughts. Fast-Whisper transcribes and extracts atomic nodes into the Global Graph.
+                Speak raw insights or research thoughts. Fast-Whisper transcribes and extracts atomic nodes into the Global Graph.
               </p>
               <button
                 onClick={() => simulateVoiceCommand('Joint limits should constrain latent flow field directly during action denoising.')}
                 disabled={isLoading}
-                className="w-full py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-md font-semibold flex items-center justify-center gap-2 transition-all"
+                className="w-full py-2 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500/30 hover:to-yellow-500/30 text-amber-200 border border-amber-500/40 rounded-lg font-bold flex items-center justify-center gap-2 transition-all shadow-md"
               >
-                <Mic className={`w-3.5 h-3.5 ${isVoiceListening ? 'animate-bounce text-red-400' : ''}`} />
+                <Radio className={`w-3.5 h-3.5 ${isVoiceListening ? 'animate-ping text-red-400' : 'text-amber-400'}`} />
                 <span>{isVoiceListening ? 'Listening & Extracting...' : 'Record Voice Note'}</span>
               </button>
             </div>
 
             {/* URL Web Link Snapshot Card */}
-            <div className="bg-[#0d1117] p-3 rounded-lg border border-[#30363d] space-y-2">
-              <span className="font-semibold text-slate-200 flex items-center gap-1.5">
-                <Link className="w-3.5 h-3.5 text-cyan-400" /> Web Link / Tweet / arXiv Entry
+            <div className="bg-[#121824]/90 p-3.5 rounded-xl border border-cyan-500/20 space-y-2.5 shadow-lg">
+              <span className="font-display font-semibold text-slate-200 flex items-center gap-1.5">
+                <Link className="w-4 h-4 text-cyan-400" /> Web Link / Tweet / arXiv Entry
               </span>
               <form onSubmit={onUrlSubmit} className="space-y-2">
                 <input
@@ -126,12 +130,12 @@ export const LeftRail: React.FC = () => {
                   placeholder="Paste URL, tweet, or arXiv DOI..."
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
-                  className="w-full bg-[#161b22] text-slate-200 p-2 rounded border border-[#30363d] focus:border-cyan-400 focus:outline-none text-xs"
+                  className="w-full bg-[#090d16] text-slate-200 p-2.5 rounded-lg border border-slate-700/80 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 focus:outline-none text-xs transition-all placeholder-slate-500 font-mono"
                 />
                 <button
                   type="submit"
                   disabled={isLoading || !urlInput.trim()}
-                  className="w-full py-1.5 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 rounded font-medium flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                  className="w-full py-2 bg-gradient-to-r from-cyan-600/20 to-blue-600/20 hover:from-cyan-600/30 hover:to-blue-600/30 text-cyan-300 border border-cyan-500/40 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all shadow-md disabled:opacity-50"
                 >
                   <Plus className="w-3.5 h-3.5" /> Fetch & Snapshot HTML
                 </button>
@@ -139,9 +143,9 @@ export const LeftRail: React.FC = () => {
             </div>
 
             {/* Raw File / Text Note Intake Card */}
-            <div className="bg-[#0d1117] p-3 rounded-lg border border-[#30363d] space-y-2">
-              <span className="font-semibold text-slate-200 flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-emerald-400" /> Quick Text Note / Markdown
+            <div className="bg-[#121824]/90 p-3.5 rounded-xl border border-emerald-500/20 space-y-2.5 shadow-lg">
+              <span className="font-display font-semibold text-slate-200 flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-emerald-400" /> Quick Text Note / Markdown
               </span>
               <form onSubmit={onTextSubmit} className="space-y-2">
                 <textarea
@@ -149,12 +153,12 @@ export const LeftRail: React.FC = () => {
                   placeholder="Type an insight, hypothesis premise, or markdown excerpt..."
                   value={textInput}
                   onChange={(e) => setTextInput(e.target.value)}
-                  className="w-full bg-[#161b22] text-slate-200 p-2 rounded border border-[#30363d] focus:border-emerald-400 focus:outline-none text-xs resize-none"
+                  className="w-full bg-[#090d16] text-slate-200 p-2.5 rounded-lg border border-slate-700/80 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 focus:outline-none text-xs resize-none transition-all placeholder-slate-500 font-mono"
                 />
                 <button
                   type="submit"
                   disabled={isLoading || !textInput.trim()}
-                  className="w-full py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded font-medium flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                  className="w-full py-2 bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/30 hover:to-teal-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all shadow-md disabled:opacity-50"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add Note to Global Graph
                 </button>
@@ -171,45 +175,47 @@ export const LeftRail: React.FC = () => {
             </div>
 
             {proposals.length === 0 ? (
-              <div className="text-center py-6 text-slate-500 font-mono">No pending agent proposals.</div>
+              <div className="text-center py-8 text-slate-500 font-mono">No pending agent proposals.</div>
             ) : (
               proposals.map((prop) => (
                 <div
                   key={prop.id}
-                  className={`p-3 rounded-lg border space-y-2 transition-all ${
+                  className={`p-3.5 rounded-xl border space-y-2.5 transition-all shadow-md ${
                     prop.status === 'accepted'
-                      ? 'bg-emerald-950/20 border-emerald-500/30'
+                      ? 'bg-emerald-950/20 border-emerald-500/40'
                       : prop.status === 'rejected'
                       ? 'bg-red-950/20 border-red-500/30 opacity-60'
-                      : 'bg-[#0d1117] border-cyan-500/30'
+                      : 'bg-[#121824] border-cyan-500/30 hover:border-cyan-400/50'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                    <span className="font-display font-semibold text-slate-200 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> {prop.title}
                     </span>
-                    <span className="text-[10px] font-mono text-slate-400 uppercase">{prop.proposal_type}</span>
+                    <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-500/30 uppercase">
+                      {prop.proposal_type}
+                    </span>
                   </div>
 
-                  <p className="text-slate-300 text-[11px] leading-normal">{prop.description}</p>
+                  <p className="text-slate-300 text-[11px] leading-relaxed">{prop.description}</p>
 
                   {prop.status === 'pending' ? (
                     <div className="flex items-center gap-2 pt-1">
                       <button
                         onClick={() => handleProposalAction(prop.id, 'accept')}
-                        className="flex-1 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded flex items-center justify-center gap-1 font-medium transition-all"
+                        className="flex-1 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg flex items-center justify-center gap-1.5 font-bold transition-all"
                       >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Accept
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Accept
                       </button>
                       <button
                         onClick={() => handleProposalAction(prop.id, 'reject')}
-                        className="flex-1 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 rounded flex items-center justify-center gap-1 font-medium transition-all"
+                        className="flex-1 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 rounded-lg flex items-center justify-center gap-1.5 font-bold transition-all"
                       >
-                        <XCircle className="w-3.5 h-3.5" /> Reject
+                        <XCircle className="w-3.5 h-3.5 text-red-400" /> Reject
                       </button>
                     </div>
                   ) : (
-                    <div className="text-[10px] font-mono font-semibold uppercase tracking-wider text-slate-400 pt-1">
+                    <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 pt-1">
                       Status: {prop.status}
                     </div>
                   )}
@@ -222,12 +228,12 @@ export const LeftRail: React.FC = () => {
         {/* FSRS TAB */}
         {activeTab === 'fsrs' && (
           <div className="space-y-3">
-            <div className="bg-[#0d1117] p-3 rounded-lg border border-emerald-500/30 space-y-2">
+            <div className="bg-[#121824]/90 p-3.5 rounded-xl border border-emerald-500/30 space-y-2.5 shadow-lg">
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-emerald-300 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-emerald-400" /> Morning Spaced Review
+                <span className="font-display font-semibold text-emerald-300 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-emerald-400" /> Morning Spaced Review
                 </span>
-                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-500/30 font-semibold">
                   12 Due Today
                 </span>
               </div>
@@ -236,9 +242,9 @@ export const LeftRail: React.FC = () => {
               </p>
               <button
                 onClick={() => alert('Starting 15-minute FSRS-DAG spaced repetition review session!')}
-                className="w-full py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-md font-semibold flex items-center justify-center gap-2 transition-all"
+                className="w-full py-2 bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/30 hover:to-teal-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg font-bold flex items-center justify-center gap-2 transition-all shadow-md"
               >
-                <Zap className="w-3.5 h-3.5" /> Start 15m Review Quiz
+                <Zap className="w-3.5 h-3.5 text-amber-400" /> Start 15m Review Quiz
               </button>
             </div>
           </div>
@@ -246,21 +252,21 @@ export const LeftRail: React.FC = () => {
       </div>
 
       {/* Active Agents Live Status Footer */}
-      <div className="p-3 bg-[#0d1117] border-t border-[#30363d] space-y-1.5">
+      <div className="p-3.5 bg-[#090d16]/90 border-t border-white/10 space-y-2">
         <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-semibold">
           Active Background Agents
         </div>
         <div className="flex items-center justify-between text-[11px]">
-          <span className="flex items-center gap-1.5 text-purple-400">
-            <span className="w-2 h-2 rounded-full bg-purple-500 animate-ping" /> Co-Scientist (Elo Arena)
+          <span className="flex items-center gap-2 text-purple-300 font-medium">
+            <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping" /> Co-Scientist (Elo Arena)
           </span>
-          <span className="text-slate-500 font-mono">Cycle 2/5</span>
+          <span className="text-slate-500 font-mono text-[10px]">Cycle 2/5</span>
         </div>
         <div className="flex items-center justify-between text-[11px]">
-          <span className="flex items-center gap-1.5 text-cyan-400">
-            <span className="w-2 h-2 rounded-full bg-cyan-500" /> HippoRAG 2 (PPR Index)
+          <span className="flex items-center gap-2 text-cyan-300 font-medium">
+            <span className="w-2 h-2 rounded-full bg-cyan-400" /> HippoRAG 2 (PPR Index)
           </span>
-          <span className="text-slate-500 font-mono">Idle</span>
+          <span className="text-slate-500 font-mono text-[10px]">Idle</span>
         </div>
       </div>
     </aside>
