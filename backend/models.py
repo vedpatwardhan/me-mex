@@ -4,19 +4,16 @@ from pydantic import BaseModel, Field
 
 NodeType = Literal[
     "external_source",  # Blue: PDFs, papers, web pages, tweets
-    "human_insight",   # Yellow: Voice notes, personal thoughts
-    "agent_hypothesis",# Purple: Co-Scientist generated bridge nodes
+    "human_insight",  # Yellow: Voice notes, personal thoughts
+    "agent_hypothesis",  # Purple: Co-Scientist generated bridge nodes
     "concept_phrase",  # Cyan: HippoRAG 2 phrase/concept node
-    "falsified_path"   # Red: Strikethrough dead-ends
+    "falsified_path",  # Red: Strikethrough dead-ends
 ]
 
 EdgeType = Literal[
-    "BUILDS_UPON",
-    "CONTRASTS_WITH",
-    "REFUTES",
-    "DERIVES_FROM",
-    "CATEGORY_MEMBER"
+    "BUILDS_UPON", "CONTRASTS_WITH", "REFUTES", "DERIVES_FROM", "CATEGORY_MEMBER"
 ]
+
 
 class GraphNode(BaseModel):
     id: str
@@ -30,6 +27,7 @@ class GraphNode(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
+
 class GraphEdge(BaseModel):
     id: str
     source_node_id: str
@@ -40,14 +38,20 @@ class GraphEdge(BaseModel):
     project_ids: List[str] = Field(default_factory=lambda: ["global"])
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
+
 class RawDocument(BaseModel):
     id: str
-    source_type: Literal["pdf", "web_snapshot", "tweet", "video_transcript", "voice_epiphany"]
+    source_type: Literal[
+        "pdf", "web_snapshot", "tweet", "video_transcript", "voice_epiphany"
+    ]
     title: str
     raw_content: str
     original_url: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
-    temporal_timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    temporal_timestamp: str = Field(
+        default_factory=lambda: datetime.utcnow().isoformat()
+    )
+
 
 class ProjectWorkspace(BaseModel):
     id: str
@@ -56,6 +60,7 @@ class ProjectWorkspace(BaseModel):
     node_ids: List[str] = Field(default_factory=list)
     edge_ids: List[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
 
 class AgentProposal(BaseModel):
     id: str
@@ -68,10 +73,12 @@ class AgentProposal(BaseModel):
     status: Literal["pending", "accepted", "rejected"] = "pending"
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
+
 class ReportRequest(BaseModel):
     title: str
     target_node_ids: List[str]
     project_id: Optional[str] = "global"
+
 
 class ReportResponse(BaseModel):
     id: str
@@ -79,6 +86,7 @@ class ReportResponse(BaseModel):
     markdown_content: str
     provenance_mappings: Dict[str, str]  # phrase/section -> node_id mapping
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
 
 class IntakeRequest(BaseModel):
     source_type: Literal["pdf", "url", "voice", "text"]
