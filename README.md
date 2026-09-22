@@ -6,40 +6,49 @@ Graph-Memex (`me-mex`) is an agentic research assistant and personal long-term m
 
 ---
 
-## 🏗️ The Grand Architecture
+## 🏗️ The Operational System Architecture
 
-The architecture of Graph-Memex is synthesized from various papers across Knowledge Graph RAG, agentic memory, automated scientific discovery, and control systems:
+Graph-Memex operates on a continuous **Retrieval $\rightarrow$ Exploration & Editing $\rightarrow$ Ingestion & Macro Update $\rightarrow$ Retrieval** loop:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        1. Multi-Modal Ingestion & Intake                               │
+│                        1. Multi-Modal Ingestion & Staging                              │
 └────────────────────────────────────────────────────────────────────────────────────────┘
- - fastbmRAG: Abstract-first drafting (deeper_read_notes.md) -> Main-text refining (select_papers.md).
- - Cognee: Extract-Cognify-Load (ECL) pipeline with Pydantic/BAML structured models.
- - LightRAG: Key-Value profiling & instant incremental writes to MongoDB without re-clustering.
+ - Staged Sandbox: Uploaded documents/links do NOT immediately populate the active graph.
+ - Out-of-Graph Passage Storage: Text chunks are stored as plain text records in `passages`
+   collection, linked only via `passage_pointers` inside atomic `CONCEPT` nodes.
+ - Plain text retrieval: Passages are opened only when clicked to validate concept extraction.
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                       2. Memory Storage & Topological Graph                            │
+│                       2. Memory Storage & Clean 3-Element Topology                      │
 └────────────────────────────────────────────────────────────────────────────────────────┘
- - A-MEM: Atomic Zettelkasten nodes with multi-attribute tags & retroactive note evolution.
- - Graphiti: Bi-temporal schema (valid_time vs transaction_time) to invalidate outdated facts.
- - HippoRAG 2: Dual-node graph (Passages + Phrase Entities) bridging vector search & graph paths.
+ - Zero Passage Clutter: Passages are NOT graph nodes. The active network contains only:
+     1. ROOT_MEDIA Nodes : Papers, Reports, Blogs, Transcripts, Code Repos.
+     2. CONCEPT Nodes    : Self-evolving atomic notes with multi-attribute tags.
+     3. CONNECTION_EDGE  : Qualitative relation edges (`BUILDS_UPON`, `CONTRASTS_WITH`, `SUPERSEDES`).
+ - Historical Edge Decay: Superseded relations decay in weight from `1.0` down to `0.3`
+   (`HISTORICAL_SUPERSEDED`), preserving history without cluttering path searches.
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                     3. Search, Retrieval & Evidence Auditing                           │
+│                     3. Search, Multi-Persona Retrieval & Telemetry                      │
 └────────────────────────────────────────────────────────────────────────────────────────┘
- - HippoRAG 2: Joint Vector + Graph Personalized PageRank (PPR) for deep multi-hop recall.
- - PaperQA2: Reranking Contextual Summarization (RCS) to filter evidence chunks before answering.
- - ScientistOne: Chain-of-Evidence (CoE) hard-linking every claim/metric back to source offsets.
+ - Department Macro Documents: High-level summaries partitioning the graph into 3–4
+   Department Communities using NetworkX Louvain & rustworkx Hub Centrality.
+ - Department Specialist Personas: Specialized agents with visual color coding:
+     * Latent World Models & Architectures (`#38bdf8` - Sky Blue)
+     * Planning & Policy Control (`#fbbf24` - Amber Yellow)
+     * Perceptual Representations & Sensors (`#c084fc` - Purple)
+     * Foundation Robotics Systems (`#4ade80` - Emerald Green)
+ - Real-Time SSE Telemetry: Streams persona traversal events (`traversingNodeIds`) in color
+   to the WebGL canvas (`react-force-graph-2d`).
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                   4. Synthesis, Deep Research & Agent Execution                        │
+│                   4. Multi-Agent Debate & Human-in-the-Loop Ingestion                  │
 └────────────────────────────────────────────────────────────────────────────────────────┘
- - STORM: Multi-perspective persona interviews & information trees for deep research lessons.
- - Co-Scientist: Asynchronous tournament evolution (Reflection, Ranking, Meta-Review) for insights.
- - EvoFSM: Finite State Machine (FSM) control flow separating Macro Flow from Micro Skills.
- - ARTS: Diagnostic log reasoning (code bug vs flawed hypothesis) for experimental runs.
- - Nested Learning: Multi-timescale continuum context flows (Real-Time -> Ingestion -> Review -> Macro).
+ - Multi-Agent Integration Debate: Personas debate whether new concepts should `MERGE` into
+   existing nodes, `SUPERSEDE` older concepts, or create new seed hubs.
+ - Human-in-the-Loop Prompts: Emits clarification events in chat for user input on trade-offs.
+ - Delta Macro Updates: Re-partitions and patches only the affected Department Macro Documents.
 ```
 
 ---
@@ -48,37 +57,41 @@ The architecture of Graph-Memex is synthesized from various papers across Knowle
 
 | Paper | Key Innovation | Role in Graph-Memex (`me-mex`) |
 | :--- | :--- | :--- |
-| **Microsoft GraphRAG** ([2404.16130](https://arxiv.org/abs/2404.16130)) | Hierarchical Leiden community detection & Map-Reduce QFS. | Periodic workspace macro briefings & high-level theme clustering. |
-| **OSU HippoRAG** ([2405.14831](https://arxiv.org/abs/2405.14831)) | Artificial neocortex (LLM) + hippocampus (KG) with Personalized PageRank (PPR). | Fast multi-hop associative retrieval across entity nodes. |
-| **OSU HippoRAG 2** ([2502.14802](https://arxiv.org/abs/2502.14802)) | Dual-node graph (Passages + Phrases) with joint vector-PPR search. | Primary retrieval engine restoring single-hop factual precision while boosting multi-hop recall (+7%). |
-| **HKU LightRAG** ([2410.05779](https://arxiv.org/abs/2410.05779)) | Key-Value entity/relation profiling & dual-level retrieval. | High-speed, low-cost streaming ingestion into MongoDB without global re-clustering. |
-| **Zep Graphiti** ([2501.13956](https://arxiv.org/abs/2501.13956)) | Bi-temporal knowledge graph schema ($T_{\text{valid}}, T_{\text{trans}}$). | Non-destructive fact invalidation for time-evolving research findings & experimental logs. |
-| **fastbmRAG** ([2511.10014](https://arxiv.org/abs/2511.10014)) | Two-stage Draft-and-Refine graph construction via vector entity linking. | Ingests abstracts into `deeper_read_notes.md` first; refines main text into `select_papers.md` (>10x speedup). |
-| **A-MEM** ([2502.12110](https://arxiv.org/abs/2502.12110)) | Zettelkasten atomic notes with retroactive memory evolution loops. | Treats papers/insights as atomic notes; retroactively updates historical category takeaways (`overall_insights.md`). |
-| **Cognee** ([2505.24478](https://arxiv.org/abs/2505.24478)) | Extract-Cognify-Load (ECL) pipeline with Pydantic structured output models. | Standardizes backend ingestion & multi-engine persistence (Relational + Vector + Graph). |
-| **PaperQA2** ([2409.13740](https://arxiv.org/abs/2409.13740)) | Grobid PDF structuring & Reranking Contextual Summarization (RCS). | FastMCP tool evidence filter: scores & summarizes retrieved chunks before passing context to agent/user. |
-| **Stanford STORM** ([2402.14207](https://arxiv.org/abs/2402.14207)) | Pre-writing perspective persona discovery & hierarchical outline curation. | Generates standalone deep research topic curricula (`jepa_deep_dive.md`, `rl_landscape.md`) without redundancy. |
-| **Google Co-Scientist** ([2502.18864](https://arxiv.org/abs/2502.18864)) | Multi-agent tournament evolution (Generation, Proximity, Reflection, Ranking). | Background agent loops host Elo-ranked idea tournaments to discover latent research connections. |
-| **Nested Learning** ([2512.24695](https://arxiv.org/abs/2512.24695)) | Multi-level nested context flows & continuum memory systems. | 4-tier multi-timescale memory system (Real-Time Context $\rightarrow$ Streaming Intake $\rightarrow$ Associative Review $\rightarrow$ Macro Briefings). |
-| **ARTS** ([2606.21891](https://arxiv.org/abs/2606.21891)) | Agentic Reasoning for Tree Search & Test-Time Training (TTT) memory retention. | Diagnostic log reasoning for `EXPERIMENT` nodes (separating transient code bugs from baseline hypothesis flaws). |
-| **ScientistOne** ([2605.26340](https://arxiv.org/abs/2605.26340)) | Chain-of-Evidence (CoE) framework & 4 integrity audit checks. | Hard-links every claim, metric, and citation in MongoDB back to raw source text offsets or execution JSON logs. |
-| **EvoFSM** ([2601.09465](https://arxiv.org/abs/2601.09465)) | Controllable self-evolution via Finite State Machines (FSM). | Decouples agent workflows into Macroscopic Flow (FSM graph logic) and Microscopic Skill (prompts/tools), saving trajectory priors. |
+| **Microsoft GraphRAG** ([2404.16130](https://arxiv.org/abs/2404.16130)) | Hierarchical Leiden community detection & Map-Reduce QFS. | Department Macro Documents partitioning graph into 3–4 communities via NetworkX. |
+| **OSU HippoRAG 2** ([2502.14802](https://arxiv.org/abs/2502.14802)) | Dual-node graph (Passages + Phrases) with joint vector-PPR search. | Out-of-graph passage pointers linked to concept nodes for single-hop factual verification. |
+| **HKU LightRAG** ([2410.05779](https://arxiv.org/abs/2410.05779)) | Key-Value entity/relation profiling & dual-level retrieval. | High-speed streaming ingestion into MongoDB without global re-clustering. |
+| **Zep Graphiti** ([2501.13956](https://arxiv.org/abs/2501.13956)) | Bi-temporal knowledge graph schema ($T_{\text{valid}}, T_{\text{trans}}$). | Edge weight decay (`1.0` $\rightarrow$ `0.3`) for superseded facts and historical papers. |
+| **A-MEM** ([2502.12110](https://arxiv.org/abs/2502.12110)) | Zettelkasten atomic notes with retroactive memory evolution loops. | Atomic `CONCEPT` nodes that self-evolve summaries when new papers arrive. |
+| **Cognee** ([2505.24478](https://arxiv.org/abs/2505.24478)) | Extract-Cognify-Load (ECL) pipeline with Pydantic structured output models. | Standardizes MongoDB engine models (`DocumentRecord`, `PassageRecord`, `GraphNodeRecord`, `ConnectionEdgeRecord`). |
+| **PaperQA2** ([2409.13740](https://arxiv.org/abs/2409.13740)) | Reranking Contextual Summarization (RCS). | FastMCP tool filtering & plain text passage retrieval. |
+| **Stanford STORM** ([2402.14207](https://arxiv.org/abs/2402.14207)) | Pre-writing perspective persona discovery & outline curation. | Color-coded Department Personas debating retrieval and ingestion deltas. |
+| **Google Co-Scientist** ([2502.18864](https://arxiv.org/abs/2502.18864)) | Multi-agent tournament evolution & reflection loops. | Multi-persona integration debates evaluating graph evolution proposals. |
+| **ScientistOne** ([2605.26340](https://arxiv.org/abs/2605.26340)) | Chain-of-Evidence (CoE) framework & integrity audit checks. | Hard-links every concept node back to raw document file paths and passage IDs. |
 
 ---
 
-## 🛠️ Technology Stack & Key Constraints
+## 🛠️ Technology Stack & Engine Architecture
 
-* **Database Engine:** **MongoDB** document database (partitioned by `theme_id` across `nodes`, `edges`, `themes` collections; HNSW `$vectorSearch` + `$graphLookup`). *No Neo4j.*
-* **Local Extraction Model:** **Ministral 3 8B** running locally via `vLLM` / `llama-cpp-python`, enforced with Pydantic / JSON Schema grammars (`outlines`).
-* **Agent Protocol:** **FastMCP** (Python MCP SDK) exposing typed tools for graph mutations, neighborhood expansion, and evidence filtering.
-* **Frontend Visualization:** **React + WebGL** (`react-force-graph`), featuring off-canvas Markdown drawers and dual-density edge styling (solid strong mesh vs. dashed weak structural links).
-* **Cognitive Review Engine:** Hybrid **FSRS** (Free Spaced Repetition Scheduler) memory decay tracking combined with **DAG topological scheduling** for 15-minute morning review briefings.
+* **Database Engine:** **MongoDB** document database (`documents`, `passages`, `nodes`, `edges`, `macro_documents`, `staging_sandbox`) with in-memory fallback for local execution.
+* **LLM Gateway:** **Ministral 3-8B** running remotely via Colab vLLM server (`http://localhost:8000/v1`) with local rule-based fallback.
+* **Graph Analytics Worker:** **`rustworkx`** PyDiGraph for eigenvector/degree Hub Centrality ranking + **`NetworkX`** Louvain community partitioning.
+* **Agent Protocol & Tools:** **FastMCP** (Python MCP SDK) exposing typed tools (`search_arxiv_papers`, `fetch_web_article`, `get_graph_nodes`, `get_passages_by_ids`, `get_macro_documents`, `calculate_hub_rankings`).
+* **Search Integrations:** **`arxiv`** API client and **`trafilatura`** web page markdown extractor.
+* **Telemetry Streaming:** **FastAPI + SSE Starlette** streaming real-time colored persona node traversal events to the WebGL canvas.
+* **Frontend Visualization:** **React + WebGL** (`react-force-graph-2d`), featuring off-canvas Markdown drawers and visual node highlights.
 
 ---
 
-## 🚀 Phased Implementation Roadmap
+## 🚀 Backend Implementation & Verification Status
 
-* **Phase 1:** MongoDB Schema Initialization, FastMCP Backend Server, and AST Bidirectional Markdown Sync Engine (`deeper_read_notes.md`, `overall_insights.md`, `select_papers.md`).
-* **Phase 2:** Local Ministral 3 8B Ingestion Pipeline with Pydantic structured output models (Cognee ECL) & fastbmRAG draft-and-refine parsing.
-* **Phase 3:** Interactive Multi-Theme Web UI with `react-force-graph`, off-canvas Markdown reader drawer, and level-of-detail edge culling.
-* **Phase 4:** Agentic connection discovery (Co-Scientist tournaments, A-MEM note evolution), HippoRAG 2 joint vector-graph PPR retrieval, and FSRS-DAG topological morning review queue.
+The backend engine (`me-mex/backend`) is fully implemented and verified:
+
+- ✅ **`app/db.py`**: MongoDB Database Engine with models for Documents, Passages, Graph Nodes, Connection Edges, Macro Documents, and Staging Records.
+- ✅ **`app/services/llm_gateway.py`**: vLLM gateway client targeting Colab Ministral 3-8B with local rule-based fallback.
+- ✅ **`app/services/graph_analytics.py`**: `rustworkx` Hub Centrality worker & `NetworkX` Louvain community partitioner.
+- ✅ **`app/tools/search_tools.py`**: ArXiv research paper search and Trafilatura web article text extractor.
+- ✅ **`app/agents/department_persona.py`**: Color-coded Department Personas for parallel graph exploration and ingestion debates.
+- ✅ **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating User Flow 1 (Ingestion) and User Flow 2 (Retrieval).
+- ✅ **`app/api/sse.py`**: FastAPI SSE endpoints (`/api/sse/retrieval` & `/api/sse/ingestion`) streaming live persona traversal telemetry.
+- ✅ **`app/mcp/server.py`**: FastMCP server exposing graph search, passage retrieval, and analytics tools.
+- ✅ **`test_verification.py`**: Automated verification test suite passing all database, analytics, retrieval stream, and ingestion delta checks.
