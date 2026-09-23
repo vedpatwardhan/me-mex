@@ -243,9 +243,144 @@ To avoid re-generating macro documents across the entire corpus after every sing
 
 ---
 
-## 9. Implementation Phasing
+## 9. API Endpoint Specification
+
+This section details all backend REST API endpoints, real-time Server-Sent Events (SSE) telemetry streams, and FastMCP agent tools implemented in the `me-mex/backend` engine.
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                               Graph-Memex API Gateway                                  │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+          │                                 │                                 │
+          ▼                                 ▼                                 ▼
+┌───────────────────┐             ┌───────────────────┐             ┌───────────────────┐
+│  REST API Routes  │             │   SSE Streaming   │             │   FastMCP Server  │
+│  (CRUD & Engine)  │             │  (Real-Time UI)   │             │  (Agent Tools)    │
+└───────────────────┘             └───────────────────┘             └───────────────────┘
+```
+
+### A. Graph & Topology Endpoints
+
+#### `GET /api/graph`
+- **Purpose**: Fetch nodes and edges filtered by workspace/theme ID.
+- **Parameters**: `project_id` / `theme_id` (Query parameter, string, optional, default: `"global"`).
+- **Behavior**: Returns the active clean 3-element graph topology (`ROOT_MEDIA`, `CONCEPT`, `CONNECTION_EDGE`). When `project_id="global"`, returns the master superset.
+- **Response**:
+  ```json
+  {
+    "project_id": "vla_research",
+    "nodes": [ { "_id": "concept_latent_wm", "node_class": "CONCEPT", "title": "Latent-Space World Models", ... } ],
+    "edges": [ { "_id": "edge_01", "source_id": "concept_latent_wm", "target_id": "concept_action_mpc", "weight": 1.0, ... } ]
+  }
+  ```
+
+#### `GET /api/nodes/{node_id}`
+- **Purpose**: Retrieve a single node record along with its incoming and outgoing connection edges and associated passage pointers.
+- **Parameters**: `node_id` (Path parameter, string, required).
+- **Behavior**: Queries MongoDB/InMemory store for the node. Resolves incoming and outgoing `CONNECTION_EDGE` records.
+- **Response**:
+  ```json
+  {
+    "node": { "_id": "concept_latent_wm", "title": "Latent-Space World Models", "passage_pointers": ["pass_01", "pass_02"], ... },
+    "outgoing_edges": [ ... ],
+    "incoming_edges": [ ... ]
+  }
+  ```
+
+#### `POST /api/nodes`
+- **Purpose**: Create or upsert a new `ROOT_MEDIA` or `CONCEPT` node in the database.
+- **Payload**: `GraphNodeRecord` JSON object (`_id`, `theme_id`, `node_class`, `title`, `text_body`, `passage_pointers`, `metadata`).
+- **Behavior**: Validates schema and upserts into database. Automatically enforces global superset rules.
+
+#### `POST /api/edges`
+- **Purpose**: Create or update a `CONNECTION_EDGE` record between two existing concept or media nodes.
+- **Payload**: `ConnectionEdgeRecord` JSON object (`_id`, `source_id`, `target_id`, `relation_type`, `text_body`, `weight`, `status`).
+- **Behavior**: Connects nodes with qualitative relation types (`BUILDS_UPON`, `CONTRASTS_WITH`, `SUPERSEDES`).
+
+---
+
+### B. Out-of-Graph Passage & Document Storage Endpoints
+
+#### `GET /api/passages`
+- **Purpose**: Retrieve plain text passage records linked to atomic `CONCEPT` nodes via `passage_pointers`.
+- **Parameters**: `ids` (Query parameter, comma-separated list of passage IDs).
+- **Behavior**: Used by the UI when a user clicks on a concept node's passage link to open the plain text passage drawer for verification.
+- **Response**:
+  ```json
+  {
+    "passages": [
+      { "_id": "pass_01", "doc_id": "doc_lewm", "chunk_index": 0, "text_content": "LeWM introduced latent rollouts..." }
+    ]
+  }
+  ```
+
+#### `POST /api/documents`
+- **Purpose**: Register original source document metadata (arXiv papers, blogs, video transcripts) and copy source file to local document storage (`me-mex/data/documents/`).
+- **Payload**: `DocumentRecord` JSON object (`_id`, `title`, `file_path`, `media_type`, `source_url`).
+
+---
+
+### C. Staging & Intake Endpoints
+
+#### `POST /api/intake`
+- **Purpose**: Stage raw intake stream (URL, text snippet, PDF file path, or voice transcript) into the Staging Sandbox before graph integration.
+- **Payload**: `IntakeRequest` JSON (`source_type`, `content_or_url`, `title_hint`, `project_id`).
+- **Behavior**: Stores item in `staging_sandbox` collection (`status: "STAGED"`). Does **NOT** immediately mutate the active graph until conversational exploration and user-triggered integration occur.
+
+---
+
+### D. Real-Time Telemetry SSE Streams
+
+#### `GET /api/sse/retrieval`
+- **Purpose**: Real-time Server-Sent Events (SSE) telemetry stream for User Flow 2 (Multi-Persona Graph Retrieval).
+- **Parameters**: `query` (Query parameter, string, e.g., `"latent space world models"`).
+- **Stream Event Sequence**:
+  1. `orchestrator_start`: Initiates Executive Orchestrator retrieval pass.
+  2. `persona_traversal_start`: Emits Department Specialist Persona traversal initiation with persona visual color code (`#38bdf8`, `#fbbf24`, `#c084fc`, `#4ade80`).
+  3. `persona_traversal_active`: Emits active `traversing_node_ids` for live WebGL canvas glowing animation.
+  4. `retrieval_complete`: Streams final executive synthesis and persona findings.
+
+#### `GET /api/sse/ingestion`
+- **Purpose**: Real-time SSE telemetry stream for User Flow 1 (Document Ingestion & Graph Evolution).
+- **Parameters**: `title` (string), `content` (string), `source_url` (optional string).
+- **Stream Event Sequence**:
+  1. `ingestion_staged`: Document & plain text passages stored in out-of-graph records.
+  2. `persona_ingestion_debate`: Department personas evaluate candidate concepts against existing graph nodes.
+  3. `human_in_the_loop_prompt`: Emits interactive clarification prompt for chat UI when trade-offs or edge superseding ambiguities arise.
+  4. `ingestion_complete`: Commits evolved nodes with passage pointers and updates Department Macro Documents.
+
+---
+
+### E. Macro Documents & Graph Analytics Endpoints
+
+#### `GET /api/macros`
+- **Purpose**: Retrieve Department Macro Documents summarizing partitioned graph communities.
+- **Behavior**: Returns high-level department summaries, hub concept IDs, and department titles.
+
+#### `POST /api/analytics/repartition`
+- **Purpose**: Trigger `rustworkx` Hub Centrality ranking and `NetworkX` Louvain community partitioning to patch Department Macro Documents.
+
+---
+
+### F. FastMCP Agent Tools Protocol Server
+
+The FastMCP server (`me-mex/backend/app/mcp/server.py`) exposes agentic tools over standard MCP JSON-RPC protocol:
+
+| MCP Tool Name | Arguments | Functionality Description |
+| :--- | :--- | :--- |
+| `search_arxiv_papers` | `query: str, max_results: int` | Queries ArXiv API for relevant paper metadata and abstracts. |
+| `fetch_web_article` | `url: str` | Uses Trafilatura to fetch and extract clean plain-text markdown from blogs/web pages. |
+| `get_graph_nodes` | `theme_id: str` | Fetches all active atomic graph nodes for agent context windows. |
+| `get_passages_by_ids` | `passage_ids: List[str]` | Retrieves plain text out-of-graph passage records for evidence auditing. |
+| `get_macro_documents` | None | Retrieves Department Macro Documents for high-level domain routing. |
+| `calculate_hub_rankings` | None | Runs `rustworkx` eigenvector/degree centrality algorithm to identify primary concept hubs. |
+
+---
+
+## 10. Implementation Phasing
 
 - **Phase 1**: MongoDB Document Schema, FastMCP Server, & Bidirectional Markdown Sync Engine.
 - **Phase 2**: React + WebGL Canvas (`react-force-graph`) with Live Traversal Glow, Stationary Node Selection, & Markdown Side Drawer.
 - **Phase 3**: Retrieval-First Engine with Compressed Global Registries & Specialist Persona Search.
 - **Phase 4**: User-Triggered Ingestion Pipeline with Staged Conversational Sandbox, Human-in-the-Loop Multi-Agent Debate, & Incremental Delta Macro Patching.
+
