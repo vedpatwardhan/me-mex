@@ -120,9 +120,9 @@ graph TD
     ConceptLatent -.->|ID Pointers in Metadata| Passage2
 ```
 
-### Universal Node Schema & Out-of-Graph Passage Grounding
+### Universal Node & Edge Schema
 
-Every entity in the graph network adheres to a single universal node schema. Passages exist purely as plain text database records referenced via ID pointers inside atomic concept notes:
+Every entity in the graph network adheres to a single universal node schema and a dual-mode edge schema. Passages exist purely as plain text database records referenced via ID pointers inside atomic concept notes:
 
 ```json
 {
@@ -139,6 +139,34 @@ Every entity in the graph network adheres to a single universal node schema. Pas
   "passage_pointers": ["pass_chunk_101", "pass_chunk_102"]
 }
 ```
+
+#### Dual-Mode Connection Edge Schema (`CONNECTION_EDGE`)
+Edges connect `ROOT_MEDIA` and `CONCEPT` nodes. The architecture explicitly supports **both directional and undirected (symmetric) edges** via `is_directional`:
+
+```json
+{
+  "id": "edge_pixel_parallel_latent",
+  "source_id": "concept_pixel_world_models",
+  "target_id": "concept_latent_world_models",
+  "relation_type": "PARALLEL_TO",
+  "is_directional": false,
+  "text_body": "Parallel generative world model paradigms operating on raw pixels vs latent embeddings.",
+  "weight": 1.0,
+  "status": "PRIMARY_ACTIVE"
+}
+```
+
+#### Complete Edge Taxonomy & Behavior Matrix
+
+| Relation Predicate | Directional Mode (`is_directional`) | Graph Analytics Flow | Canvas Visual Rendering | Typical Use Case |
+| :--- | :--- | :--- | :--- | :--- |
+| **`BUILDS_UPON`** | `true` (Directional) | Directed $S \rightarrow T$ | Arrowhead from source to target | Incremental improvements or foundational theory. |
+| **`SUPERSEDES`** | `true` (Directional) | Directed $S \rightarrow T$ | Bold arrow (with legacy 0.3 weight decay) | SOTA concept replacing an older paradigm. |
+| **`EXTRACTED_FROM`** | `true` (Directional) | Directed $S \rightarrow T$ | Origin source arrow | Linking paper/blog node to an extracted concept. |
+| **`CONTRASTS_WITH`** | `true` (Directional) | Directed $S \rightarrow T$ | Comparative arrow | Asymmetric comparison with specific nuance. |
+| **`PARALLEL_TO`** | **`false` (Undirected)** | Reciprocal $S \leftrightarrow T$ | Clean solid line (no arrows) | Parallel contemporary paradigms (e.g., ACT vs Diffusion). |
+| **`TRADE_OFF_WITH`** | **`false` (Undirected)** | Reciprocal $S \leftrightarrow T$ | Clean dashed/solid line | Symmetric trade-offs (e.g., Latency vs Expressivity). |
+| **`CO_OCCURS_WITH`** | **`false` (Undirected)** | Reciprocal $S \leftrightarrow T$ | Subtle solid line | Frequently co-occurring domain topics. |
 
 #### Role of Out-of-Graph Passage Pointers
 1. **User Verification:** When a user clicks a `CONCEPT` node in the UI, it displays the self-evolving concept summary. Clicking a passage ID pointer fetches the raw plain text passage chunk for manual verification.

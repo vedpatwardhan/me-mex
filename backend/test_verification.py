@@ -14,10 +14,24 @@ async def test_backend_verification():
     print(
         f"✓ Database Initialized: {len(nodes)} concept nodes, {len(edges)} connection edges."
     )
-    for n in nodes:
-        print(
-            f"  - Node [{n.id}]: '{n.title}' | Passage Pointers: {n.passage_pointers}"
+    for e in edges:
+        dir_label = (
+            "DIRECTED"
+            if getattr(e, "is_directional", True)
+            else "UNDIRECTED (SYMMETRIC)"
         )
+        print(
+            f"  - Edge [{e.id}]: {e.source_id} --({e.relation_type}, {dir_label})--> {e.target_id} | Weight: {e.weight}"
+        )
+
+    # Assert at least one undirected edge exists in seed data
+    undirected_edges = [e for e in edges if not getattr(e, "is_directional", True)]
+    assert (
+        len(undirected_edges) > 0
+    ), "Expected at least one undirected edge in seed data!"
+    print(
+        f"✓ Dual-Mode Edge Schema verified: {len(undirected_edges)} undirected symmetric edge(s) found."
+    )
 
     # 2. Test Graph Analytics & Community Partitioning
     print("\n--- Testing Graph Analytics (rustworkx & NetworkX Louvain) ---")

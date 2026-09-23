@@ -83,8 +83,9 @@ class DepartmentPersonaAgent:
 
         Determine:
         1. Should candidate concepts MERGE into existing nodes?
-        2. Are old concept edges SUPERSEDED (decaying weight to 0.3)?
-        3. Should new passage pointers be linked?
+        2. Are old concept edges SUPERSEDED (directional weight decay to 0.3)?
+        3. Are new concepts PARALLEL_TO or TRADE_OFF_WITH existing concepts (undirected, is_directional: false)?
+        4. Should new passage pointers be linked?
         """
         messages = [
             {

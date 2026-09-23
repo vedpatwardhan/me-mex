@@ -28,15 +28,16 @@ class GraphAnalyticsWorker:
             if e.source_id in node_id_to_idx and e.target_id in node_id_to_idx:
                 s_idx = node_id_to_idx[e.source_id]
                 t_idx = node_id_to_idx[e.target_id]
-                graph.add_edge(
-                    s_idx,
-                    t_idx,
-                    {
-                        "weight": e.weight,
-                        "relation": e.relation_type,
-                        "status": e.status,
-                    },
-                )
+                edge_data = {
+                    "weight": e.weight,
+                    "relation": e.relation_type,
+                    "status": e.status,
+                    "is_directional": getattr(e, "is_directional", True),
+                }
+                graph.add_edge(s_idx, t_idx, edge_data)
+                # If undirected, add reciprocal edge for symmetric PageRank and traversal
+                if not getattr(e, "is_directional", True):
+                    graph.add_edge(t_idx, s_idx, edge_data)
 
         return graph, idx_to_node_id, node_id_to_idx
 
