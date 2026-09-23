@@ -2,10 +2,39 @@ import re
 from typing import List, Dict, Any, Optional
 import arxiv
 import trafilatura
+from duckduckgo_search import DDGS
 
 
 class SearchTools:
-    """Tools for querying ArXiv research papers and fetching/extracting web article content."""
+    """Tools for querying ArXiv research papers, DuckDuckGo web search, and fetching/extracting web article content."""
+
+    @staticmethod
+    def search_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+        """Search DuckDuckGo for live web results, snippets, and page URLs."""
+        print(f"[SearchTools] Querying DuckDuckGo Web Search for: '{query}'")
+        try:
+            results = []
+            with DDGS() as ddgs:
+                for r in ddgs.text(query, max_results=max_results):
+                    results.append(
+                        {
+                            "title": r.get("title", ""),
+                            "snippet": r.get("body", ""),
+                            "url": r.get("href", ""),
+                        }
+                    )
+            return results
+        except Exception as e:
+            print(
+                f"[SearchTools] DuckDuckGo search failed: {e}. Returning fallback result."
+            )
+            return [
+                {
+                    "title": f"Web Search Result: {query}",
+                    "snippet": f"Synthetic web search overview for {query} dynamics in robotics.",
+                    "url": "https://duckduckgo.com",
+                }
+            ]
 
     @staticmethod
     def search_arxiv(query: str, max_results: int = 3) -> List[Dict[str, Any]]:

@@ -381,6 +381,25 @@ The FastMCP server (`me-mex/backend/app/mcp/server.py`) exposes agentic tools ov
 | `get_macro_documents` | None | Retrieves Department Macro Documents for high-level domain routing. |
 | `calculate_hub_rankings` | None | Runs `rustworkx` eigenvector/degree centrality algorithm to identify primary concept hubs. |
 
+### G. External Web Search MCP Server (`duckduckgo-mcp-server`)
+
+For real-time internet search and concept clarification, agents use the Python-based DuckDuckGo MCP server launched via `uvx`:
+
+```json
+{
+  "mcpServers": {
+    "duckduckgo": {
+      "command": "uvx",
+      "args": ["duckduckgo-mcp-server"]
+    }
+  }
+}
+```
+
+| External MCP Tool | Arguments | Description |
+| :--- | :--- | :--- |
+| `duckduckgo_web_search` | `query: str, count: int` | Searches DuckDuckGo for live web results, snippets, and page URLs. |
+
 ---
 
 ## 10. Implementation Phasing

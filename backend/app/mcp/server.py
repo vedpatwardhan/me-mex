@@ -11,6 +11,13 @@ mcp = FastMCP("Graph-Memex Agent Tools")
 
 
 @mcp.tool()
+def search_duckduckgo_web(query: str, max_results: int = 5) -> str:
+    """Search DuckDuckGo web search engine for live web pages, snippets, and URLs."""
+    results = search_tools.search_duckduckgo(query, max_results=max_results)
+    return json.dumps(results, indent=2)
+
+
+@mcp.tool()
 def search_arxiv_papers(query: str, max_results: int = 3) -> str:
     """Search ArXiv API for papers relevant to a research topic."""
     results = search_tools.search_arxiv(query, max_results=max_results)
