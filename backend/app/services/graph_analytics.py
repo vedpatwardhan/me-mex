@@ -1,7 +1,8 @@
 from typing import List, Dict, Any, Tuple
 import rustworkx as rx
 import networkx as nx
-from app.db import db_engine, GraphNodeRecord, ConnectionEdgeRecord, MacroDocumentRecord
+from app.db import db_engine
+from app.models import GraphNode, GraphEdge, MacroDocumentRecord
 
 
 class GraphAnalyticsWorker:
@@ -97,16 +98,23 @@ class GraphAnalyticsWorker:
             communities = [all_nodes]
 
         department_map: Dict[str, List[str]] = {}
-        dept_names = [
-            "Department of Latent World Models & Architectures",
-            "Department of Planning & Policy Control",
-            "Department of Perceptual Representations & Sensors",
-            "Department of Foundation Robotics Systems",
-        ]
+        centralities = GraphAnalyticsWorker.calculate_hub_centrality(theme_id)
 
         for idx, comm in enumerate(communities):
-            dept_title = dept_names[idx % len(dept_names)]
-            department_map[dept_title] = list(comm)
+            comm_nodes = list(comm)
+            # Find highest centrality hub node in this community
+            top_hub_id = (
+                max(comm_nodes, key=lambda nid: centralities.get(nid, 0.0))
+                if comm_nodes
+                else f"Cluster {idx+1}"
+            )
+            top_node = db_engine.get_node(top_hub_id)
+            dept_title = (
+                f"Department of {top_node.title}"
+                if top_node
+                else f"Department of Cluster {idx+1}"
+            )
+            department_map[dept_title] = comm_nodes
 
         return department_map
 

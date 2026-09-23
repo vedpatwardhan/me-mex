@@ -52,6 +52,28 @@ export const GraphCanvas: React.FC = () => {
     };
   }, [nodes, edges, searchQuery, selectedNodeTypeFilter]);
 
+  // Dynamic high-contrast frontend color palette array for departments
+  const DEPARTMENT_PALETTE = [
+    '#38bdf8', // Sky Blue
+    '#fbbf24', // Amber Yellow
+    '#c084fc', // Bright Purple
+    '#34d399', // Emerald Green
+    '#f87171', // Coral Red
+    '#f43f5e', // Rose
+    '#a855f7', // Violet
+    '#06b6d4', // Cyan
+  ];
+
+  const getDepartmentColor = useCallback((departmentId?: string) => {
+    if (!departmentId) return DEPARTMENT_PALETTE[0];
+    let hash = 0;
+    for (let i = 0; i < departmentId.length; i++) {
+      hash = departmentId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const index = Math.abs(hash) % DEPARTMENT_PALETTE.length;
+    return DEPARTMENT_PALETTE[index];
+  }, []);
+
   // Node Color taxonomy mapping
   const getNodeColor = (node: GraphNode) => {
     if (traversingNodeIds.includes(node.id)) return '#fbbf24'; // Glowing Gold for active intake traversal

@@ -78,6 +78,10 @@ class MacroDocumentRecord(BaseModel):
     summary_text: str
     last_updated: float = Field(default_factory=time.time)
 
+    @property
+    def department_id(self) -> str:
+        return self.id
+
 
 # 6. Staging Sandbox Record
 class StagingRecord(BaseModel):

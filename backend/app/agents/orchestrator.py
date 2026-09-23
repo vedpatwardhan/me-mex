@@ -2,10 +2,10 @@ import json
 import uuid
 import time
 from typing import List, Dict, Any, AsyncGenerator, Optional
-from app.db import (
-    db_engine,
-    GraphNodeRecord,
-    ConnectionEdgeRecord,
+from app.db import db_engine
+from app.models import (
+    GraphNode,
+    GraphEdge,
     PassageRecord,
     DocumentRecord,
     MacroDocumentRecord,
@@ -13,7 +13,6 @@ from app.db import (
 )
 from app.agents.department_persona import (
     DepartmentPersonaAgent,
-    DEPARTMENT_PERSONA_COLORS,
 )
 from app.services.graph_analytics import graph_analytics
 from app.services.llm_gateway import llm_gateway
@@ -42,13 +41,34 @@ class ExecutiveOrchestrator:
             "timestamp": time.time(),
         }
 
+        # Dynamically load departments from macro documents stored in DB
+        macros = db_engine.get_macros()
+        if macros:
+            active_departments = [
+                DepartmentPersonaAgent(m.department_name, m.department_id)
+                for m in macros
+            ]
+        else:
+            active_departments = [
+                DepartmentPersonaAgent(
+                    "Department of Latent World Models & Architectures",
+                    "dept_world_models",
+                ),
+                DepartmentPersonaAgent(
+                    "Department of Planning & Policy Control", "dept_policy_control"
+                ),
+                DepartmentPersonaAgent(
+                    "Department of Perceptual Representations & Sensors", "dept_sensors"
+                ),
+            ]
+
         department_findings = []
-        for dept in self.departments:
-            # Emit SSE event for persona starting traversal with color code
+        for dept in active_departments:
+            # Emit SSE event for persona starting traversal
             yield {
                 "event": "persona_traversal_start",
+                "department_id": dept.department_id,
                 "department_name": dept.department_name,
-                "color": dept.color,
                 "message": f"Specialist {dept.department_name} traversing department seed concept hubs...",
                 "timestamp": time.time(),
             }
@@ -59,8 +79,8 @@ class ExecutiveOrchestrator:
             # Emit SSE node highlight event for visual WebGL canvas
             yield {
                 "event": "persona_traversal_active",
+                "department_id": dept.department_id,
                 "department_name": dept.department_name,
-                "color": dept.color,
                 "traversing_node_ids": finding["traversing_node_ids"],
                 "perspective_snippet": finding["perspective"][:150],
                 "timestamp": time.time(),
@@ -120,11 +140,17 @@ class ExecutiveOrchestrator:
         ]
 
         delta_proposals = []
-        for dept in self.departments:
+        macros = db_engine.get_macros()
+        active_departments = (
+            [DepartmentPersonaAgent(m.department_name, m.department_id) for m in macros]
+            if macros
+            else self.departments
+        )
+        for dept in active_departments:
             yield {
                 "event": "persona_ingestion_debate",
+                "department_id": dept.department_id,
                 "department_name": dept.department_name,
-                "color": dept.color,
                 "message": f"{dept.department_name} evaluating graph evolution deltas and concept merging...",
                 "timestamp": time.time(),
             }
@@ -145,7 +171,7 @@ class ExecutiveOrchestrator:
 
         # Step 5: Evolve Graph Nodes (Add concept with passage pointers)
         concept_id = f"concept_{title.lower().replace(' ', '_')}"
-        new_node = GraphNodeRecord(
+        new_node = GraphNode(
             _id=concept_id,
             title=title,
             text_body=f"# {title}\n{raw_text[:500]}",
@@ -156,11 +182,11 @@ class ExecutiveOrchestrator:
 
         # Connect edge from Root Concept to Action Planning
         edge_id = f"edge_{concept_id}_to_mpc"
-        new_edge = ConnectionEdgeRecord(
+        new_edge = GraphEdge(
             _id=edge_id,
             source_id=concept_id,
             target_id="concept_action_mpc",
-            relation_type="BUILDS_UPON",
+            is_directional=True,
             text_body=f"Integration edge from {title} to MPC action planning.",
             weight=1.0,
             status="PRIMARY_ACTIVE",

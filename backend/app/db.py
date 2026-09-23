@@ -2,18 +2,12 @@ import os
 import time
 from typing import Dict, List, Optional, Any
 from app.models import (
-    NodeType,
     GraphNode,
     GraphEdge,
     DocumentRecord,
     PassageRecord,
     MacroDocumentRecord,
     StagingRecord,
-    ProjectWorkspace,
-    AgentProposal,
-    IntakeRequest,
-    ReportRequest,
-    ReportResponse,
 )
 
 # Try PyMongo import, fall back gracefully if MongoDB server is offline/not installed
@@ -29,10 +23,6 @@ except ImportError:
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "graph_memex_db")
 
-# Aliases for backward compatibility
-GraphNodeRecord = GraphNode
-ConnectionEdgeRecord = GraphEdge
-
 
 class GraphMemexDatabase:
     """Hybrid MongoDB Database Engine with in-memory fallback for local execution."""
@@ -45,8 +35,8 @@ class GraphMemexDatabase:
         # In-memory fallbacks
         self.mem_documents: Dict[str, DocumentRecord] = {}
         self.mem_passages: Dict[str, PassageRecord] = {}
-        self.mem_nodes: Dict[str, GraphNodeRecord] = {}
-        self.mem_edges: Dict[str, ConnectionEdgeRecord] = {}
+        self.mem_nodes: Dict[str, GraphNode] = {}
+        self.mem_edges: Dict[str, GraphEdge] = {}
         self.mem_macro: Dict[str, MacroDocumentRecord] = {}
         self.mem_staging: Dict[str, StagingRecord] = {}
 
@@ -70,13 +60,13 @@ class GraphMemexDatabase:
     def _seed_initial_data(self):
         """Seed initial nodes, edges, and macro documents if empty."""
         if not self.get_nodes():
-            n1 = GraphNodeRecord(
+            n1 = GraphNode(
                 _id="concept_world_models",
                 title="World Models",
                 text_body="# World Models\nGeneral paradigm of generative world models in robotics.",
                 metadata={"domain_tags": ["world_models"]},
             )
-            n2 = GraphNodeRecord(
+            n2 = GraphNode(
                 _id="concept_pixel_world_models",
                 title="Pixel-Space World Models",
                 text_body="# Pixel-Space World Models\nGenerates future raw RGB frames directly (e.g. World Models 2018).",
@@ -86,14 +76,14 @@ class GraphMemexDatabase:
                 },
                 passage_pointers=["pass_pixel_01"],
             )
-            n3 = GraphNodeRecord(
+            n3 = GraphNode(
                 _id="concept_latent_world_models",
                 title="Latent-Space World Models",
                 text_body="# Latent-Space World Models\nGenerates representations in latent space for 100x faster planning (e.g. LeWM, JEPA).",
                 metadata={"domain_tags": ["latent_space"], "status": "PRIMARY_ACTIVE"},
                 passage_pointers=["pass_latent_01"],
             )
-            n4 = GraphNodeRecord(
+            n4 = GraphNode(
                 _id="concept_action_mpc",
                 title="Action Planning via MPC",
                 text_body="# Action Planning via MPC\nTrajectory optimization over world model rollouts.",
@@ -103,7 +93,7 @@ class GraphMemexDatabase:
             for n in [n1, n2, n3, n4]:
                 self.upsert_node(n)
 
-            e1 = ConnectionEdgeRecord(
+            e1 = GraphEdge(
                 _id="edge_pixel_to_mpc",
                 source_id="concept_pixel_world_models",
                 target_id="concept_action_mpc",
@@ -112,7 +102,7 @@ class GraphMemexDatabase:
                 weight=0.3,
                 status="HISTORICAL_SUPERSEDED",
             )
-            e2 = ConnectionEdgeRecord(
+            e2 = GraphEdge(
                 _id="edge_latent_to_mpc",
                 source_id="concept_latent_world_models",
                 target_id="concept_action_mpc",
@@ -121,7 +111,7 @@ class GraphMemexDatabase:
                 weight=1.0,
                 status="PRIMARY_ACTIVE",
             )
-            e3 = ConnectionEdgeRecord(
+            e3 = GraphEdge(
                 _id="edge_pixel_parallel_latent",
                 source_id="concept_pixel_world_models",
                 target_id="concept_latent_world_models",
@@ -142,7 +132,7 @@ class GraphMemexDatabase:
             self.upsert_macro(macro1)
 
     # --- Node Operations ---
-    def upsert_node(self, node: GraphNodeRecord):
+    def upsert_node(self, node: GraphNode):
         if self.use_mongo:
             self.db.nodes.update_one(
                 {"_id": node.id}, {"$set": node.model_dump(by_alias=True)}, upsert=True
@@ -150,23 +140,23 @@ class GraphMemexDatabase:
         else:
             self.mem_nodes[node.id] = node
 
-    def get_nodes(self, theme_id: Optional[str] = None) -> List[GraphNodeRecord]:
+    def get_nodes(self, theme_id: Optional[str] = None) -> List[GraphNode]:
         if self.use_mongo:
             query = {"theme_id": theme_id} if theme_id and theme_id != "global" else {}
             docs = list(self.db.nodes.find(query))
-            return [GraphNodeRecord(**d) for d in docs]
+            return [GraphNode(**d) for d in docs]
         else:
             return list(self.mem_nodes.values())
 
-    def get_node(self, node_id: str) -> Optional[GraphNodeRecord]:
+    def get_node(self, node_id: str) -> Optional[GraphNode]:
         if self.use_mongo:
             doc = self.db.nodes.find_one({"_id": node_id})
-            return GraphNodeRecord(**doc) if doc else None
+            return GraphNode(**doc) if doc else None
         else:
             return self.mem_nodes.get(node_id)
 
     # --- Edge Operations ---
-    def upsert_edge(self, edge: ConnectionEdgeRecord):
+    def upsert_edge(self, edge: GraphEdge):
         if self.use_mongo:
             self.db.edges.update_one(
                 {"_id": edge.id}, {"$set": edge.model_dump(by_alias=True)}, upsert=True
@@ -174,11 +164,11 @@ class GraphMemexDatabase:
         else:
             self.mem_edges[edge.id] = edge
 
-    def get_edges(self, theme_id: Optional[str] = None) -> List[ConnectionEdgeRecord]:
+    def get_edges(self, theme_id: Optional[str] = None) -> List[GraphEdge]:
         if self.use_mongo:
             query = {"theme_id": theme_id} if theme_id and theme_id != "global" else {}
             docs = list(self.db.edges.find(query))
-            return [ConnectionEdgeRecord(**d) for d in docs]
+            return [GraphEdge(**d) for d in docs]
         else:
             return list(self.mem_edges.values())
 

@@ -1,7 +1,8 @@
 import json
 from typing import List, Dict, Any, Optional
 from fastmcp import FastMCP
-from app.db import db_engine, GraphNodeRecord, ConnectionEdgeRecord, PassageRecord
+from app.db import db_engine
+from app.models import GraphNode, GraphEdge, PassageRecord
 from app.tools.search_tools import search_tools
 from app.services.graph_analytics import graph_analytics
 

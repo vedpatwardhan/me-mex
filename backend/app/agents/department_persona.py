@@ -1,28 +1,21 @@
 import json
 from typing import List, Dict, Any, Optional
-from app.db import (
-    db_engine,
+from app.db import db_engine
+from app.models import (
     MacroDocumentRecord,
-    GraphNodeRecord,
-    ConnectionEdgeRecord,
+    GraphNode,
+    GraphEdge,
     PassageRecord,
 )
 from app.services.llm_gateway import llm_gateway
 
-DEPARTMENT_PERSONA_COLORS = {
-    "Department of Latent World Models & Architectures": "#38bdf8",  # Sky Blue
-    "Department of Planning & Policy Control": "#fbbf24",  # Amber Yellow
-    "Department of Perceptual Representations & Sensors": "#c084fc",  # Purple
-    "Department of Foundation Robotics Systems": "#4ade80",  # Emerald Green
-}
-
 
 class DepartmentPersonaAgent:
-    """Specialized Department Persona agent with distinct visual color coding for graph traversal."""
+    """Specialized Department Persona agent representing a dynamically discovered concept community."""
 
-    def __init__(self, department_name: str):
+    def __init__(self, department_name: str, department_id: Optional[str] = None):
         self.department_name = department_name
-        self.color = DEPARTMENT_PERSONA_COLORS.get(department_name, "#38bdf8")
+        self.department_id = department_id or department_name.lower().replace(" ", "_")
 
     def explore_and_debate_retrieval(self, query: str) -> Dict[str, Any]:
         """Phase 1 Retrieval Debate: Explore macro summary and seed concept nodes."""
@@ -57,8 +50,8 @@ class DepartmentPersonaAgent:
         llm_response = llm_gateway.generate_chat_completion(messages)
 
         return {
+            "department_id": self.department_id,
             "department_name": self.department_name,
-            "color": self.color,
             "traversing_node_ids": traversed_node_ids,
             "perspective": llm_response,
             "relevant_concepts": relevant_concepts,
@@ -96,7 +89,7 @@ class DepartmentPersonaAgent:
         ]
         response = llm_gateway.generate_chat_completion(messages)
         return {
+            "department_id": self.department_id,
             "department_name": self.department_name,
-            "color": self.color,
             "delta_proposal": response,
         }
