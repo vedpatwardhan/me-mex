@@ -105,7 +105,7 @@ export const RightDrawer: React.FC = () => {
         <div className="space-y-2.5 pt-1">
           <div className="flex items-center justify-between">
             <span className="font-display font-semibold text-slate-200 flex items-center gap-1.5 text-xs">
-              <BookOpen className="w-4 h-4 text-purple-400" /> Markdown AST Body
+              <BookOpen className="w-4 h-4 text-purple-400" /> Zettelkasten Note Content
             </span>
           </div>
 

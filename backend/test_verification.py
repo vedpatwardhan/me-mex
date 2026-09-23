@@ -21,7 +21,7 @@ async def test_backend_verification():
             else "UNDIRECTED (SYMMETRIC)"
         )
         print(
-            f"  - Edge [{e.id}]: {e.source_id} --({e.relation_type}, {dir_label})--> {e.target_id} | Weight: {e.weight}"
+            f"  - Edge [{e.id}]: {e.source_id} --({dir_label})--> {e.target_id} | Context: '{e.text_body}'"
         )
 
     # Assert at least one undirected edge exists in seed data

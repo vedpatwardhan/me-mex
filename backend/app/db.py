@@ -53,9 +53,8 @@ class ConnectionEdgeRecord(BaseModel):
     theme_id: str = "vla_research"
     source_id: str
     target_id: str
-    relation_type: str = "BUILDS_UPON"  # "BUILDS_UPON" | "CONTRASTS_WITH" | "SUPERSEDES" | "PARALLEL_TO" | "TRADE_OFF_WITH" | "CO_OCCURS_WITH"
     is_directional: bool = True  # Set to False for symmetric parallel concepts
-    text_body: str
+    text_body: str  # Natural language explanation of relationship
     weight: float = 1.0  # Decays to 0.3 when superseded
     status: str = "PRIMARY_ACTIVE"  # "PRIMARY_ACTIVE" | "HISTORICAL_SUPERSEDED"
     created_at: float = Field(default_factory=time.time)
@@ -153,7 +152,6 @@ class GraphMemexDatabase:
                 _id="edge_pixel_to_mpc",
                 source_id="concept_pixel_world_models",
                 target_id="concept_action_mpc",
-                relation_type="BUILDS_UPON",
                 is_directional=True,
                 text_body="Historical MPC rollout over raw pixel predictions.",
                 weight=0.3,
@@ -163,7 +161,6 @@ class GraphMemexDatabase:
                 _id="edge_latent_to_mpc",
                 source_id="concept_latent_world_models",
                 target_id="concept_action_mpc",
-                relation_type="SUPERSEDES",
                 is_directional=True,
                 text_body="Primary SOTA 100x speedup for MPC action planning in latent space.",
                 weight=1.0,
@@ -173,7 +170,6 @@ class GraphMemexDatabase:
                 _id="edge_pixel_parallel_latent",
                 source_id="concept_pixel_world_models",
                 target_id="concept_latent_world_models",
-                relation_type="PARALLEL_TO",
                 is_directional=False,
                 text_body="Parallel generative world model paradigms operating on raw pixels vs latent embeddings.",
                 weight=1.0,

@@ -5,13 +5,6 @@ export type NodeType =
   | 'post'
   | 'concept';
 
-export type EdgeType =
-  | 'BUILDS_UPON'
-  | 'CONTRASTS_WITH'
-  | 'REFUTES'
-  | 'DERIVES_FROM'
-  | 'CATEGORY_MEMBER';
-
 export interface GraphNode {
   id: string;
   node_type: NodeType;
@@ -35,7 +28,8 @@ export interface GraphEdge {
   target: string | GraphNode;
   source_node_id?: string;
   target_node_id?: string;
-  edge_type: EdgeType;
+  is_directional?: boolean;
+  text_body?: string;
   weight: number;
   provenance_quote?: string;
   project_ids: string[];

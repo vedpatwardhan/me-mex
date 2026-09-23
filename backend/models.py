@@ -10,10 +10,6 @@ NodeType = Literal[
     "concept",  # Yellow: Atomic self-evolving Zettelkasten concept nodes
 ]
 
-EdgeType = Literal[
-    "BUILDS_UPON", "CONTRASTS_WITH", "REFUTES", "DERIVES_FROM", "CATEGORY_MEMBER"
-]
-
 
 class GraphNode(BaseModel):
     id: str
@@ -32,7 +28,8 @@ class GraphEdge(BaseModel):
     id: str
     source_node_id: str
     target_node_id: str
-    edge_type: EdgeType
+    is_directional: bool = True  # False for symmetric parallel concepts
+    text_body: str = ""  # Natural language explanation of relationship
     weight: float = 1.0
     provenance_quote: Optional[str] = None
     project_ids: List[str] = Field(default_factory=lambda: ["global"])

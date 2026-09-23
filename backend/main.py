@@ -184,7 +184,8 @@ def intake_content(req: IntakeRequest, background_tasks: BackgroundTasks):
             id=edge_id,
             source_node_id=new_node_id,
             target_node_id=target_id,
-            edge_type="BUILDS_UPON",
+            is_directional=True,
+            text_body="Bi-directional seeded trajectory match",
             provenance_quote="Bi-directional seeded trajectory match",
             project_ids=["global", req.project_id],
         )
@@ -219,7 +220,8 @@ def proposal_action(proposal_id: str, action: str):
                 id=edge_id,
                 source_node_id=prop.source_node_id,
                 target_node_id=prop.target_node_id,
-                edge_type=prop.suggested_edge_type or "BUILDS_UPON",
+                is_directional=True,
+                text_body=prop.description or "Accepted agent proposal link",
                 provenance_quote=prop.description,
                 project_ids=["global"],
             )

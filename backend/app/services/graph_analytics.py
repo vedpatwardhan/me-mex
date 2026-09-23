@@ -30,9 +30,9 @@ class GraphAnalyticsWorker:
                 t_idx = node_id_to_idx[e.target_id]
                 edge_data = {
                     "weight": e.weight,
-                    "relation": e.relation_type,
                     "status": e.status,
                     "is_directional": getattr(e, "is_directional", True),
+                    "text_body": getattr(e, "text_body", ""),
                 }
                 graph.add_edge(s_idx, t_idx, edge_data)
                 # If undirected, add reciprocal edge for symmetric PageRank and traversal
