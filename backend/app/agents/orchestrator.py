@@ -20,51 +20,159 @@ from app.tools.search_tools import search_tools
 
 
 class ExecutiveOrchestrator:
-    """Executive Orchestrator agent coordinating Department Personas, graph retrieval debates, and delta ingestion."""
+    """Executive Orchestrator agent acting as central intent classifier and coordinator for conversation, retrieval, and ingestion."""
 
     def __init__(self):
-        self.departments = [
-            DepartmentPersonaAgent("Department of Latent World Models & Architectures"),
-            DepartmentPersonaAgent("Department of Planning & Policy Control"),
-            DepartmentPersonaAgent(
-                "Department of Perceptual Representations & Sensors"
-            ),
+        pass
+
+    def classify_intent(
+        self, query: str, chat_history: Optional[List[Dict[str, str]]] = None
+    ) -> str:
+        """Classifies user input into DIRECT_CONVERSATION, GRAPH_RETRIEVAL, or DOCUMENT_INGESTION."""
+        prompt = f"""
+        Analyze the following user input and classify its primary intent into exactly ONE category:
+
+        Categories:
+        - "DIRECT_CONVERSATION": Greetings, general questions, conversational follow-ups, formatting, math, or basic Q&A that does not require deep graph traversal or new document ingestion.
+        - "GRAPH_RETRIEVAL": Domain research, cross-paper synthesis, concept exploration, or queries asking about concepts/departments in the system.
+        - "DOCUMENT_INGESTION": Input containing URLs (e.g. arXiv, YouTube, blogs), raw document text, paper abstracts, or explicit instructions to ingest/store content.
+
+        User Input: "{query}"
+
+        Return JSON format: {{"intent": "DIRECT_CONVERSATION" | "GRAPH_RETRIEVAL" | "DOCUMENT_INGESTION"}}
+        """
+        messages = [
+            {
+                "role": "system",
+                "content": "You are the Executive Orchestrator intent classifier.",
+            },
+            {"role": "user", "content": prompt},
         ]
+        try:
+            res = llm_gateway.generate_chat_completion(messages)
+            data = json.loads(res)
+            intent = data.get("intent", "DIRECT_CONVERSATION").upper()
+            if intent in [
+                "DIRECT_CONVERSATION",
+                "GRAPH_RETRIEVAL",
+                "DOCUMENT_INGESTION",
+            ]:
+                return intent
+        except Exception:
+            pass
+
+        # Simple heuristic fallback if JSON parsing or LLM synthetic fallback occurs
+        lower_q = query.lower()
+        if (
+            lower_q.startswith("http")
+            or "arxiv.org" in lower_q
+            or "ingest" in lower_q
+            or "paper abstract" in lower_q
+        ):
+            return "DOCUMENT_INGESTION"
+        elif any(
+            k in lower_q
+            for k in [
+                "compare",
+                "synthesize",
+                "explain",
+                "concept",
+                "department",
+                "graph",
+                "paper",
+                "models",
+                "retrieval",
+                "search",
+                "latent",
+            ]
+        ):
+            return "GRAPH_RETRIEVAL"
+        return "DIRECT_CONVERSATION"
+
+    async def process_user_message(
+        self, query: str, chat_history: Optional[List[Dict[str, str]]] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Central conversational entry point routing user input dynamically."""
+        intent = self.classify_intent(query, chat_history)
+
+        yield {
+            "event": "orchestrator_intent_classified",
+            "intent": intent,
+            "message": f"Executive Orchestrator evaluated user input intent: '{intent}'",
+            "timestamp": time.time(),
+        }
+
+        if intent == "DIRECT_CONVERSATION":
+            async for event in self.execute_direct_conversation_flow(
+                query, chat_history
+            ):
+                yield event
+        elif intent == "DOCUMENT_INGESTION":
+            title = f"Ingested Document {uuid.uuid4().hex[:6]}"
+            async for event in self.execute_ingestion_flow(title, query):
+                yield event
+        else:
+            async for event in self.execute_retrieval_flow(query):
+                yield event
+
+    async def execute_direct_conversation_flow(
+        self, query: str, chat_history: Optional[List[Dict[str, str]]] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Direct conversational response without graph traversal overhead."""
+        yield {
+            "event": "conversation_start",
+            "message": "Executive Orchestrator responding directly via conversational mode...",
+            "timestamp": time.time(),
+        }
+
+        messages = [
+            {
+                "role": "system",
+                "content": "You are Executive Orchestrator, an intelligent research assistant for Graph-Memex. Answer directly, concisely, and helpfully.",
+            }
+        ]
+        if chat_history:
+            messages.extend(chat_history)
+        messages.append({"role": "user", "content": query})
+
+        direct_response = llm_gateway.generate_chat_completion(messages)
+
+        yield {
+            "event": "conversation_complete",
+            "final_answer": direct_response,
+            "timestamp": time.time(),
+        }
 
     async def execute_retrieval_flow(
         self, query: str
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """User Flow 2: Multi-Persona Parallel Debate Retrieval over Graph & Macro Documents."""
+        """Multi-Persona Parallel Debate Retrieval over dynamic DB Macro Documents."""
         yield {
             "event": "orchestrator_start",
             "message": f"Executive Orchestrator initiating multi-department retrieval for query: '{query}'",
             "timestamp": time.time(),
         }
 
-        # Dynamically load departments from macro documents stored in DB
+        # Dynamically load active departments from macro documents stored in DB
         macros = db_engine.get_macros()
-        if macros:
-            active_departments = [
-                DepartmentPersonaAgent(m.department_name, m.department_id)
-                for m in macros
-            ]
-        else:
-            active_departments = [
-                DepartmentPersonaAgent(
-                    "Department of Latent World Models & Architectures",
-                    "dept_world_models",
-                ),
-                DepartmentPersonaAgent(
-                    "Department of Planning & Policy Control", "dept_policy_control"
-                ),
-                DepartmentPersonaAgent(
-                    "Department of Perceptual Representations & Sensors", "dept_sensors"
-                ),
-            ]
+        active_departments = (
+            [DepartmentPersonaAgent(m.department_name, m.department_id) for m in macros]
+            if macros
+            else []
+        )
+
+        if not active_departments:
+            yield {
+                "event": "no_personas_active",
+                "message": "No department communities exist in database yet. Falling back to direct executive response.",
+                "timestamp": time.time(),
+            }
+            async for event in self.execute_direct_conversation_flow(query):
+                yield event
+            return
 
         department_findings = []
         for dept in active_departments:
-            # Emit SSE event for persona starting traversal
             yield {
                 "event": "persona_traversal_start",
                 "department_id": dept.department_id,
@@ -76,7 +184,6 @@ class ExecutiveOrchestrator:
             finding = dept.explore_and_debate_retrieval(query)
             department_findings.append(finding)
 
-            # Emit SSE node highlight event for visual WebGL canvas
             yield {
                 "event": "persona_traversal_active",
                 "department_id": dept.department_id,
@@ -86,7 +193,6 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
-        # Executive synthesis over department findings
         synthesis_prompt = f"Executive Orchestrator: Synthesize findings from department personas into a final cohesive response for query: '{query}'.\nDepartment Findings: {json.dumps(department_findings)}"
         messages = [
             {
@@ -107,11 +213,10 @@ class ExecutiveOrchestrator:
     async def execute_ingestion_flow(
         self, title: str, raw_text: str, source_url: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """User Flow 1: Staging -> Retrieval Debate -> Concept Evolution -> Passage Pointer Storage -> Macro Patch."""
+        """Staging -> Dynamic Ingestion Debate -> Concept Evolution -> Passage Storage -> Macro Patch."""
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
         passage_id = f"pass_{uuid.uuid4().hex[:8]}"
 
-        # Step 1: Write raw document to disk and record metadata
         doc_rec = DocumentRecord(
             _id=doc_id,
             title=title,
@@ -120,7 +225,6 @@ class ExecutiveOrchestrator:
         )
         db_engine.upsert_document(doc_rec)
 
-        # Step 2: Create Out-Of-Graph Passage Record
         pass_rec = PassageRecord(
             _id=passage_id, doc_id=doc_id, chunk_index=0, text_content=raw_text
         )
@@ -134,18 +238,15 @@ class ExecutiveOrchestrator:
             "timestamp": time.time(),
         }
 
-        # Step 3: Multi-Persona Ingestion Debate for Concept Extraction & Superseding
         candidate_concepts = [
             {"title": f"{title} Dynamic Concept", "description": raw_text[:300]}
         ]
 
         delta_proposals = []
         macros = db_engine.get_macros()
-        active_departments = (
-            [DepartmentPersonaAgent(m.department_name, m.department_id) for m in macros]
-            if macros
-            else self.departments
-        )
+        active_departments = [
+            DepartmentPersonaAgent(m.department_name, m.department_id) for m in macros
+        ]
         for dept in active_departments:
             yield {
                 "event": "persona_ingestion_debate",
@@ -157,7 +258,6 @@ class ExecutiveOrchestrator:
             prop = dept.debate_ingestion_deltas(raw_text, candidate_concepts)
             delta_proposals.append(prop)
 
-        # Step 4: Emit Human-In-The-Loop Prompt Event (if clarification needed)
         yield {
             "event": "human_in_the_loop_prompt",
             "prompt_question": f"Should concept '{title}' supersede older pixel-space world model concepts or merge as a sub-concept?",
@@ -169,7 +269,6 @@ class ExecutiveOrchestrator:
             "timestamp": time.time(),
         }
 
-        # Step 5: Evolve Graph Nodes (Add concept with passage pointers)
         concept_id = f"concept_{title.lower().replace(' ', '_')}"
         new_node = GraphNode(
             _id=concept_id,
@@ -180,7 +279,6 @@ class ExecutiveOrchestrator:
         )
         db_engine.upsert_node(new_node)
 
-        # Connect edge from Root Concept to Action Planning
         edge_id = f"edge_{concept_id}_to_mpc"
         new_edge = GraphEdge(
             _id=edge_id,
@@ -193,7 +291,6 @@ class ExecutiveOrchestrator:
         )
         db_engine.upsert_edge(new_edge)
 
-        # Step 6: Trigger Delta Macro Document Update via Graph Analytics
         graph_analytics.update_macro_documents()
 
         yield {

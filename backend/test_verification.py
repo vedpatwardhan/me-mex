@@ -45,7 +45,33 @@ async def test_backend_verification():
             f"  - Department Macro: '{m.department_name}' | Hubs: {m.hub_concept_ids}"
         )
 
-    # 3. Test Retrieval Stream (User Flow 2)
+    # 3. Test Intent Router & Direct Conversation Flow
+    print("\n--- Testing Executive Orchestrator Intent Router ---")
+    chat_intent = orchestrator.classify_intent("Hello, how are you?")
+    print(f"✓ Classified 'Hello, how are you?' intent: {chat_intent}")
+    assert chat_intent == "DIRECT_CONVERSATION"
+
+    retrieval_intent = orchestrator.classify_intent(
+        "Explain latent world models synthesis"
+    )
+    print(f"✓ Classified research prompt intent: {retrieval_intent}")
+    assert retrieval_intent == "GRAPH_RETRIEVAL"
+
+    ingest_intent = orchestrator.classify_intent(
+        "https://arxiv.org/abs/2401.00001 paper abstract"
+    )
+    print(f"✓ Classified URL prompt intent: {ingest_intent}")
+    assert ingest_intent == "DOCUMENT_INGESTION"
+
+    print("\n--- Testing Unified Process User Message Stream ---")
+    async for event in orchestrator.process_user_message("What can you help me with?"):
+        evt_type = event.get("event")
+        if evt_type == "orchestrator_intent_classified":
+            print(f"  [SSE Event] Intent: {event['intent']}")
+        elif evt_type == "conversation_complete":
+            print(f"  [SSE Event] Direct Response: {event['final_answer'][:100]}...")
+
+    # 4. Test Retrieval Stream (User Flow 2)
     print("\n--- Testing Multi-Persona Retrieval Flow (User Flow 2) ---")
     async for event in orchestrator.execute_retrieval_flow(
         "latent world models planning"
@@ -53,15 +79,15 @@ async def test_backend_verification():
         evt_type = event.get("event")
         if evt_type == "persona_traversal_active":
             dept = event.get("department_name")
-            color = event.get("color")
+            dept_id = event.get("department_id")
             traversed = event.get("traversing_node_ids")
-            print(f"  [SSE Event] {dept} ({color}) traversing nodes -> {traversed}")
+            print(f"  [SSE Event] {dept} ({dept_id}) traversing nodes -> {traversed}")
         elif evt_type == "retrieval_complete":
             print(
                 f"  [SSE Event] Retrieval Complete!\nSynthesis: {event['final_answer'][:120]}..."
             )
 
-    # 4. Test Ingestion Stream (User Flow 1)
+    # 5. Test Ingestion Stream (User Flow 1)
     print("\n--- Testing Document Ingestion & Delta Patch Flow (User Flow 1) ---")
     title = "LeWM: Latent Efficient World Models for MPC"
     text = "LeWM introduces a joint-embedding predictive architecture for 100x faster trajectory rollouts in latent state representation."

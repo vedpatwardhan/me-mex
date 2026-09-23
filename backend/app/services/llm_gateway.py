@@ -48,7 +48,43 @@ class LLMGateway:
 
     def _rule_based_fallback(self, messages: List[Dict[str, str]]) -> str:
         """Synthetic structured responses for local testing when Colab vLLM server is disconnected."""
-        last_prompt = messages[-1]["content"].lower() if messages else ""
+        user_msg = next(
+            (m["content"] for m in reversed(messages) if m.get("role") == "user"), ""
+        )
+        last_prompt = user_msg.lower()
+
+        if "intent" in last_prompt or "classify" in last_prompt:
+            # Extract actual query string from user input prompt wrapper if present
+            query_part = (
+                last_prompt.split('user input: "')[-1].split('"')[0]
+                if 'user input: "' in last_prompt
+                else last_prompt
+            )
+            if (
+                "http" in query_part
+                or "arxiv" in query_part
+                or "ingest" in query_part
+                or "paper abstract" in query_part
+            ):
+                return json.dumps({"intent": "DOCUMENT_INGESTION"})
+            elif any(
+                k in query_part
+                for k in [
+                    "compare",
+                    "synthesize",
+                    "explain",
+                    "concept",
+                    "department",
+                    "graph",
+                    "paper",
+                    "models",
+                    "retrieval",
+                    "search",
+                    "latent",
+                ]
+            ):
+                return json.dumps({"intent": "GRAPH_RETRIEVAL"})
+            return json.dumps({"intent": "DIRECT_CONVERSATION"})
 
         if "department" in last_prompt or "community" in last_prompt:
             return json.dumps(
