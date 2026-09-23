@@ -282,8 +282,8 @@ export const useMemexStore = create<MemexState>((set, get) => ({
       source: sourceId,
       target: targetId,
       source_node_id: sourceId,
-      target_node_id: targetId,
-      edge_type: edgeType as any || 'BUILDS_UPON',
+      is_directional: true,
+      text_body: 'User defined relationship link',
       weight: 1.0,
       project_ids: ['global', get().activeProjectId],
       created_at: new Date().toISOString()
