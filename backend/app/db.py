@@ -1,7 +1,20 @@
 import os
 import time
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
+from app.models import (
+    NodeType,
+    GraphNode,
+    GraphEdge,
+    DocumentRecord,
+    PassageRecord,
+    MacroDocumentRecord,
+    StagingRecord,
+    ProjectWorkspace,
+    AgentProposal,
+    IntakeRequest,
+    ReportRequest,
+    ReportResponse,
+)
 
 # Try PyMongo import, fall back gracefully if MongoDB server is offline/not installed
 try:
@@ -16,67 +29,9 @@ except ImportError:
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "graph_memex_db")
 
-
-class DocumentRecord(BaseModel):
-    id: str = Field(alias="_id")
-    theme_id: str = "vla_research"
-    title: str
-    file_path: str
-    media_type: str = "PAPER"  # "PAPER" | "BLOG" | "TRANSCRIPT" | "CODE"
-    source_url: Optional[str] = None
-    ingested_at: float = Field(default_factory=time.time)
-
-
-class PassageRecord(BaseModel):
-    id: str = Field(alias="_id")
-    doc_id: str
-    chunk_index: int
-    text_content: str
-    embedding_vector: Optional[List[float]] = None
-    created_at: float = Field(default_factory=time.time)
-
-
-class GraphNodeRecord(BaseModel):
-    id: str = Field(alias="_id")
-    theme_id: str = "vla_research"
-    node_class: str = "CONCEPT"  # "ROOT_MEDIA" | "CONCEPT"
-    title: str
-    text_body: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    embedding_vector: Optional[List[float]] = None
-    passage_pointers: List[str] = Field(default_factory=list)  # Passage IDs
-    updated_at: float = Field(default_factory=time.time)
-
-
-class ConnectionEdgeRecord(BaseModel):
-    id: str = Field(alias="_id")
-    theme_id: str = "vla_research"
-    source_id: str
-    target_id: str
-    is_directional: bool = True  # Set to False for symmetric parallel concepts
-    text_body: str  # Natural language explanation of relationship
-    weight: float = 1.0  # Decays to 0.3 when superseded
-    status: str = "PRIMARY_ACTIVE"  # "PRIMARY_ACTIVE" | "HISTORICAL_SUPERSEDED"
-    created_at: float = Field(default_factory=time.time)
-
-
-class MacroDocumentRecord(BaseModel):
-    id: str = Field(alias="_id")
-    theme_id: str = "vla_research"
-    department_name: str
-    hub_concept_ids: List[str] = Field(default_factory=list)
-    summary_text: str
-    last_updated: float = Field(default_factory=time.time)
-
-
-class StagingRecord(BaseModel):
-    id: str = Field(alias="_id")
-    theme_id: str = "vla_research"
-    title: str
-    raw_content: str
-    source_type: str = "url"
-    status: str = "STAGED"  # "STAGED" | "INTEGRATED" | "REJECTED"
-    extracted_candidate_concepts: List[str] = Field(default_factory=list)
+# Aliases for backward compatibility
+GraphNodeRecord = GraphNode
+ConnectionEdgeRecord = GraphEdge
 
 
 class GraphMemexDatabase:

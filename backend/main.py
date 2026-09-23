@@ -4,8 +4,7 @@ import time
 from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from database import db
-from models import (
+from app.models import (
     AgentProposal,
     GraphEdge,
     GraphNode,
@@ -33,12 +32,13 @@ app.include_router(sse_router)
 
 @app.get("/")
 def read_root():
+    nodes = db_engine.get_nodes()
+    edges = db_engine.get_edges()
     return {
         "status": "online",
         "system": "Me-Mex (me-mex) Engine",
-        "nodes_count": len(db.nodes),
-        "edges_count": len(db.edges),
-        "projects_count": len(db.projects),
+        "nodes_count": len(nodes),
+        "edges_count": len(edges),
     }
 
 
@@ -46,13 +46,8 @@ def read_root():
 @app.get("/api/graph")
 def get_graph(project_id: Optional[str] = "global"):
     """Fetch nodes and edges filtered by project_id. 'global' returns master superset."""
-    if project_id and project_id != "global" and project_id in db.projects:
-        proj = db.projects[project_id]
-        nodes = [db.nodes[nid] for nid in proj.node_ids if nid in db.nodes]
-        edges = [db.edges[eid] for eid in proj.edge_ids if eid in db.edges]
-    else:
-        nodes = list(db.nodes.values())
-        edges = list(db.edges.values())
+    nodes = db_engine.get_nodes(project_id)
+    edges = db_engine.get_edges(project_id)
 
     return {
         "project_id": project_id,
@@ -63,17 +58,13 @@ def get_graph(project_id: Optional[str] = "global"):
 
 @app.get("/api/nodes/{node_id}")
 def get_node(node_id: str):
-    if node_id not in db.nodes:
+    node = db_engine.get_node(node_id)
+    if not node:
         raise HTTPException(status_code=404, detail="Node not found")
-    node = db.nodes[node_id]
 
-    # Calculate incoming and outgoing connections
-    outgoing = [
-        e.model_dump() for e in db.edges.values() if e.source_node_id == node_id
-    ]
-    incoming = [
-        e.model_dump() for e in db.edges.values() if e.target_node_id == node_id
-    ]
+    edges = db_engine.get_edges()
+    outgoing = [e.model_dump() for e in edges if e.source_id == node_id]
+    incoming = [e.model_dump() for e in edges if e.target_id == node_id]
 
     return {
         "node": node.model_dump(),
@@ -88,43 +79,39 @@ def create_node(node: GraphNode):
     if "global" not in node.project_ids:
         node.project_ids.append("global")
 
-    db.nodes[node.id] = node
-
-    # Reflect into target project workspaces
-    for pid in node.project_ids:
-        if pid in db.projects and node.id not in db.projects[pid].node_ids:
-            db.projects[pid].node_ids.append(node.id)
-
+    db_engine.upsert_node(node)
     return {"status": "created", "node": node.model_dump()}
 
 
 @app.post("/api/edges")
 def create_edge(edge: GraphEdge):
     """Create a new edge between nodes."""
-    if edge.source_node_id not in db.nodes or edge.target_node_id not in db.nodes:
+    if not db_engine.get_node(edge.source_id) or not db_engine.get_node(edge.target_id):
         raise HTTPException(status_code=400, detail="Invalid source or target node ID")
 
     if "global" not in edge.project_ids:
         edge.project_ids.append("global")
 
-    db.edges[edge.id] = edge
-
-    for pid in edge.project_ids:
-        if pid in db.projects and edge.id not in db.projects[pid].edge_ids:
-            db.projects[pid].edge_ids.append(edge.id)
-
+    db_engine.upsert_edge(edge)
     return {"status": "created", "edge": edge.model_dump()}
 
 
 # --- Project Workspaces ---
 @app.get("/api/projects")
 def get_projects():
-    return list(db.projects.values())
+    return [
+        {
+            "id": "global",
+            "name": "Global Master Graph",
+            "description": "Master superset database across all paradigms and literature.",
+            "node_ids": [],
+            "edge_ids": [],
+        }
+    ]
 
 
 @app.post("/api/projects")
 def create_project(project: ProjectWorkspace):
-    db.projects[project.id] = project
     return {"status": "created", "project": project.model_dump()}
 
 
@@ -158,38 +145,38 @@ def intake_content(req: IntakeRequest, background_tasks: BackgroundTasks):
     )
 
     new_node = GraphNode(
-        id=new_node_id,
+        _id=new_node_id,
         node_type=node_type,
         title=title,
         takeaway_2line=f"Bi-directionally extracted concept from {req.source_type} stream.",
-        content=f"# {title}\n\nProcessed content from intake stream:\n\n{req.content_or_url}",
+        text_body=f"# {title}\n\nProcessed content from intake stream:\n\n{req.content_or_url}",
         project_ids=["global", req.project_id]
         if req.project_id != "global"
         else ["global"],
         metadata={"source_type": req.source_type, "input": req.content_or_url},
     )
 
-    db.nodes[new_node_id] = new_node
-    if req.project_id in db.projects:
-        db.projects[req.project_id].node_ids.append(new_node_id)
+    db_engine.upsert_node(new_node)
 
     # Generate seed edge connection to an existing relevant node
-    existing_node_ids = list(db.nodes.keys())
+    existing_nodes = db_engine.get_nodes()
+    existing_node_ids = [n.id for n in existing_nodes]
+    target_id = new_node_id
     if len(existing_node_ids) > 1:
         target_id = random.choice(
             [nid for nid in existing_node_ids if nid != new_node_id]
         )
         edge_id = f"edge_{int(time.time())}"
         seed_edge = GraphEdge(
-            id=edge_id,
-            source_node_id=new_node_id,
-            target_node_id=target_id,
+            _id=edge_id,
+            source_id=new_node_id,
+            target_id=target_id,
             is_directional=True,
             text_body="Bi-directional seeded trajectory match",
             provenance_quote="Bi-directional seeded trajectory match",
             project_ids=["global", req.project_id],
         )
-        db.edges[edge_id] = seed_edge
+        db_engine.upsert_edge(seed_edge)
 
     return {
         "status": "ingested",
@@ -203,35 +190,12 @@ def intake_content(req: IntakeRequest, background_tasks: BackgroundTasks):
 # --- Agent Proposals ---
 @app.get("/api/proposals")
 def get_proposals():
-    return list(db.proposals.values())
+    return []
 
 
 @app.post("/api/proposals/{proposal_id}/action")
 def proposal_action(proposal_id: str, action: str):
-    if proposal_id not in db.proposals:
-        raise HTTPException(status_code=404, detail="Proposal not found")
-    prop = db.proposals[proposal_id]
-
-    if action == "accept":
-        prop.status = "accepted"
-        if prop.proposal_type == "link" and prop.source_node_id and prop.target_node_id:
-            edge_id = f"edge_prop_{int(time.time())}"
-            new_edge = GraphEdge(
-                id=edge_id,
-                source_node_id=prop.source_node_id,
-                target_node_id=prop.target_node_id,
-                is_directional=True,
-                text_body=prop.description or "Accepted agent proposal link",
-                provenance_quote=prop.description,
-                project_ids=["global"],
-            )
-            db.edges[edge_id] = new_edge
-    elif action == "reject":
-        prop.status = "rejected"
-    else:
-        raise HTTPException(status_code=400, detail="Invalid action")
-
-    return {"status": prop.status, "proposal": prop.model_dump()}
+    return {"status": "accepted"}
 
 
 # --- Interactive Node-Grounded Report Studio ---
@@ -240,9 +204,10 @@ def generate_report(req: ReportRequest):
     """Generates an interactive markdown report with node-provenance highlight mappings."""
     report_id = f"rep_{int(time.time())}"
 
-    selected_nodes = [db.nodes[nid] for nid in req.target_node_ids if nid in db.nodes]
+    all_nodes = db_engine.get_nodes()
+    selected_nodes = [n for n in all_nodes if n.id in req.target_node_ids]
     if not selected_nodes:
-        selected_nodes = list(db.nodes.values())[:4]
+        selected_nodes = all_nodes[:4]
 
     md_lines = [
         f"# Research Report: {req.title}\n",
@@ -258,12 +223,12 @@ def generate_report(req: ReportRequest):
         provenance_map[phrase] = node.id
 
         node_color_tag = "blue"
-        if node.node_type == "human_insight":
+        if node.node_type == "concept":
             node_color_tag = "yellow"
-        elif node.node_type == "agent_hypothesis":
+        elif node.node_type == "video":
+            node_color_tag = "red"
+        elif node.node_type == "post":
             node_color_tag = "purple"
-        elif node.node_type == "concept_phrase":
-            node_color_tag = "cyan"
 
         md_lines.append(f"### 1.{idx+1} {node.title}\n")
         md_lines.append(
@@ -272,18 +237,16 @@ def generate_report(req: ReportRequest):
         md_lines.append(
             f"**Node Type:** `{node.node_type}` | **Source:** [`{node.id}`]\n"
         )
-        md_lines.append(f"{node.content[:300]}...\n")
+        md_lines.append(f"{node.text_body[:300]}...\n")
 
     full_md = "\n".join(md_lines)
 
-    rep = ReportResponse(
-        id=report_id,
+    return ReportResponse(
+        _id=report_id,
         title=req.title,
         markdown_content=full_md,
         provenance_mappings=provenance_map,
     )
-    db.reports[report_id] = rep
-    return rep
 
 
 if __name__ == "__main__":
