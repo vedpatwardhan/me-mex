@@ -3,11 +3,11 @@ from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 NodeType = Literal[
-    "external_source",  # Blue: PDFs, papers, web pages, tweets
-    "human_insight",  # Yellow: Voice notes, personal thoughts
-    "agent_hypothesis",  # Purple: Co-Scientist generated bridge nodes
-    "concept_phrase",  # Cyan: HippoRAG 2 phrase/concept node
-    "falsified_path",  # Red: Strikethrough dead-ends
+    "paper",  # Blue: Academic research papers & preprints
+    "blog",  # Green: Technical blog posts & web articles
+    "video",  # Red: YouTube video transcripts & lectures
+    "post",  # Purple: Social posts, tweets, forum updates, short notes
+    "concept",  # Yellow: Atomic self-evolving Zettelkasten concept nodes
 ]
 
 EdgeType = Literal[

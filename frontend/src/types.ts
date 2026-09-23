@@ -1,9 +1,9 @@
 export type NodeType =
-  | 'external_source'
-  | 'human_insight'
-  | 'agent_hypothesis'
-  | 'concept_phrase'
-  | 'falsified_path';
+  | 'paper'
+  | 'blog'
+  | 'video'
+  | 'post'
+  | 'concept';
 
 export type EdgeType =
   | 'BUILDS_UPON'

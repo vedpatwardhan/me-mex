@@ -24,16 +24,16 @@ export const RightDrawer: React.FC = () => {
 
   const getNodeTypeBadge = () => {
     switch (selectedNode.node_type) {
-      case 'external_source':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-sky-950/70 text-sky-400 border border-sky-500/40 shadow-sm">External Source (Paper/PDF)</span>;
-      case 'human_insight':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-amber-950/70 text-amber-400 border border-amber-500/40 shadow-sm">Human Voice Insight</span>;
-      case 'agent_hypothesis':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-purple-950/70 text-purple-400 border border-purple-500/40 shadow-sm">Co-Scientist Hypothesis</span>;
-      case 'concept_phrase':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-teal-950/70 text-teal-400 border border-teal-500/40 shadow-sm">HippoRAG 2 Concept</span>;
-      case 'falsified_path':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-red-950/70 text-red-400 border border-red-500/40 shadow-sm">Falsified Path</span>;
+      case 'paper':
+        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-sky-950/70 text-sky-400 border border-sky-500/40 shadow-sm">Research Paper</span>;
+      case 'blog':
+        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-emerald-950/70 text-emerald-400 border border-emerald-500/40 shadow-sm">Blog Article</span>;
+      case 'video':
+        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-red-950/70 text-red-400 border border-red-500/40 shadow-sm">Video Transcript</span>;
+      case 'post':
+        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-purple-950/70 text-purple-400 border border-purple-500/40 shadow-sm">Social / Voice Post</span>;
+      case 'concept':
+        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-amber-950/70 text-amber-400 border border-amber-500/40 shadow-sm">Atomic Concept</span>;
       default:
         return null;
     }

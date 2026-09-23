@@ -51,7 +51,7 @@ class MemexDatabase:
         initial_nodes = [
             GraphNode(
                 id="node_1",
-                node_type="external_source",
+                node_type="paper",
                 title="Google AI Co-Scientist Paper (2026)",
                 takeaway_2line="Automated hypothesis evolution system scaling test-time compute through pairwise Elo tournaments and adversarial falsification.",
                 content="# Towards an AI Co-Scientist\n\nGoogle DeepMind / Google Cloud AI.\n\nKey Mechanisms:\n- Iterative Assumption Identification\n- Pairwise Elo Tournaments\n- Falsification Reflection Agent\n- Meta-Review Compaction",
@@ -64,7 +64,7 @@ class MemexDatabase:
             ),
             GraphNode(
                 id="node_2",
-                node_type="external_source",
+                node_type="paper",
                 title="HippoRAG 2: Dual-Node Associative Recall",
                 takeaway_2line="Decouples passage chunks from phrase nodes, running Personalized PageRank over memory for multi-hop retrieval.",
                 content="# HippoRAG 2: Memory Graph Traversal\n\nSeparates raw text passages from conceptual phrase nodes to enable mathematical probability propagation across subgraphs without blowing up context windows.",
@@ -77,7 +77,7 @@ class MemexDatabase:
             ),
             GraphNode(
                 id="node_3",
-                node_type="external_source",
+                node_type="paper",
                 title="PhysCtrl: Physics-Based Humanoid Control",
                 takeaway_2line="Integrates skeletal joint priors into model predictive control for dynamic contact stabilization.",
                 content="# PhysCtrl Skeletal Priors\n\nDemonstrates that enforcing biomechanical joint limits reduces MPC trajectory search space by 40%.",
@@ -90,7 +90,7 @@ class MemexDatabase:
             ),
             GraphNode(
                 id="node_4",
-                node_type="human_insight",
+                node_type="post",
                 title="Voice Note: Joint Limit Loss Injection",
                 takeaway_2line="Personal voice epiphany on injecting skeletal kinematic loss directly into latent flow steering vectors.",
                 content="## Voice Transcript (Recorded May 12, 2026)\n\n'Instead of running heavy IK solvers server-side during MPC execution, what if we condition the action denoiser directly on joint velocity constraints?'",
@@ -102,7 +102,7 @@ class MemexDatabase:
             ),
             GraphNode(
                 id="node_5",
-                node_type="agent_hypothesis",
+                node_type="concept",
                 title="Hypothesis #4: Flow Matching Action Denoiser + PPR Steering",
                 takeaway_2line="Combines HippoRAG 2 Personalized PageRank topological paths with Flow Matching parameter space steering.",
                 content="## Co-Scientist Synthesized Hypothesis #4\n\nBy propagating PageRank probabilities across the passage-phrase memory graph, we can dynamically steer the latent velocity field during action denoising.",
@@ -111,7 +111,7 @@ class MemexDatabase:
             ),
             GraphNode(
                 id="node_6",
-                node_type="concept_phrase",
+                node_type="concept",
                 title="Concept: Personalized PageRank (PPR)",
                 takeaway_2line="Graph traversal algorithm propagating random walk probability distribution from seed nodes.",
                 content="Math formulation: $p^{(t+1)} = (1-\\alpha) M p^{(t)} + \\alpha v_{seed}$",
@@ -120,7 +120,7 @@ class MemexDatabase:
             ),
             GraphNode(
                 id="node_7",
-                node_type="falsified_path",
+                node_type="concept",
                 title="Falsified: Naive Global Latent Search Without Constraints",
                 takeaway_2line="Direct unconstrained gradient descent on latent space collapsed trajectory stability under dynamic impacts.",
                 content="~~Falsified Path~~\n\nRefuted by Reflection Agent in Cycle 1 due to divergence during contact phase transitions.",
@@ -132,7 +132,7 @@ class MemexDatabase:
             ),
             GraphNode(
                 id="node_8",
-                node_type="external_source",
+                node_type="paper",
                 title="PaperQA2 Reranking Contextual Summarization",
                 takeaway_2line="Strips 90% of token noise by evaluating candidate chunks in micro-summarization passes.",
                 content="# PaperQA2 Context Reduction\n\nPrevents lost-in-the-middle context window degradation by extracting atomic evidence snippets.",
@@ -145,7 +145,7 @@ class MemexDatabase:
             ),
             GraphNode(
                 id="node_9",
-                node_type="human_insight",
+                node_type="post",
                 title="Voice Note: SPA Canvas Physics Preference",
                 takeaway_2line="User design rule: Decouple strong mesh links from weak category splines on react-force-graph.",
                 content="## Voice Transcript (Recorded Sep 21, 2026)\n\n'Ensure the canvas visually distinguishes hard mechanistic dependencies from soft thematic memberships so the graph doesn't look like a hairball.'",

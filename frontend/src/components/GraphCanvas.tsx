@@ -56,16 +56,16 @@ export const GraphCanvas: React.FC = () => {
   const getNodeColor = (node: GraphNode) => {
     if (traversingNodeIds.includes(node.id)) return '#fbbf24'; // Glowing Gold for active intake traversal
     switch (node.node_type) {
-      case 'external_source':
-        return '#38bdf8'; // Blue
-      case 'human_insight':
-        return '#fbbf24'; // Yellow
-      case 'agent_hypothesis':
+      case 'paper':
+        return '#38bdf8'; // Sky Blue
+      case 'blog':
+        return '#34d399'; // Emerald Green
+      case 'video':
+        return '#f87171'; // Coral / Red
+      case 'post':
         return '#c084fc'; // Purple
-      case 'concept_phrase':
-        return '#2dd4bf'; // Cyan
-      case 'falsified_path':
-        return '#f87171'; // Red
+      case 'concept':
+        return '#fbbf24'; // Amber Yellow
       default:
         return '#94a3b8';
     }
@@ -143,11 +143,11 @@ export const GraphCanvas: React.FC = () => {
 
           {[
             { id: 'all', label: 'All' },
-            { id: 'external_source', label: 'Papers', color: 'text-sky-400' },
-            { id: 'human_insight', label: 'Insights', color: 'text-amber-400' },
-            { id: 'agent_hypothesis', label: 'Hypotheses', color: 'text-purple-400' },
-            { id: 'concept_phrase', label: 'Concepts', color: 'text-teal-400' },
-            { id: 'falsified_path', label: 'Falsified', color: 'text-red-400' },
+            { id: 'paper', label: 'Papers', color: 'text-sky-400' },
+            { id: 'blog', label: 'Blogs', color: 'text-emerald-400' },
+            { id: 'video', label: 'Videos', color: 'text-red-400' },
+            { id: 'post', label: 'Posts', color: 'text-purple-400' },
+            { id: 'concept', label: 'Concepts', color: 'text-amber-400' },
           ].map((item) => (
             <button
               key={item.id}

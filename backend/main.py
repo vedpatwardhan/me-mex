@@ -135,11 +135,22 @@ def intake_content(req: IntakeRequest, background_tasks: BackgroundTasks):
     new_doc_id = f"doc_{int(time.time())}"
     new_node_id = f"node_{int(time.time())}"
 
-    node_type = "external_source"
-    if req.source_type == "voice":
-        node_type = "human_insight"
+    node_type = "post"
+    if req.source_type == "voice" or req.source_type == "text":
+        node_type = "post"
     elif req.source_type == "url":
-        node_type = "external_source"
+        if (
+            "arxiv.org" in req.content_or_url.lower()
+            or "paper" in req.content_or_url.lower()
+        ):
+            node_type = "paper"
+        elif (
+            "youtube.com" in req.content_or_url.lower()
+            or "youtu.be" in req.content_or_url.lower()
+        ):
+            node_type = "video"
+        else:
+            node_type = "blog"
 
     title = (
         req.title_hint
