@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 
 # Configuration for vLLM Server on Colab / Remote
 COLAB_VLLM_URL = os.getenv("COLAB_VLLM_URL", "http://localhost:8000/v1")
-MODEL_NAME = os.getenv("LLM_MODEL_NAME", "mistralai/Ministral-3b-instruct")
+MODEL_NAME = os.getenv("LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512")
 
 # Official Reasoning System Prompt Template for Ministral-3B-Reasoning
 OFFICIAL_REASONING_SYSTEM_PROMPT = """# HOW YOU SHOULD THINK AND ANSWER
@@ -30,7 +30,7 @@ class LLMGateway:
             "Bypass-Tunnel-Reminder": "true",
             "User-Agent": "Me-Mex-Client",
         }
-        self.client = httpx.Client(timeout=60.0, headers=headers)
+        self.client = httpx.Client(timeout=90.0, headers=headers)
 
     def prepare_reasoning_messages(
         self, messages: List[Dict[str, Any]]
@@ -78,7 +78,7 @@ class LLMGateway:
         self,
         messages: List[Dict[str, Any]],
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         top_p: float = 0.95,
     ) -> str:
         """Call vLLM OpenAI-compatible endpoint with automatic reasoning prompt formatting & output parsing."""
@@ -96,17 +96,32 @@ class LLMGateway:
             resp = self.client.post(url, json=payload)
             if resp.status_code == 200:
                 data = resp.json()
-                raw_content = data["choices"][0]["message"]["content"]
+                choice = data["choices"][0]
+                msg_obj = choice.get("message", {})
+
+                # Extract explicit vLLM reasoning fields if provided
+                vllm_reasoning = (
+                    msg_obj.get("reasoning_content") or msg_obj.get("reasoning") or ""
+                )
+                raw_content = msg_obj.get("content", "")
+
+                if vllm_reasoning:
+                    print(
+                        f"[LLMGateway] vLLM Dedicated Reasoning Tokens Generated: {len(vllm_reasoning)} chars"
+                    )
+                    return raw_content.strip()
+
                 parsed = self.parse_reasoning_output(raw_content)
                 if parsed["thinking"]:
                     print(
-                        f"[LLMGateway] Reasoning Tokens Generated: {len(parsed['thinking'])} chars"
+                        f"[LLMGateway] Parsed [THINK] Reasoning Tokens: {len(parsed['thinking'])} chars"
                     )
                 return parsed["final_response"]
             else:
                 print(
                     f"[LLMGateway] HTTP error {resp.status_code}: {resp.text}. Using synthetic fallback."
                 )
+                return self._rule_based_fallback(messages)
                 return self._rule_based_fallback(messages)
         except Exception as e:
             print(
