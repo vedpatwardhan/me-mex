@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useMemexStore } from '../store/useMemexStore';
+import { voiceService } from '../services/voiceService';
 import {
   Send,
   Mic,
@@ -54,13 +55,21 @@ export const LeftRail: React.FC = () => {
     }
   };
 
-  const handleVoiceRecord = () => {
+  const handleVoiceRecord = async () => {
     if (isVoiceListening) {
       setVoiceListening(false);
+      const transcribedText = await voiceService.stopRecordingAndTranscribe();
+      if (transcribedText.trim()) {
+        setInputVal(transcribedText);
+        sendMessage(transcribedText.trim(), true);
+      }
       return;
     }
-    setVoiceListening(true);
-    sendMessage('Joint limit loss should constrain latent flow field directly during action denoising.', true);
+
+    const started = await voiceService.startRecording();
+    if (started) {
+      setVoiceListening(true);
+    }
   };
 
   return (

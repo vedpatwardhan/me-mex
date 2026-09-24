@@ -14,7 +14,12 @@ class LLMGateway:
     def __init__(self, base_url: str = COLAB_VLLM_URL, model: str = MODEL_NAME):
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self.client = httpx.Client(timeout=30.0)
+        headers = {
+            "ngrok-skip-browser-warning": "true",
+            "Bypass-Tunnel-Reminder": "true",
+            "User-Agent": "Me-Mex-Client",
+        }
+        self.client = httpx.Client(timeout=45.0, headers=headers)
 
     def generate_chat_completion(
         self,

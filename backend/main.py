@@ -42,6 +42,45 @@ def read_root():
     }
 
 
+from pydantic import BaseModel
+from app.agents.orchestrator import orchestrator
+
+
+class ChatRequest(BaseModel):
+    query: str
+    project_id: Optional[str] = "global"
+    is_voice: Optional[bool] = False
+    chat_history: Optional[List[Dict[str, str]]] = None
+
+
+@app.post("/api/chat")
+async def chat_endpoint(req: ChatRequest):
+    """Unified Orchestrated Chat Endpoint: Classifies intent & queries Executive Orchestrator / vLLM."""
+    final_reply = ""
+    intent = "DIRECT_CONVERSATION"
+    department_findings = []
+
+    async for event in orchestrator.process_user_message(req.query, req.chat_history):
+        evt_type = event.get("event")
+        if evt_type == "orchestrator_intent_classified":
+            intent = event.get("intent", "DIRECT_CONVERSATION")
+        elif evt_type in ["conversation_complete", "retrieval_complete"]:
+            final_reply = event.get("final_answer", "")
+            department_findings = event.get("department_findings", [])
+        elif evt_type == "ingestion_complete":
+            final_reply = event.get("message", "")
+
+    if not final_reply:
+        final_reply = f"Processed {req.query}."
+
+    return {
+        "reply": final_reply,
+        "intent": intent,
+        "department_findings": department_findings,
+        "status": "success",
+    }
+
+
 # --- Graph Nodes & Edges Endpoints ---
 @app.get("/api/graph")
 def get_graph(project_id: Optional[str] = "global"):

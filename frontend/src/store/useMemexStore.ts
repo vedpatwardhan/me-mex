@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { AgentThinkingState, ChatMessage, GraphEdge, GraphNode, NodeType, ProjectWorkspace } from '../types';
+import { voiceService } from '../services/voiceService';
 
 interface MemexState {
   activeProjectId: string;
@@ -212,37 +213,41 @@ export const useMemexStore = create<MemexState>((set, get) => ({
         return;
       }
 
-      // Standard Chat / Insight Ingest
-      const intakeRes = await fetch('/api/intake', {
+      // Orchestrated Executive Chat
+      const chatRes = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          source_type: isVoice ? 'voice' : 'text',
-          content_or_url: text,
-          project_id: projId
+          query: text,
+          project_id: projId,
+          is_voice: isVoice
         })
       });
-      const intakeData = await intakeRes.json();
+      const chatData = await chatRes.json();
       await get().fetchGraphData();
 
+      const agentText = chatData.reply || `Processed ${isVoice ? 'spoken insight' : 'thought'}.`;
       const agentMsg: ChatMessage = {
         id: `agent_msg_${Date.now()}`,
         sender: 'agent',
-        text: `Processed ${isVoice ? 'spoken insight' : 'thought'}. Updated Master Superset & linked to project "${projId}".`,
+        text: agentText,
         timestamp: new Date().toISOString(),
-        grounded_node_ids: intakeData.seed_traversal || []
+        grounded_node_ids: []
       };
+
+      if (isVoice && agentText) {
+        voiceService.speakText(agentText);
+      }
 
       set({
         chatHistory: {
           ...get().chatHistory,
           [projId]: [...(get().chatHistory[projId] || []), agentMsg]
         },
-        selectedNodeId: intakeData.node?.id,
         thinkingState: {
           isThinking: false,
           currentAction: 'Idle',
-          visitedNodeIds: intakeData.seed_traversal || []
+          visitedNodeIds: []
         }
       });
     } catch (err) {
