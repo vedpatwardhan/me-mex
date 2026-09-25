@@ -1,5 +1,9 @@
-import { pipeline } from '@xenova/transformers';
+import { pipeline, env } from '@xenova/transformers';
 import { KokoroTTS } from 'kokoro-js';
+
+// Configure @xenova/transformers to load remote ONNX CDN models directly and avoid Vite HTML fallback interception
+env.allowLocalModels = false;
+env.useBrowserCache = true;
 
 class VoiceService {
   private transcriber: any = null;
