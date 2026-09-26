@@ -27,7 +27,7 @@ def search_arxiv_papers(query: str, max_results: int = 3) -> str:
 @mcp.tool()
 def fetch_web_article(url: str) -> str:
     """Fetch and extract clean plain-text markdown content from web page or blog URL."""
-    res = search_tools.fetch_web_page(url)
+    res = search_tools.fetch_document(url)
     return json.dumps(res, indent=2)
 
 

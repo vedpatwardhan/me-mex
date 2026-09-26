@@ -103,18 +103,10 @@ class ExecutiveOrchestrator:
                 enable_reasoning=False,
             )
             data = json.loads(res)
-            intent = str(data.get("intent", "DIRECT_CONVERSATION")).upper()
-            if intent not in [
-                "DIRECT_CONVERSATION",
-                "GRAPH_RETRIEVAL",
-                "DOCUMENT_INGESTION",
-            ]:
-                intent = "DIRECT_CONVERSATION"
             return {
-                "intent": intent,
+                "intent": data.get("intent"),
                 "source_url": data.get("source_url"),
-                "raw_text": data.get("raw_text")
-                or (query if intent == "DOCUMENT_INGESTION" else None),
+                "raw_text": data.get("raw_text"),
             }
         except Exception:
             return {
@@ -317,33 +309,28 @@ class ExecutiveOrchestrator:
             target_info = self._extract_ingestion_target(query, chat_history)
 
         source_url = target_info.get("source_url")
-        raw_payload = target_info.get("raw_text") or query
+        raw_payload = target_info.get("raw_text")
 
         # Step 1: Content Scraping & Title Extraction
         full_content = raw_payload
         title = None
 
         if source_url:
-            if "arxiv.org" in source_url.lower():
-                arxiv_res = self.tools.search_arxiv(source_url, max_results=1)
-                if arxiv_res:
-                    paper = arxiv_res[0]
-                    title = paper.get("title")
-                    full_content = f"# {title}\n\nAbstract: {paper.get('summary')}\n\nAuthors: {', '.join(paper.get('authors', []))}"
-            else:
-                web_res = self.tools.fetch_web_page(source_url)
-                if web_res.get("content"):
-                    full_content = web_res["content"]
-                    # Extract title from markdown header (# Title) if available
-                    for line in full_content.splitlines():
-                        if line.startswith("# "):
-                            title = line[2:].strip()
-                            break
+            doc_res = self.tools.fetch_document(source_url)
+            if doc_res.get("content"):
+                full_content = doc_res["content"]
+                # Extract title from first markdown header (# Title) if available
+                for line in full_content.splitlines():
+                    if line.startswith("# "):
+                        title = line[2:].strip()
+                        break
 
         if not title:
             # Fallback to deriving title from raw_text payload (first non-empty line or snippet)
             first_line = (
-                full_content.strip().splitlines()[0] if full_content.strip() else ""
+                full_content.strip().splitlines()[0]
+                if (full_content and full_content.strip())
+                else ""
             )
             if first_line and len(first_line) < 80:
                 title = first_line.lstrip("#").strip()
