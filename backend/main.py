@@ -1,20 +1,14 @@
-import asyncio
-import random
-import time
+import uuid
 from typing import Dict, List, Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
 from app.models import (
-    AgentProposal,
-    GraphEdge,
-    GraphNode,
-    IntakeRequest,
     ProjectWorkspace,
-    ReportRequest,
-    ReportResponse,
     ChatMessageRecord,
 )
-
+from app.agents.orchestrator import orchestrator
 from app.api.sse import router as sse_router
 from app.db import db_engine
 
@@ -43,10 +37,6 @@ def read_root():
     }
 
 
-from pydantic import BaseModel
-from app.agents.orchestrator import orchestrator
-
-
 class ChatRequest(BaseModel):
     query: str
     project_id: str = "global"
@@ -63,8 +53,6 @@ async def chat_endpoint(req: ChatRequest):
     touched_nodes = []
     tool_calls = []
     events_log = []
-
-    import uuid
 
     # Persist user chat message
     user_msg = ChatMessageRecord(
