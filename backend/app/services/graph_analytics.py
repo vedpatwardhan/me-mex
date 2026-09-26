@@ -10,11 +10,11 @@ class GraphAnalyticsWorker:
 
     @staticmethod
     def build_rustworkx_graph(
-        theme_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> Tuple[rx.PyDiGraph, Dict[int, str], Dict[str, int]]:
         """Construct a PyDiGraph from MongoDB/InMemory node and edge collections."""
-        nodes = db_engine.get_nodes(theme_id)
-        edges = db_engine.get_edges(theme_id)
+        nodes = db_engine.get_nodes(project_id)
+        edges = db_engine.get_edges(project_id)
 
         graph = rx.PyDiGraph()
         node_id_to_idx: Dict[str, int] = {}
@@ -43,9 +43,11 @@ class GraphAnalyticsWorker:
         return graph, idx_to_node_id, node_id_to_idx
 
     @staticmethod
-    def calculate_hub_centrality(theme_id: Optional[str] = None) -> Dict[str, float]:
+    def calculate_hub_centrality(project_id: Optional[str] = None) -> Dict[str, float]:
         """Compute degree/eigenvector centrality to rank high-level seed concept hubs."""
-        graph, idx_to_node_id, _ = GraphAnalyticsWorker.build_rustworkx_graph(theme_id)
+        graph, idx_to_node_id, _ = GraphAnalyticsWorker.build_rustworkx_graph(
+            project_id
+        )
         if len(graph) == 0:
             return {}
 
@@ -72,11 +74,11 @@ class GraphAnalyticsWorker:
 
     @staticmethod
     def partition_department_communities(
-        theme_id: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> Dict[str, List[str]]:
         """Partition concept nodes into 3-4 distinct Department Communities using NetworkX Louvain/Leiden graph clustering."""
-        nodes = db_engine.get_nodes(theme_id)
-        edges = db_engine.get_edges(theme_id)
+        nodes = db_engine.get_nodes(project_id)
+        edges = db_engine.get_edges(project_id)
 
         nx_graph = nx.Graph()
         for n in nodes:
@@ -98,7 +100,7 @@ class GraphAnalyticsWorker:
             communities = [all_nodes]
 
         department_map: Dict[str, List[str]] = {}
-        centralities = GraphAnalyticsWorker.calculate_hub_centrality(theme_id)
+        centralities = GraphAnalyticsWorker.calculate_hub_centrality(project_id)
 
         for idx, comm in enumerate(communities):
             comm_nodes = list(comm)
@@ -120,14 +122,14 @@ class GraphAnalyticsWorker:
 
     @staticmethod
     def get_top_concept_hubs(
-        theme_id: Optional[str] = None, top_k: int = 4
+        project_id: Optional[str] = None, top_k: int = 4
     ) -> List[Tuple[GraphNode, float]]:
         """Identify top K concept hub nodes using eigenvector/degree centrality."""
-        centralities = GraphAnalyticsWorker.calculate_hub_centrality(theme_id)
+        centralities = GraphAnalyticsWorker.calculate_hub_centrality(project_id)
         if not centralities:
             # Fallback to returning all existing concept nodes
             nodes = [
-                n for n in db_engine.get_nodes(theme_id) if n.node_type == "concept"
+                n for n in db_engine.get_nodes(project_id) if n.node_type == "concept"
             ]
             return [(n, 1.0) for n in nodes[:top_k]]
 

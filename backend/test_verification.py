@@ -62,6 +62,23 @@ async def test_backend_verification():
     print(f"✓ Classified URL prompt intent: {ingest_intent}")
     assert ingest_intent == "DOCUMENT_INGESTION"
 
+    # Test Intent classification with conversational chat_history
+    history = [
+        {
+            "role": "user",
+            "text": "I am studying model predictive control in world models.",
+        },
+        {
+            "role": "agent",
+            "text": "Here is an overview of MPC in latent vs pixel space.",
+        },
+    ]
+    followup_intent = orchestrator.classify_intent(
+        "Compare the two paradigms further", chat_history=history
+    )
+    print(f"✓ Classified follow-up intent with chat history: {followup_intent}")
+    assert followup_intent == "GRAPH_RETRIEVAL"
+
     print("\n--- Testing Unified Process User Message Stream ---")
     async for event in orchestrator.process_user_message("What can you help me with?"):
         evt_type = event.get("event")
@@ -147,8 +164,32 @@ async def test_backend_verification():
     assert not any(
         n.id == "concept_vla_flow" for n in other_nodes
     ), "Node should NOT exist in unrelated project graph!"
+    # Test Project Chat History Persistence & Isolation
+    from app.models import ChatMessageRecord
+
+    m1 = ChatMessageRecord(
+        _id="msg_vla_1",
+        project_id="proj_vla_research",
+        sender="user",
+        text="What is flow steering?",
+    )
+    m2 = ChatMessageRecord(
+        _id="msg_glob_1", project_id="global", sender="user", text="Global query"
+    )
+    db_engine.upsert_message(m1)
+    db_engine.upsert_message(m2)
+
+    vla_msgs = db_engine.get_chat_history("proj_vla_research")
+    glob_msgs = db_engine.get_chat_history("global")
+
+    assert any(
+        m.id == "msg_vla_1" for m in vla_msgs
+    ), "VLA chat message not found in project chat!"
+    assert not any(
+        m.id == "msg_vla_1" for m in glob_msgs
+    ), "VLA chat message leaked into global chat!"
     print(
-        "✓ Project Workspace bidirectional referencing & scoped graph isolation verified successfully."
+        "✓ Project-Scoped Chat History persistence and isolation verified successfully."
     )
 
     print("\n=== ALL GRAPH-MEMEX BACKEND CHECKS PASSED SUCCESSFULLY! ===")

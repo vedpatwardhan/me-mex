@@ -22,22 +22,57 @@ from app.tools.search_tools import search_tools
 class ExecutiveOrchestrator:
     """Executive Orchestrator agent acting as central intent classifier and coordinator for conversation, retrieval, and ingestion."""
 
-    def __init__(self):
-        pass
+    def __init__(self, top_k_hubs: int = 4):
+        self.db = db_engine
+        self.analytics = graph_analytics
+        self.llm = llm_gateway
+        self.tools = search_tools
+        self.top_k_hubs = top_k_hubs
+
+    def _extract_document_title(self, raw_text: str) -> str:
+        """Extract a concise 3-7 word document title using LLM gateway."""
+        prompt = f"Extract a concise title (3-7 words, plain text without quotes) for the following document text:\n\n{raw_text[:1000]}"
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a precise technical document title generator.",
+            },
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            title = self.llm.generate_chat_completion(messages).strip().strip('"')
+            if title and len(title) > 3:
+                return title
+        except Exception:
+            pass
+        return f"Ingested Document {uuid.uuid4().hex[:6]}"
 
     def classify_intent(
         self, query: str, chat_history: Optional[List[Dict[str, str]]] = None
     ) -> str:
-        """Classifies user input into DIRECT_CONVERSATION, GRAPH_RETRIEVAL, or DOCUMENT_INGESTION."""
+        """Classifies user input into DIRECT_CONVERSATION, GRAPH_RETRIEVAL, or DOCUMENT_INGESTION using query and recent chat history."""
+        history_context = ""
+        if chat_history:
+            formatted_turns = []
+            for msg in chat_history[-4:]:
+                role = msg.get("role", "user")
+                text = msg.get("content") or msg.get("text", "")
+                if text:
+                    formatted_turns.append(f"{role}: {text}")
+            if formatted_turns:
+                history_context = f"\nRecent Chat History:\n" + "\n".join(
+                    formatted_turns
+                )
+
         prompt = f"""
-        Analyze the following user input and classify its primary intent into exactly ONE category:
+        Analyze the user input in context of recent conversation history and classify its primary intent into exactly ONE category:
 
         Categories:
         - "DIRECT_CONVERSATION": Greetings, general questions, conversational follow-ups, formatting, math, or basic Q&A that does not require deep graph traversal or new document ingestion.
         - "GRAPH_RETRIEVAL": Domain research, cross-paper synthesis, concept exploration, or queries asking about concepts/departments in the system.
         - "DOCUMENT_INGESTION": Input containing URLs (e.g. arXiv, YouTube, blogs), raw document text, paper abstracts, or explicit instructions to ingest/store content.
-
-        User Input: "{query}"
+        {history_context}
+        Current User Input: "{query}"
 
         Return JSON format: {{"intent": "DIRECT_CONVERSATION" | "GRAPH_RETRIEVAL" | "DOCUMENT_INGESTION"}}
         """
@@ -49,7 +84,7 @@ class ExecutiveOrchestrator:
             {"role": "user", "content": prompt},
         ]
         try:
-            res = llm_gateway.generate_chat_completion(messages)
+            res = self.llm.generate_chat_completion(messages)
             data = json.loads(res)
             intent = data.get("intent", "DIRECT_CONVERSATION").upper()
             if intent in [
@@ -95,33 +130,46 @@ class ExecutiveOrchestrator:
         chat_history: Optional[List[Dict[str, str]]] = None,
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Central conversational entry point routing user input dynamically."""
-        intent = self.classify_intent(query, chat_history)
+        """Central conversational entry point routing user input dynamically with error handling."""
+        try:
+            intent = self.classify_intent(query, chat_history)
 
-        yield {
-            "event": "intent_classified",
-            "intent": intent,
-            "message": f"Executive Orchestrator evaluated user input intent: '{intent}'",
-            "timestamp": time.time(),
-        }
+            yield {
+                "event": "intent_classified",
+                "intent": intent,
+                "message": f"Executive Orchestrator evaluated user input intent: '{intent}'",
+                "timestamp": time.time(),
+            }
 
-        if intent == "DIRECT_CONVERSATION":
-            async for event in self.execute_direct_conversation_flow(
-                query, chat_history
-            ):
-                yield event
-        elif intent == "DOCUMENT_INGESTION":
-            title = f"Ingested Document {uuid.uuid4().hex[:6]}"
-            async for event in self.execute_ingestion_flow(
-                title, query, project_id=project_id
-            ):
-                yield event
-        else:
-            async for event in self.execute_retrieval_flow(query):
-                yield event
+            if intent == "DIRECT_CONVERSATION":
+                async for event in self.execute_direct_conversation_flow(
+                    query, chat_history, project_id=project_id
+                ):
+                    yield event
+            elif intent == "DOCUMENT_INGESTION":
+                title = self._extract_document_title(query)
+                async for event in self.execute_ingestion_flow(
+                    title, query, project_id=project_id
+                ):
+                    yield event
+            else:
+                async for event in self.execute_retrieval_flow(
+                    query, project_id=project_id
+                ):
+                    yield event
+        except Exception as e:
+            yield {
+                "event": "error",
+                "error": str(e),
+                "message": f"Orchestrator encountered an error: {str(e)}",
+                "timestamp": time.time(),
+            }
 
     async def execute_direct_conversation_flow(
-        self, query: str, chat_history: Optional[List[Dict[str, str]]] = None
+        self,
+        query: str,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Direct conversational response without graph traversal overhead."""
         yield {
@@ -140,7 +188,7 @@ class ExecutiveOrchestrator:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": query})
 
-        direct_response = llm_gateway.generate_chat_completion(messages)
+        direct_response = self.llm.generate_chat_completion(messages)
 
         yield {
             "event": "chat_complete",
@@ -149,17 +197,19 @@ class ExecutiveOrchestrator:
         }
 
     async def execute_retrieval_flow(
-        self, query: str
+        self, query: str, project_id: str = "global"
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Multi-Persona Parallel Retrieval over dynamically discovered Concept Hubs."""
+        """Multi-Persona Parallel Retrieval over project-scoped concept hubs."""
         yield {
             "event": "persona_traversal_start",
-            "message": f"Executive Orchestrator identifying dynamic concept hubs for query: '{query}'",
+            "message": f"Executive Orchestrator identifying dynamic concept hubs in project '{project_id}' for query: '{query}'",
             "timestamp": time.time(),
         }
 
-        # Dynamically discover top concept hubs via rustworkx centrality
-        top_hubs = graph_analytics.get_top_concept_hubs(top_k=4)
+        # Dynamically discover top concept hubs via rustworkx centrality in project scope
+        top_hubs = self.analytics.get_top_concept_hubs(
+            project_id=project_id, top_k=self.top_k_hubs
+        )
         active_departments = [
             DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
         ]
@@ -185,12 +235,12 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
-            finding = dept.explore_and_debate_retrieval(query)
+            finding = dept.explore_and_debate_retrieval(query, project_id=project_id)
             department_findings.append(finding)
 
             # Emit granular node_touched events as persona traverses adjacent nodes
             for node_id in finding["traversing_node_ids"]:
-                node = db_engine.get_node(node_id)
+                node = self.db.get_node(node_id)
                 yield {
                     "event": "node_touched",
                     "persona_id": dept.department_id,
@@ -227,7 +277,7 @@ class ExecutiveOrchestrator:
             },
             {"role": "user", "content": synthesis_prompt},
         ]
-        final_answer = llm_gateway.generate_chat_completion(messages)
+        final_answer = self.llm.generate_chat_completion(messages)
 
         yield {
             "event": "chat_complete",
@@ -261,12 +311,12 @@ class ExecutiveOrchestrator:
             file_path=f"me-mex/data/documents/{doc_id}.txt",
             source_url=source_url,
         )
-        db_engine.upsert_document(doc_rec)
+        self.db.upsert_document(doc_rec)
 
         pass_rec = PassageRecord(
             _id=passage_id, doc_id=doc_id, chunk_index=0, text_content=raw_text
         )
-        db_engine.upsert_passage(pass_rec)
+        self.db.upsert_passage(pass_rec)
 
         proj_list = ["global"]
         if project_id and project_id != "global":
@@ -282,10 +332,10 @@ class ExecutiveOrchestrator:
             project_ids=proj_list,
             metadata={"status": "PRIMARY_ACTIVE"},
         )
-        db_engine.upsert_node(new_node)
+        self.db.upsert_node(new_node)
 
         # Connect new node to existing concept hubs if available
-        top_hubs = graph_analytics.get_top_concept_hubs(top_k=1)
+        top_hubs = self.analytics.get_top_concept_hubs(project_id=project_id, top_k=1)
         if top_hubs:
             target_hub = top_hubs[0][0]
             edge_id = f"edge_{concept_id}_to_{target_hub.id}"
@@ -299,7 +349,7 @@ class ExecutiveOrchestrator:
                 project_ids=proj_list,
                 status="PRIMARY_ACTIVE",
             )
-            db_engine.upsert_edge(new_edge)
+            self.db.upsert_edge(new_edge)
 
             yield {
                 "event": "node_touched",

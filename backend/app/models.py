@@ -134,3 +134,14 @@ class ReportResponse(BaseModel):
     markdown_content: str
     provenance_mappings: Dict[str, str] = Field(default_factory=dict)
     created_at: float = Field(default_factory=time.time)
+
+
+# 8. Project-Scoped Chat Message Record
+class ChatMessageRecord(BaseModel):
+    id: str = Field(alias="_id")
+    project_id: str = "global"
+    sender: Literal["user", "agent"]
+    text: str
+    is_voice: bool = False
+    grounded_node_ids: List[str] = Field(default_factory=list)
+    created_at: float = Field(default_factory=time.time)

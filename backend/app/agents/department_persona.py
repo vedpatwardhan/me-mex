@@ -20,10 +20,10 @@ class DepartmentPersonaAgent:
         self.department_name = f"Persona Specialist: {hub_node.title}"
 
     def explore_and_debate_retrieval(
-        self, query: str, allow_web_search: bool = True
+        self, query: str, allow_web_search: bool = True, project_id: str = "global"
     ) -> Dict[str, Any]:
         """Explore hub node body, adjacent sub-graph edges, and optionally execute DuckDuckGo web search tool."""
-        all_edges = db_engine.get_edges()
+        all_edges = db_engine.get_edges(project_id)
         adjacent_edges = [
             e
             for e in all_edges

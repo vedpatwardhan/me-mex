@@ -9,6 +9,7 @@ from app.models import (
     MacroDocumentRecord,
     StagingRecord,
     ProjectWorkspace,
+    ChatMessageRecord,
 )
 
 # Try PyMongo import, fall back gracefully if MongoDB server is offline/not installed
@@ -40,6 +41,7 @@ class GraphMemexDatabase:
         self.mem_edges: Dict[str, GraphEdge] = {}
         self.mem_staging: Dict[str, StagingRecord] = {}
         self.mem_projects: Dict[str, ProjectWorkspace] = {}
+        self.mem_messages: Dict[str, ChatMessageRecord] = {}
 
         if HAS_PYMONGO:
             try:
@@ -267,6 +269,29 @@ class GraphMemexDatabase:
             return StagingRecord(**d) if d else None
         else:
             return self.mem_staging.get(stage_id)
+
+    # --- Chat Message Operations ---
+    def upsert_message(self, msg: ChatMessageRecord):
+        if self.use_mongo:
+            self.db.chat_messages.update_one(
+                {"_id": msg.id},
+                {"$set": msg.model_dump(by_alias=True)},
+                upsert=True,
+            )
+        else:
+            self.mem_messages[msg.id] = msg
+
+    def get_chat_history(self, project_id: str = "global") -> List[ChatMessageRecord]:
+        if self.use_mongo:
+            docs = list(
+                self.db.chat_messages.find({"project_id": project_id}).sort(
+                    "created_at", 1
+                )
+            )
+            return [ChatMessageRecord(**d) for d in docs]
+        else:
+            msgs = [m for m in self.mem_messages.values() if m.project_id == project_id]
+            return sorted(msgs, key=lambda m: m.created_at)
 
 
 # Global Database Singleton

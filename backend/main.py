@@ -12,6 +12,7 @@ from app.models import (
     ProjectWorkspace,
     ReportRequest,
     ReportResponse,
+    ChatMessageRecord,
 )
 
 from app.api.sse import router as sse_router
@@ -63,6 +64,18 @@ async def chat_endpoint(req: ChatRequest):
     tool_calls = []
     events_log = []
 
+    import uuid
+
+    # Persist user chat message
+    user_msg = ChatMessageRecord(
+        _id=f"msg_user_{uuid.uuid4().hex[:8]}",
+        project_id=req.project_id,
+        sender="user",
+        text=req.query,
+        is_voice=req.is_voice,
+    )
+    db_engine.upsert_message(user_msg)
+
     async for event in orchestrator.process_user_message(
         req.query, req.chat_history, project_id=req.project_id
     ):
@@ -95,6 +108,16 @@ async def chat_endpoint(req: ChatRequest):
 
     if not final_reply:
         final_reply = f"Processed {req.query}."
+
+    # Persist agent reply
+    agent_msg = ChatMessageRecord(
+        _id=f"msg_agent_{uuid.uuid4().hex[:8]}",
+        project_id=req.project_id,
+        sender="agent",
+        text=final_reply,
+        grounded_node_ids=[t["node_id"] for t in touched_nodes if t.get("node_id")],
+    )
+    db_engine.upsert_message(agent_msg)
 
     return {
         "reply": final_reply,
@@ -143,6 +166,13 @@ def get_node(node_id: str):
 def get_projects():
     projects = db_engine.get_projects()
     return [p.model_dump(by_alias=True) for p in projects]
+
+
+@app.get("/api/projects/{project_id}/chat")
+def get_project_chat(project_id: str):
+    """Retrieve project-isolated chat history."""
+    messages = db_engine.get_chat_history(project_id)
+    return [m.model_dump(by_alias=True) for m in messages]
 
 
 @app.post("/api/projects")
