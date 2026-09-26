@@ -13,16 +13,16 @@ class VoiceService {
   private isTranscriberLoading = false;
   private isTTSLoading = false;
 
-  /** Initialize Whisper-Tiny Speech-to-Text Pipeline */
+  /** Initialize Whisper-Base English Speech-to-Text Pipeline */
   async initSTT() {
     if (this.transcriber || this.isTranscriberLoading) return;
     this.isTranscriberLoading = true;
     try {
-      console.log('[VoiceService] Initializing Xenova/whisper-tiny pipeline...');
-      this.transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny');
-      console.log('[VoiceService] Whisper-tiny loaded successfully.');
+      console.log('[VoiceService] Initializing Xenova/whisper-base pipeline...');
+      this.transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base');
+      console.log('[VoiceService] Whisper-base loaded successfully.');
     } catch (err: any) {
-      console.error('[VoiceService] Failed to load whisper-tiny:', err);
+      console.error('[VoiceService] Failed to load whisper-base.en:', err);
     } finally {
       this.isTranscriberLoading = false;
     }
@@ -145,14 +145,8 @@ class VoiceService {
           }
 
           if (this.transcriber) {
-            console.log('[VoiceService] Transcribing audio with Whisper-tiny...');
-            const output = await this.transcriber(channelData, {
-              language: 'english',
-              task: 'transcribe',
-              return_timestamps: false,
-              chunk_length_s: 30,
-              stride_length_s: 5,
-            });
+            console.log('[VoiceService] Transcribing audio with Whisper-base...');
+            const output = await this.transcriber(channelData);
             console.log('[VoiceService] Raw Whisper output:', output);
             const text = typeof output === 'string' ? output : output.text || '';
             console.log('[VoiceService] Transcription:', text);
