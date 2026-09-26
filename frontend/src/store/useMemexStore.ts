@@ -132,124 +132,140 @@ export const useMemexStore = create<MemexState>((set, get) => ({
       },
       thinkingState: {
         isThinking: true,
-        currentAction: `Agent evaluating query in ${projId}...`,
+        currentAction: `Executive Orchestrator evaluating query in ${projId}...`,
         visitedNodeIds: []
       }
     });
 
     try {
-      const lower = text.toLowerCase();
+      const sseUrl = `/api/sse/chat?query=${encodeURIComponent(text)}`;
+      const eventSource = new EventSource(sseUrl);
+      const visitedIdsSet = new Set<string>();
 
-      // Check if user is asking for a report
-      if (lower.includes('report') || lower.includes('summary report')) {
-        const reportRes = await fetch('/api/reports/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: `Synthesis Report: ${projId === 'global' ? 'Master Superset' : projId}`,
-            target_node_ids: get().nodes.map(n => n.id),
-            project_id: projId
-          })
-        });
-        const reportData = await reportRes.json();
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const evtType = data.event;
 
-        const agentReportMsg: ChatMessage = {
-          id: `agent_msg_${Date.now()}`,
-          sender: 'agent',
-          text: `Prepared interactive synthesis report for scope "${projId}":`,
-          timestamp: new Date().toISOString(),
-          grounded_node_ids: Object.values(reportData.provenance_mappings || {}) as string[],
-          report: reportData
-        };
+          if (evtType === 'intent_classified') {
+            set({
+              thinkingState: {
+                ...get().thinkingState,
+                currentAction: `Intent classified: ${data.intent}`
+              }
+            });
+          } else if (evtType === 'node_touched') {
+            if (data.node_id) {
+              visitedIdsSet.add(data.node_id);
+              set({
+                thinkingState: {
+                  ...get().thinkingState,
+                  currentAction: `Concept '${data.node_title || data.node_id}' touched by ${data.persona_name}`,
+                  visitedNodeIds: Array.from(visitedIdsSet)
+                }
+              });
+            }
+          } else if (evtType === 'persona_traversal_active') {
+            if (data.traversing_node_ids) {
+              data.traversing_node_ids.forEach((id: string) => visitedIdsSet.add(id));
+              set({
+                thinkingState: {
+                  ...get().thinkingState,
+                  currentAction: `${data.department_name} traversing adjacent concepts...`,
+                  visitedNodeIds: Array.from(visitedIdsSet)
+                }
+              });
+            }
+          } else if (evtType === 'persona_web_search') {
+            set({
+              thinkingState: {
+                ...get().thinkingState,
+                currentAction: `Executing DuckDuckGo web search: ${data.search_query}`
+              }
+            });
+          } else if (evtType === 'orchestrator_tool_call') {
+            set({
+              thinkingState: {
+                ...get().thinkingState,
+                currentAction: `Invoking tool ${data.tool_name}...`
+              }
+            });
+          } else if (evtType === 'tool_complete') {
+            get().fetchGraphData();
+            if (data.concept_id) {
+              set({ selectedNodeId: data.concept_id });
+            }
+          } else if (evtType === 'chat_complete') {
+            eventSource.close();
+            const finalAnswer = data.final_answer || `Processed message.`;
+            const agentMsg: ChatMessage = {
+              id: `agent_msg_${Date.now()}`,
+              sender: 'agent',
+              text: finalAnswer,
+              timestamp: new Date().toISOString(),
+              grounded_node_ids: Array.from(visitedIdsSet)
+            };
 
-        set({
-          chatHistory: {
-            ...get().chatHistory,
-            [projId]: [...(get().chatHistory[projId] || []), agentReportMsg]
-          },
-          thinkingState: {
-            isThinking: false,
-            currentAction: 'Idle',
-            visitedNodeIds: Object.values(reportData.provenance_mappings || {}) as string[]
+            if (isVoice && finalAnswer) {
+              voiceService.speakText(finalAnswer);
+            }
+
+            set({
+              chatHistory: {
+                ...get().chatHistory,
+                [projId]: [...(get().chatHistory[projId] || []), agentMsg]
+              },
+              thinkingState: {
+                isThinking: false,
+                currentAction: 'Idle',
+                visitedNodeIds: Array.from(visitedIdsSet)
+              }
+            });
           }
-        });
-        return;
-      }
-
-      // Check if user is pasting a URL or intake item
-      if (lower.startsWith('http') || lower.includes('arxiv') || lower.includes('doi')) {
-        const intakeRes = await fetch('/api/intake', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            source_type: 'url',
-            content_or_url: text,
-            project_id: projId
-          })
-        });
-        const intakeData = await intakeRes.json();
-        await get().fetchGraphData();
-
-        const agentIntakeMsg: ChatMessage = {
-          id: `agent_msg_${Date.now()}`,
-          sender: 'agent',
-          text: `Ingested & bi-directionally linked URL. Extracted concept node "${intakeData.node?.title}".`,
-          timestamp: new Date().toISOString(),
-          grounded_node_ids: intakeData.seed_traversal || [intakeData.node?.id]
-        };
-
-        set({
-          chatHistory: {
-            ...get().chatHistory,
-            [projId]: [...(get().chatHistory[projId] || []), agentIntakeMsg]
-          },
-          selectedNodeId: intakeData.node?.id,
-          thinkingState: {
-            isThinking: false,
-            currentAction: 'Idle',
-            visitedNodeIds: intakeData.seed_traversal || []
-          }
-        });
-        return;
-      }
-
-      // Orchestrated Executive Chat
-      const chatRes = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: text,
-          project_id: projId,
-          is_voice: isVoice
-        })
-      });
-      const chatData = await chatRes.json();
-      await get().fetchGraphData();
-
-      const agentText = chatData.reply || `Processed ${isVoice ? 'spoken insight' : 'thought'}.`;
-      const agentMsg: ChatMessage = {
-        id: `agent_msg_${Date.now()}`,
-        sender: 'agent',
-        text: agentText,
-        timestamp: new Date().toISOString(),
-        grounded_node_ids: []
+        } catch (e) {
+          console.error('[MemexStore] SSE parse error:', e);
+        }
       };
 
-      if (isVoice && agentText) {
-        voiceService.speakText(agentText);
-      }
+      eventSource.onerror = (err) => {
+        console.warn('[MemexStore] SSE Connection closed or error, falling back to POST /api/chat:', err);
+        eventSource.close();
 
-      set({
-        chatHistory: {
-          ...get().chatHistory,
-          [projId]: [...(get().chatHistory[projId] || []), agentMsg]
-        },
-        thinkingState: {
-          isThinking: false,
-          currentAction: 'Idle',
-          visitedNodeIds: []
-        }
-      });
+        // Fallback to standard POST /api/chat REST call if EventSource fails
+        fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: text, project_id: projId, is_voice: isVoice })
+        })
+          .then((res) => res.json())
+          .then((chatData) => {
+            get().fetchGraphData();
+            const agentText = chatData.reply || 'Processed input successfully.';
+            const agentMsg: ChatMessage = {
+              id: `agent_msg_${Date.now()}`,
+              sender: 'agent',
+              text: agentText,
+              timestamp: new Date().toISOString(),
+              grounded_node_ids: (chatData.touched_nodes || []).map((n: any) => n.node_id)
+            };
+
+            if (isVoice && agentText) {
+              voiceService.speakText(agentText);
+            }
+
+            set({
+              chatHistory: {
+                ...get().chatHistory,
+                [projId]: [...(get().chatHistory[projId] || []), agentMsg]
+              },
+              thinkingState: {
+                isThinking: false,
+                currentAction: 'Idle',
+                visitedNodeIds: (chatData.touched_nodes || []).map((n: any) => n.node_id)
+              }
+            });
+          });
+      };
     } catch (err) {
       console.error('Chat execution failed:', err);
       set({
