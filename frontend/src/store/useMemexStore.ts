@@ -29,7 +29,6 @@ interface MemexState {
   fetchProjects: () => Promise<void>;
   sendMessage: (text: string, isVoice?: boolean) => Promise<void>;
   createProjectWorkspace: (name: string, description: string) => Promise<void>;
-  createEdge: (sourceId: string, targetId: string, edgeType: string) => Promise<void>;
 }
 
 const initialDefaultChat: Record<string, ChatMessage[]> = {
@@ -295,25 +294,5 @@ export const useMemexStore = create<MemexState>((set, get) => ({
     });
     await get().fetchProjects();
     await get().setActiveProjectId(projId);
-  },
-
-  createEdge: async (sourceId, targetId, edgeType) => {
-    const newEdge: GraphEdge = {
-      id: `edge_${Date.now()}`,
-      source: sourceId,
-      target: targetId,
-      source_node_id: sourceId,
-      is_directional: true,
-      text_body: 'User defined relationship link',
-      weight: 1.0,
-      project_ids: ['global', get().activeProjectId],
-      created_at: new Date().toISOString()
-    };
-    await fetch('/api/edges', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newEdge)
-    });
-    await get().fetchGraphData();
   }
 }));

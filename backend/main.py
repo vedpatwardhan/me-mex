@@ -138,29 +138,6 @@ def get_node(node_id: str):
     }
 
 
-@app.post("/api/nodes")
-def create_node(node: GraphNode):
-    """Create a new node. Enforces Superset Rule: node is added to Global Graph first."""
-    if "global" not in node.project_ids:
-        node.project_ids.append("global")
-
-    db_engine.upsert_node(node)
-    return {"status": "created", "node": node.model_dump()}
-
-
-@app.post("/api/edges")
-def create_edge(edge: GraphEdge):
-    """Create a new edge between nodes."""
-    if not db_engine.get_node(edge.source_id) or not db_engine.get_node(edge.target_id):
-        raise HTTPException(status_code=400, detail="Invalid source or target node ID")
-
-    if "global" not in edge.project_ids:
-        edge.project_ids.append("global")
-
-    db_engine.upsert_edge(edge)
-    return {"status": "created", "edge": edge.model_dump()}
-
-
 # --- Project Workspaces ---
 @app.get("/api/projects")
 def get_projects():
