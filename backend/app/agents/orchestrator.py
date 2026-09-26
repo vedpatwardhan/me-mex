@@ -77,51 +77,21 @@ class ExecutiveOrchestrator:
             messages.extend(chat_history[-4:])
         messages.append({"role": "user", "content": query})
 
-        try:
-            res = self.llm.generate_chat_completion(
-                messages,
-                temperature=0.0,
-                max_tokens=128,
-                response_format={"type": "json_object"},
-                enable_reasoning=False,
-            )
-            data = json.loads(res)
-            intent = data.get("intent", "DIRECT_CONVERSATION").upper()
-            if intent in [
-                "DIRECT_CONVERSATION",
-                "GRAPH_RETRIEVAL",
-                "DOCUMENT_INGESTION",
-            ]:
-                return intent
-        except Exception:
-            pass
-
-        # Simple heuristic fallback if JSON parsing or LLM synthetic fallback occurs
-        lower_q = query.lower()
-        if (
-            lower_q.startswith("http")
-            or "arxiv.org" in lower_q
-            or "ingest" in lower_q
-            or "paper abstract" in lower_q
-        ):
-            return "DOCUMENT_INGESTION"
-        elif any(
-            k in lower_q
-            for k in [
-                "compare",
-                "synthesize",
-                "explain",
-                "concept",
-                "department",
-                "graph",
-                "paper",
-                "models",
-                "retrieval",
-                "search",
-                "latent",
-            ]
-        ):
-            return "GRAPH_RETRIEVAL"
+        res = self.llm.generate_chat_completion(
+            messages,
+            temperature=0.0,
+            max_tokens=128,
+            response_format={"type": "json_object"},
+            enable_reasoning=False,
+        )
+        data = json.loads(res)
+        intent = data.get("intent", "DIRECT_CONVERSATION").upper()
+        if intent in [
+            "DIRECT_CONVERSATION",
+            "GRAPH_RETRIEVAL",
+            "DOCUMENT_INGESTION",
+        ]:
+            return intent
         return "DIRECT_CONVERSATION"
 
     async def process_user_message(
