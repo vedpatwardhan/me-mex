@@ -40,7 +40,9 @@ async def test_backend_verification():
     top_hubs = graph_analytics.get_top_concept_hubs(top_k=4)
     print(f"✓ Discovered {len(top_hubs)} Dynamic Concept Hubs:")
     for hub_node, score in top_hubs:
-        print(f"  - Concept Hub: '{hub_node.title}' (ID: {hub_node.id}, Score: {score})")
+        print(
+            f"  - Concept Hub: '{hub_node.title}' (ID: {hub_node.id}, Score: {score})"
+        )
 
     # 3. Test Intent Router & Direct Conversation Flow
     print("\n--- Testing Executive Orchestrator Intent Router ---")
@@ -91,9 +93,7 @@ async def test_backend_verification():
     async for event in orchestrator.execute_ingestion_flow(title, text):
         evt_type = event.get("event")
         if evt_type == "orchestrator_tool_call":
-            print(
-                f"  [SSE Event] Tool Call: {event['tool_name']} ({event['args']})"
-            )
+            print(f"  [SSE Event] Tool Call: {event['tool_name']} ({event['args']})")
         elif evt_type == "node_touched":
             print(
                 f"  [SSE Event] Node Touched: '{event['node_title']}' by {event['persona_name']}"
@@ -102,6 +102,54 @@ async def test_backend_verification():
             print(
                 f"  [SSE Event] Tool Complete! Concept ID: {event['concept_id']}, Passages: {event['passage_pointers']}"
             )
+
+    # 6. Test Project Workspaces & Scoped project_ids Filtering
+    print("\n--- Testing Project Workspaces & Scoped Filtering ---")
+    from app.models import ProjectWorkspace, GraphNode
+
+    # Test Project Workspace creation
+    new_proj = ProjectWorkspace(
+        _id="proj_vla_research",
+        name="VLA Policies & Steering",
+        description="Focused workspace for Vision-Language-Action models.",
+    )
+    db_engine.upsert_project(new_proj)
+    projs = db_engine.get_projects()
+    print(f"✓ Total projects in DB: {len(projs)}")
+    assert any(
+        p.id == "proj_vla_research" for p in projs
+    ), "New project workspace not found!"
+
+    # Create a node scoped specifically to proj_vla_research
+    scoped_node = GraphNode(
+        _id="concept_vla_flow",
+        title="VLA Action Flow Steering",
+        text_body="Diffusion action trajectory flow matching.",
+        project_ids=["global", "proj_vla_research"],
+    )
+    db_engine.upsert_node(scoped_node)
+
+    # Test Scoped vs Global Graph Filtering
+    global_nodes = db_engine.get_nodes("global")
+    vla_nodes = db_engine.get_nodes("proj_vla_research")
+    other_nodes = db_engine.get_nodes("proj_unrelated")
+
+    print(f"✓ Global graph node count: {len(global_nodes)}")
+    print(f"✓ VLA Project graph node count: {len(vla_nodes)}")
+    print(f"✓ Unrelated Project graph node count: {len(other_nodes)}")
+
+    assert any(
+        n.id == "concept_vla_flow" for n in global_nodes
+    ), "Node should exist in global master superset graph!"
+    assert any(
+        n.id == "concept_vla_flow" for n in vla_nodes
+    ), "Node should exist in vla_research scoped graph!"
+    assert not any(
+        n.id == "concept_vla_flow" for n in other_nodes
+    ), "Node should NOT exist in unrelated project graph!"
+    print(
+        "✓ Project Workspace bidirectional referencing & scoped graph isolation verified successfully."
+    )
 
     print("\n=== ALL GRAPH-MEMEX BACKEND CHECKS PASSED SUCCESSFULLY! ===")
 

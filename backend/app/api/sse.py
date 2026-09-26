@@ -9,11 +9,17 @@ router = APIRouter(prefix="/api/sse", tags=["SSE Telemetry"])
 
 
 @router.get("/chat")
-async def stream_chat_telemetry(request: Request, query: str = Query("Hello")):
-    """Stream real-time SSE events (intent_classified, node_touched, persona_traversal_active, tool_complete, chat_complete) over unified chat gateway."""
+async def stream_chat_telemetry(
+    request: Request,
+    query: str = Query("Hello"),
+    project_id: str = Query("global"),
+):
+    """Stream real-time SSE events over unified chat gateway."""
 
     async def event_generator():
-        async for event in orchestrator.process_user_message(query):
+        async for event in orchestrator.process_user_message(
+            query, project_id=project_id
+        ):
             if await request.is_disconnected():
                 print("[SSE] Client disconnected from chat stream.")
                 break

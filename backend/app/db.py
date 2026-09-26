@@ -8,6 +8,7 @@ from app.models import (
     PassageRecord,
     MacroDocumentRecord,
     StagingRecord,
+    ProjectWorkspace,
 )
 
 # Try PyMongo import, fall back gracefully if MongoDB server is offline/not installed
@@ -38,6 +39,7 @@ class GraphMemexDatabase:
         self.mem_nodes: Dict[str, GraphNode] = {}
         self.mem_edges: Dict[str, GraphEdge] = {}
         self.mem_staging: Dict[str, StagingRecord] = {}
+        self.mem_projects: Dict[str, ProjectWorkspace] = {}
 
         if HAS_PYMONGO:
             try:
@@ -57,7 +59,14 @@ class GraphMemexDatabase:
         self._seed_initial_data()
 
     def _seed_initial_data(self):
-        """Seed initial nodes, edges, and macro documents if empty."""
+        """Seed initial nodes, edges, and default projects if empty."""
+        if not self.get_projects():
+            global_proj = ProjectWorkspace(
+                _id="global",
+                name="Global Master Graph",
+                description="Master superset database across all paradigms and literature.",
+            )
+            self.upsert_project(global_proj)
         if not self.get_nodes():
             n1 = GraphNode(
                 _id="concept_world_models",
@@ -121,6 +130,7 @@ class GraphMemexDatabase:
             )
             for e in [e1, e2, e3]:
                 self.upsert_edge(e)
+
     def upsert_node(self, node: GraphNode):
         if self.use_mongo:
             self.db.nodes.update_one(
@@ -129,12 +139,20 @@ class GraphMemexDatabase:
         else:
             self.mem_nodes[node.id] = node
 
-    def get_nodes(self, theme_id: Optional[str] = None) -> List[GraphNode]:
+    def get_nodes(self, project_id: Optional[str] = None) -> List[GraphNode]:
         if self.use_mongo:
-            query = {"theme_id": theme_id} if theme_id and theme_id != "global" else {}
+            query = (
+                {"project_ids": project_id}
+                if project_id and project_id != "global"
+                else {}
+            )
             docs = list(self.db.nodes.find(query))
             return [GraphNode(**d) for d in docs]
         else:
+            if project_id and project_id != "global":
+                return [
+                    n for n in self.mem_nodes.values() if project_id in n.project_ids
+                ]
             return list(self.mem_nodes.values())
 
     def get_node(self, node_id: str) -> Optional[GraphNode]:
@@ -153,13 +171,46 @@ class GraphMemexDatabase:
         else:
             self.mem_edges[edge.id] = edge
 
-    def get_edges(self, theme_id: Optional[str] = None) -> List[GraphEdge]:
+    def get_edges(self, project_id: Optional[str] = None) -> List[GraphEdge]:
         if self.use_mongo:
-            query = {"theme_id": theme_id} if theme_id and theme_id != "global" else {}
+            query = (
+                {"project_ids": project_id}
+                if project_id and project_id != "global"
+                else {}
+            )
             docs = list(self.db.edges.find(query))
             return [GraphEdge(**d) for d in docs]
         else:
+            if project_id and project_id != "global":
+                return [
+                    e for e in self.mem_edges.values() if project_id in e.project_ids
+                ]
             return list(self.mem_edges.values())
+
+    # --- Project Operations ---
+    def upsert_project(self, project: ProjectWorkspace):
+        if self.use_mongo:
+            self.db.projects.update_one(
+                {"_id": project.id},
+                {"$set": project.model_dump(by_alias=True)},
+                upsert=True,
+            )
+        else:
+            self.mem_projects[project.id] = project
+
+    def get_projects(self) -> List[ProjectWorkspace]:
+        if self.use_mongo:
+            docs = list(self.db.projects.find({}))
+            return [ProjectWorkspace(**d) for d in docs]
+        else:
+            return list(self.mem_projects.values())
+
+    def get_project(self, project_id: str) -> Optional[ProjectWorkspace]:
+        if self.use_mongo:
+            doc = self.db.projects.find_one({"_id": project_id})
+            return ProjectWorkspace(**doc) if doc else None
+        else:
+            return self.mem_projects.get(project_id)
 
     # --- Passage Operations ---
     def upsert_passage(self, passage: PassageRecord):

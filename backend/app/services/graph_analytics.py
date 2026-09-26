@@ -126,7 +126,9 @@ class GraphAnalyticsWorker:
         centralities = GraphAnalyticsWorker.calculate_hub_centrality(theme_id)
         if not centralities:
             # Fallback to returning all existing concept nodes
-            nodes = [n for n in db_engine.get_nodes(theme_id) if n.node_type == "concept"]
+            nodes = [
+                n for n in db_engine.get_nodes(theme_id) if n.node_type == "concept"
+            ]
             return [(n, 1.0) for n in nodes[:top_k]]
 
         sorted_hubs = sorted(

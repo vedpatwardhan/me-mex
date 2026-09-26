@@ -25,7 +25,9 @@ class DepartmentPersonaAgent:
         """Explore hub node body, adjacent sub-graph edges, and optionally execute DuckDuckGo web search tool."""
         all_edges = db_engine.get_edges()
         adjacent_edges = [
-            e for e in all_edges if e.source_id == self.hub_node.id or e.target_id == self.hub_node.id
+            e
+            for e in all_edges
+            if e.source_id == self.hub_node.id or e.target_id == self.hub_node.id
         ]
         adjacent_node_ids = set([self.hub_node.id])
         for e in adjacent_edges:
@@ -34,17 +36,24 @@ class DepartmentPersonaAgent:
 
         traversed_node_ids = list(adjacent_node_ids)
         subgraph_nodes = [
-            db_engine.get_node(nid) for nid in traversed_node_ids if db_engine.get_node(nid)
+            db_engine.get_node(nid)
+            for nid in traversed_node_ids
+            if db_engine.get_node(nid)
         ]
 
         # Web Search Context Supplementation via DuckDuckGo tool if allowed
         web_search_results = ""
         if allow_web_search and any(
-            k in query.lower() for k in ["search", "latest", "recent", "what is", "web", "news"]
+            k in query.lower()
+            for k in ["search", "latest", "recent", "what is", "web", "news"]
         ):
             try:
-                web_res = search_tools.search_duckduckgo(f"{self.hub_node.title} {query}")
-                web_search_results = f"\nDuckDuckGo Live Web Context:\n{json.dumps(web_res[:2])}"
+                web_res = search_tools.search_duckduckgo(
+                    f"{self.hub_node.title} {query}"
+                )
+                web_search_results = (
+                    f"\nDuckDuckGo Live Web Context:\n{json.dumps(web_res[:2])}"
+                )
             except Exception as e:
                 web_search_results = f"\nWeb search attempt: {e}"
 

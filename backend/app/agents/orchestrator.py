@@ -90,7 +90,10 @@ class ExecutiveOrchestrator:
         return "DIRECT_CONVERSATION"
 
     async def process_user_message(
-        self, query: str, chat_history: Optional[List[Dict[str, str]]] = None
+        self,
+        query: str,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Central conversational entry point routing user input dynamically."""
         intent = self.classify_intent(query, chat_history)
@@ -109,7 +112,9 @@ class ExecutiveOrchestrator:
                 yield event
         elif intent == "DOCUMENT_INGESTION":
             title = f"Ingested Document {uuid.uuid4().hex[:6]}"
-            async for event in self.execute_ingestion_flow(title, query):
+            async for event in self.execute_ingestion_flow(
+                title, query, project_id=project_id
+            ):
                 yield event
         else:
             async for event in self.execute_retrieval_flow(query):
@@ -232,7 +237,11 @@ class ExecutiveOrchestrator:
         }
 
     async def execute_ingestion_flow(
-        self, title: str, raw_text: str, source_url: Optional[str] = None
+        self,
+        title: str,
+        raw_text: str,
+        source_url: Optional[str] = None,
+        project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Tool-based Ingestion: Save passage records, extract concept nodes, and form edges."""
         yield {
@@ -259,6 +268,10 @@ class ExecutiveOrchestrator:
         )
         db_engine.upsert_passage(pass_rec)
 
+        proj_list = ["global"]
+        if project_id and project_id != "global":
+            proj_list.append(project_id)
+
         concept_id = f"concept_{uuid.uuid4().hex[:6]}"
         new_node = GraphNode(
             _id=concept_id,
@@ -266,6 +279,7 @@ class ExecutiveOrchestrator:
             title=title,
             text_body=f"# {title}\n{raw_text[:500]}",
             passage_pointers=[passage_id],
+            project_ids=proj_list,
             metadata={"status": "PRIMARY_ACTIVE"},
         )
         db_engine.upsert_node(new_node)
@@ -282,6 +296,7 @@ class ExecutiveOrchestrator:
                 is_directional=True,
                 text_body=f"Ingested concept link from {title} to {target_hub.title}.",
                 weight=1.0,
+                project_ids=proj_list,
                 status="PRIMARY_ACTIVE",
             )
             db_engine.upsert_edge(new_edge)
