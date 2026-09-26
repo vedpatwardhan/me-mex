@@ -26,7 +26,6 @@ from tests.test_orchestrator import (
     test_classify_intent_retrieval,
     test_classify_intent_ingestion,
     test_classify_intent_with_chat_history,
-    test_extract_document_title,
 )
 from tests.test_department_persona import test_department_persona_project_scoping
 from tests.test_direct_conversation import (
@@ -78,7 +77,6 @@ def run_all_tests():
             test_classify_intent_with_chat_history,
             True,
         ),
-        ("Orchestrator: Extract Title", test_extract_document_title, True),
         (
             "Persona: Project-Scoped Traversal",
             test_department_persona_project_scoping,

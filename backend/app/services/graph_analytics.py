@@ -1,3 +1,4 @@
+from typing import Optional
 from typing import List, Dict, Any, Tuple
 import rustworkx as rx
 import networkx as nx

@@ -18,6 +18,7 @@ from app.services.event_queue import event_queue
 from app.services.graph_analytics import graph_analytics
 from app.services.llm_gateway import llm_gateway
 from app.tools.search_tools import search_tools
+from app.prompts import load_prompt
 
 
 class ExecutiveOrchestrator:
@@ -31,68 +32,98 @@ class ExecutiveOrchestrator:
         self.event_queue = event_queue
         self.top_k_hubs = top_k_hubs
 
-    def _extract_document_title(self, raw_text: str) -> str:
-        """Extract a concise 3-7 word document title using LLM gateway."""
-        prompt = f"Extract a concise title (3-7 words, plain text without quotes) for the following document text:\n\n{raw_text[:1000]}"
+    def _chunk_text(self, text: str, chunk_size: int = 1500) -> List[str]:
+        """Splits raw document text into fixed ~500 token (~1500 character) passage chunks."""
+        if not text:
+            return []
+        paragraphs = text.split("\n\n")
+        chunks = []
+        curr = ""
+        for p in paragraphs:
+            if len(curr) + len(p) <= chunk_size:
+                curr += ("\n\n" if curr else "") + p
+            else:
+                if curr:
+                    chunks.append(curr.strip())
+                curr = p
+        if curr.strip():
+            chunks.append(curr.strip())
+        return chunks if chunks else [text[:chunk_size]]
+
+    def _extract_concepts_from_passage(
+        self, passage_text: str, doc_title: str
+    ) -> Dict[str, Any]:
+        """Performs LLM pass across a passage chunk to extract atomic concept nodes and qualitative relation edges."""
+        system_prompt = load_prompt("passage_concept_extraction").format(
+            doc_title=doc_title
+        )
         messages = [
-            {
-                "role": "system",
-                "content": "You are a precise technical document title generator.",
-            },
-            {"role": "user", "content": prompt},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Passage Chunk:\n{passage_text}"},
         ]
         try:
-            title = (
-                self.llm.generate_chat_completion(
-                    messages,
-                    temperature=0.3,
-                    max_tokens=128,
-                    enable_reasoning=False,
-                )
-                .strip()
-                .strip('"')
+            res = self.llm.generate_chat_completion(
+                messages,
+                temperature=0.2,
+                max_tokens=512,
+                response_format={"type": "json_object"},
+                enable_reasoning=False,
             )
-            if title and len(title) > 3:
-                return title
+            data = json.loads(res)
+            return {
+                "concepts": data.get("concepts", []),
+                "relations": data.get("relations", []),
+            }
         except Exception:
-            pass
-        return f"Ingested Document {uuid.uuid4().hex[:6]}"
+            return {
+                "concepts": [
+                    {
+                        "title": doc_title,
+                        "description": passage_text[:300],
+                    }
+                ],
+                "relations": [],
+            }
 
     def classify_intent(
         self, query: str, chat_history: Optional[List[Dict[str, str]]] = None
-    ) -> str:
-        """Classifies user input into DIRECT_CONVERSATION, GRAPH_RETRIEVAL, or DOCUMENT_INGESTION using query and recent chat history."""
-        system_prompt = (
-            "You are the Executive Orchestrator intent classifier.\n"
-            "Analyze the conversation history and current user message, then classify the primary intent into exactly ONE category:\n\n"
-            "Categories:\n"
-            '- "DIRECT_CONVERSATION": Greetings, general questions, conversational follow-ups, formatting, math, or basic Q&A that does not require deep graph traversal or new document ingestion.\n'
-            '- "GRAPH_RETRIEVAL": Domain research, cross-paper synthesis, concept exploration, or queries asking about concepts/departments in the system.\n'
-            '- "DOCUMENT_INGESTION": Input containing URLs (e.g. arXiv, YouTube, blogs), raw document text, paper abstracts, or explicit instructions to ingest/store content.\n\n'
-            'Return JSON format: {"intent": "DIRECT_CONVERSATION" | "GRAPH_RETRIEVAL" | "DOCUMENT_INGESTION"}'
-        )
+    ) -> Dict[str, Any]:
+        """Classifies user input into DIRECT_CONVERSATION, GRAPH_RETRIEVAL, or DOCUMENT_INGESTION and extracts ingestion target details (source_url, raw_text) in a single pass."""
+        system_prompt = load_prompt("classify_intent")
 
         messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
             messages.extend(chat_history[-4:])
         messages.append({"role": "user", "content": query})
 
-        res = self.llm.generate_chat_completion(
-            messages,
-            temperature=0.0,
-            max_tokens=128,
-            response_format={"type": "json_object"},
-            enable_reasoning=False,
-        )
-        data = json.loads(res)
-        intent = data.get("intent", "DIRECT_CONVERSATION").upper()
-        if intent in [
-            "DIRECT_CONVERSATION",
-            "GRAPH_RETRIEVAL",
-            "DOCUMENT_INGESTION",
-        ]:
-            return intent
-        return "DIRECT_CONVERSATION"
+        try:
+            res = self.llm.generate_chat_completion(
+                messages,
+                temperature=0.0,
+                max_tokens=256,
+                response_format={"type": "json_object"},
+                enable_reasoning=False,
+            )
+            data = json.loads(res)
+            intent = str(data.get("intent", "DIRECT_CONVERSATION")).upper()
+            if intent not in [
+                "DIRECT_CONVERSATION",
+                "GRAPH_RETRIEVAL",
+                "DOCUMENT_INGESTION",
+            ]:
+                intent = "DIRECT_CONVERSATION"
+            return {
+                "intent": intent,
+                "source_url": data.get("source_url"),
+                "raw_text": data.get("raw_text")
+                or (query if intent == "DOCUMENT_INGESTION" else None),
+            }
+        except Exception:
+            return {
+                "intent": "DIRECT_CONVERSATION",
+                "source_url": None,
+                "raw_text": None,
+            }
 
     async def process_user_message(
         self,
@@ -102,7 +133,8 @@ class ExecutiveOrchestrator:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Central conversational entry point routing user input dynamically with error handling."""
         try:
-            intent = self.classify_intent(query, chat_history)
+            intent_result = self.classify_intent(query, chat_history)
+            intent = intent_result["intent"]
 
             intent_evt = {
                 "event": "intent_classified",
@@ -120,9 +152,11 @@ class ExecutiveOrchestrator:
                     self.event_queue.push(project_id, event)
                     yield event
             elif intent == "DOCUMENT_INGESTION":
-                title = self._extract_document_title(query)
                 async for event in self.execute_ingestion_flow(
-                    title, query, project_id=project_id
+                    query=query,
+                    chat_history=chat_history,
+                    target_info=intent_result,
+                    project_id=project_id,
                 ):
                     self.event_queue.push(project_id, event)
                     yield event
@@ -168,13 +202,8 @@ class ExecutiveOrchestrator:
                 + "\n".join(formatted_events)
             )
 
-        system_prompt = (
-            "You are Me-Mex, an intelligent conversational research assistant. "
-            "Your goal is to maintain an engaging, helpful, and continuous conversation with the user. "
-            "Answer directly and thoroughly based on the provided context, chat history, and system events. "
-            "Actively answer questions, provide relevant technical details, keep the conversation going, "
-            f"and invite further exploration or follow-up questions.{events_summary}"
-        )
+        base_prompt = load_prompt("direct_conversation")
+        system_prompt = f"{base_prompt}{events_summary}"
 
         messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
@@ -280,25 +309,60 @@ class ExecutiveOrchestrator:
 
     async def execute_ingestion_flow(
         self,
-        title: str,
-        raw_text: str,
-        source_url: Optional[str] = None,
+        query: str,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        target_info: Optional[Dict[str, Any]] = None,
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Tool-based Ingestion: Save passage records, extract concept nodes, form edges, and trigger direct conversation turn."""
+        """Multi-Pass Document Ingestion: Scrapes URL/payload, chunk passages, extracts atomic concepts, links concept hubs, & dispatches to direct conversation."""
+        if not target_info:
+            target_info = self._extract_ingestion_target(query, chat_history)
+
+        source_url = target_info.get("source_url")
+        raw_payload = target_info.get("raw_text") or query
+
+        # Step 1: Content Scraping & Title Extraction
+        full_content = raw_payload
+        title = None
+
+        if source_url:
+            if "arxiv.org" in source_url.lower():
+                arxiv_res = self.tools.search_arxiv(source_url, max_results=1)
+                if arxiv_res:
+                    paper = arxiv_res[0]
+                    title = paper.get("title")
+                    full_content = f"# {title}\n\nAbstract: {paper.get('summary')}\n\nAuthors: {', '.join(paper.get('authors', []))}"
+            else:
+                web_res = self.tools.fetch_web_page(source_url)
+                if web_res.get("content"):
+                    full_content = web_res["content"]
+                    # Extract title from markdown header (# Title) if available
+                    for line in full_content.splitlines():
+                        if line.startswith("# "):
+                            title = line[2:].strip()
+                            break
+
+        if not title:
+            # Fallback to deriving title from raw_text payload (first non-empty line or snippet)
+            first_line = (
+                full_content.strip().splitlines()[0] if full_content.strip() else ""
+            )
+            if first_line and len(first_line) < 80:
+                title = first_line.lstrip("#").strip()
+            else:
+                title = f"Ingested Document {uuid.uuid4().hex[:6]}"
+
         tool_evt = {
             "event": "orchestrator_tool_call",
             "tool_name": "ingest_document_tool",
             "args": {"title": title, "source_url": source_url},
-            "message": f"Executive Orchestrator invoking document ingestion tool for '{title}'...",
+            "message": f"Executive Orchestrator invoking multi-pass document ingestion pipeline for '{title}'...",
             "timestamp": time.time(),
         }
         self.event_queue.push(project_id, tool_evt)
         yield tool_evt
 
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
-        passage_id = f"pass_{uuid.uuid4().hex[:8]}"
-
         doc_rec = DocumentRecord(
             _id=doc_id,
             title=title,
@@ -307,51 +371,96 @@ class ExecutiveOrchestrator:
         )
         self.db.upsert_document(doc_rec)
 
-        pass_rec = PassageRecord(
-            _id=passage_id, doc_id=doc_id, chunk_index=0, text_content=raw_text
-        )
-        self.db.upsert_passage(pass_rec)
+        # Step 2: Passage Chunking (~500 token chunks)
+        passage_chunks = self._chunk_text(full_content, chunk_size=1500)
+        passage_ids = []
+        for idx, chunk_str in enumerate(passage_chunks):
+            p_id = f"pass_{uuid.uuid4().hex[:8]}"
+            p_rec = PassageRecord(
+                _id=p_id, doc_id=doc_id, chunk_index=idx, text_content=chunk_str
+            )
+            self.db.upsert_passage(p_rec)
+            passage_ids.append(p_id)
+
+        pass_chunk_evt = {
+            "event": "passage_chunked",
+            "doc_id": doc_id,
+            "chunks_count": len(passage_ids),
+            "message": f"Document '{title}' chunked into {len(passage_ids)} plain-text passage records.",
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, pass_chunk_evt)
+        yield pass_chunk_evt
+
+        # Step 3: Multi-Pass Passage Concept Extraction & Deduplication
+        extracted_concepts_map: Dict[str, Dict[str, Any]] = {}
+        extracted_relations: List[Dict[str, Any]] = []
+
+        for p_id, chunk_str in zip(passage_ids, passage_chunks):
+            extraction = self._extract_concepts_from_passage(chunk_str, title)
+            for c in extraction.get("concepts", []):
+                c_title = c.get("title", "").strip()
+                if not c_title:
+                    continue
+                norm_key = c_title.lower()
+                if norm_key not in extracted_concepts_map:
+                    extracted_concepts_map[norm_key] = {
+                        "title": c_title,
+                        "description": c.get("description", ""),
+                        "passage_pointers": [p_id],
+                    }
+                else:
+                    if p_id not in extracted_concepts_map[norm_key]["passage_pointers"]:
+                        extracted_concepts_map[norm_key]["passage_pointers"].append(
+                            p_id
+                        )
+            extracted_relations.extend(extraction.get("relations", []))
 
         proj_list = ["global"]
         if project_id and project_id != "global":
             proj_list.append(project_id)
 
-        concept_id = f"concept_{uuid.uuid4().hex[:6]}"
-        new_node = GraphNode(
-            _id=concept_id,
-            node_type="concept",
-            title=title,
-            text_body=f"# {title}\n{raw_text[:500]}",
-            passage_pointers=[passage_id],
-            project_ids=proj_list,
-            metadata={"status": "PRIMARY_ACTIVE"},
-        )
-        self.db.upsert_node(new_node)
+        # Discover top project concept hubs via rustworkx centrality
+        top_hubs = self.analytics.get_top_concept_hubs(project_id=project_id, top_k=2)
 
-        # Connect new node to existing concept hubs if available
-        top_hubs = self.analytics.get_top_concept_hubs(project_id=project_id, top_k=1)
-        if top_hubs:
-            target_hub = top_hubs[0][0]
-            edge_id = f"edge_{concept_id}_to_{target_hub.id}"
-            new_edge = GraphEdge(
-                _id=edge_id,
-                source_id=concept_id,
-                target_id=target_hub.id,
-                is_directional=True,
-                text_body=f"Ingested concept link from {title} to {target_hub.title}.",
-                weight=1.0,
+        created_node_ids = []
+        for norm_key, c_data in extracted_concepts_map.items():
+            concept_id = f"concept_{uuid.uuid4().hex[:6]}"
+            c_node = GraphNode(
+                _id=concept_id,
+                node_type="concept",
+                title=c_data["title"],
+                text_body=f"# {c_data['title']}\n{c_data['description']}",
+                passage_pointers=c_data["passage_pointers"],
                 project_ids=proj_list,
-                status="PRIMARY_ACTIVE",
+                metadata={"status": "PRIMARY_ACTIVE"},
             )
-            self.db.upsert_edge(new_edge)
+            self.db.upsert_node(c_node)
+            created_node_ids.append(concept_id)
+
+            # Form edge to top concept hub
+            if top_hubs:
+                target_hub = top_hubs[0][0]
+                edge_id = f"edge_{concept_id}_to_{target_hub.id}"
+                new_edge = GraphEdge(
+                    _id=edge_id,
+                    source_id=concept_id,
+                    target_id=target_hub.id,
+                    is_directional=True,
+                    text_body=f"Ingested concept '{c_data['title']}' linked to concept hub '{target_hub.title}'.",
+                    weight=1.0,
+                    project_ids=proj_list,
+                    status="PRIMARY_ACTIVE",
+                )
+                self.db.upsert_edge(new_edge)
 
             node_evt = {
                 "event": "node_touched",
                 "persona_id": "orchestrator",
                 "persona_name": "Ingestion Engine",
                 "node_id": concept_id,
-                "node_title": title,
-                "message": f"New node '{title}' created and linked to '{target_hub.title}'.",
+                "node_title": c_data["title"],
+                "message": f"Concept '{c_data['title']}' extracted and integrated into knowledge graph.",
                 "timestamp": time.time(),
             }
             self.event_queue.push(project_id, node_evt)
@@ -360,18 +469,19 @@ class ExecutiveOrchestrator:
         comp_evt = {
             "event": "tool_complete",
             "tool_name": "ingest_document_tool",
-            "concept_id": concept_id,
-            "passage_pointers": [passage_id],
-            "message": f"Successfully integrated node '{concept_id}' with passage pointers for document '{title}'.",
+            "doc_id": doc_id,
+            "created_nodes_count": len(created_node_ids),
+            "passage_pointers": passage_ids,
+            "message": f"Successfully integrated document '{title}' with {len(created_node_ids)} concept nodes and {len(passage_ids)} passage pointers.",
             "timestamp": time.time(),
         }
         self.event_queue.push(project_id, comp_evt)
         yield comp_evt
 
-        # Delegate final assistant response turn directly to execute_direct_conversation_flow
+        # Step 4: Delegate final assistant response turn directly to execute_direct_conversation_flow
         ingest_query = f"I just ingested document '{title}'. Summarize the key additions and integrated graph concepts."
         async for event in self.execute_direct_conversation_flow(
-            ingest_query, project_id=project_id
+            ingest_query, chat_history, project_id=project_id
         ):
             yield event
 

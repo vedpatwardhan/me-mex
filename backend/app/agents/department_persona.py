@@ -8,6 +8,7 @@ from app.models import (
     PassageRecord,
 )
 from app.services.llm_gateway import llm_gateway
+from app.prompts import load_prompt
 
 
 class DepartmentPersonaAgent:
@@ -74,7 +75,9 @@ class DepartmentPersonaAgent:
         messages = [
             {
                 "role": "system",
-                "content": f"You are the persona specialist for '{self.hub_node.title}'.",
+                "content": load_prompt("department_persona").format(
+                    hub_title=self.hub_node.title
+                ),
             },
             {"role": "user", "content": prompt},
         ]
