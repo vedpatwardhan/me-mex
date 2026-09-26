@@ -253,7 +253,7 @@ class ExecutiveOrchestrator:
                     "timestamp": time.time(),
                 }
 
-            yield {
+            evt_active = {
                 "event": "persona_traversal_active",
                 "department_id": dept.department_id,
                 "department_name": dept.department_name,
@@ -261,23 +261,22 @@ class ExecutiveOrchestrator:
                 "perspective_snippet": finding["perspective"][:150],
                 "timestamp": time.time(),
             }
+            self.event_queue.push(project_id, evt_active)
+            yield evt_active
 
-        synthesis_prompt = f"Executive Orchestrator: Synthesize findings from concept hub personas into a final cohesive answer for query: '{query}'.\nDepartment Findings: {json.dumps(department_findings)}"
-        messages = [
-            {
-                "role": "system",
-                "content": "You are the Executive Orchestrator synthesising multi-persona graph intelligence.",
-            },
-            {"role": "user", "content": synthesis_prompt},
-        ]
-        final_answer = self.llm.generate_chat_completion(messages)
-
-        yield {
-            "event": "chat_complete",
-            "final_answer": final_answer,
-            "department_findings": department_findings,
+        # Push retrieval summary finding event into queue for direct conversation prompt awareness
+        retrieval_summary_evt = {
+            "event": "retrieval_summary",
+            "message": f"Graph Retrieval completed across {len(active_departments)} concept departments for query: '{query}'",
             "timestamp": time.time(),
         }
+        self.event_queue.push(project_id, retrieval_summary_evt)
+
+        # Delegate final assistant response turn directly to execute_direct_conversation_flow
+        async for event in self.execute_direct_conversation_flow(
+            query, project_id=project_id
+        ):
+            yield event
 
     async def execute_ingestion_flow(
         self,
@@ -286,14 +285,16 @@ class ExecutiveOrchestrator:
         source_url: Optional[str] = None,
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Tool-based Ingestion: Save passage records, extract concept nodes, and form edges."""
-        yield {
+        """Tool-based Ingestion: Save passage records, extract concept nodes, form edges, and trigger direct conversation turn."""
+        tool_evt = {
             "event": "orchestrator_tool_call",
             "tool_name": "ingest_document_tool",
             "args": {"title": title, "source_url": source_url},
             "message": f"Executive Orchestrator invoking document ingestion tool for '{title}'...",
             "timestamp": time.time(),
         }
+        self.event_queue.push(project_id, tool_evt)
+        yield tool_evt
 
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
         passage_id = f"pass_{uuid.uuid4().hex[:8]}"
@@ -344,7 +345,7 @@ class ExecutiveOrchestrator:
             )
             self.db.upsert_edge(new_edge)
 
-            yield {
+            node_evt = {
                 "event": "node_touched",
                 "persona_id": "orchestrator",
                 "persona_name": "Ingestion Engine",
@@ -353,15 +354,26 @@ class ExecutiveOrchestrator:
                 "message": f"New node '{title}' created and linked to '{target_hub.title}'.",
                 "timestamp": time.time(),
             }
+            self.event_queue.push(project_id, node_evt)
+            yield node_evt
 
-        yield {
+        comp_evt = {
             "event": "tool_complete",
             "tool_name": "ingest_document_tool",
             "concept_id": concept_id,
             "passage_pointers": [passage_id],
-            "message": f"Successfully integrated node '{concept_id}' with passage pointers.",
+            "message": f"Successfully integrated node '{concept_id}' with passage pointers for document '{title}'.",
             "timestamp": time.time(),
         }
+        self.event_queue.push(project_id, comp_evt)
+        yield comp_evt
+
+        # Delegate final assistant response turn directly to execute_direct_conversation_flow
+        ingest_query = f"I just ingested document '{title}'. Summarize the key additions and integrated graph concepts."
+        async for event in self.execute_direct_conversation_flow(
+            ingest_query, project_id=project_id
+        ):
+            yield event
 
 
 orchestrator = ExecutiveOrchestrator()
