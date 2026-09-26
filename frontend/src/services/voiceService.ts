@@ -1,7 +1,7 @@
 import { pipeline, env } from '@xenova/transformers';
 import { KokoroTTS } from 'kokoro-js';
 
-// Configure @xenova/transformers to load remote ONNX CDN models directly and avoid Vite HTML fallback interception
+// Re-enable browser caching now that model assets download cleanly
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
@@ -18,10 +18,10 @@ class VoiceService {
     if (this.transcriber || this.isTranscriberLoading) return;
     this.isTranscriberLoading = true;
     try {
-      console.log('[VoiceService] Loading Xenova/whisper-tiny model...');
+      console.log('[VoiceService] Initializing Xenova/whisper-tiny pipeline...');
       this.transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny');
       console.log('[VoiceService] Whisper-tiny loaded successfully.');
-    } catch (err) {
+    } catch (err: any) {
       console.error('[VoiceService] Failed to load whisper-tiny:', err);
     } finally {
       this.isTranscriberLoading = false;
@@ -49,9 +49,20 @@ class VoiceService {
   /** Start Microphone Audio Recording */
   async startRecording(onAudioLevel?: (level: number) => void): Promise<boolean> {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 44100,
+        },
+      });
       this.audioChunks = [];
-      this.mediaRecorder = new MediaRecorder(stream);
+      this.mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : undefined,
+      });
 
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -59,7 +70,8 @@ class VoiceService {
         }
       };
 
-      this.mediaRecorder.start();
+      // Request data every 250ms so chunks are flushed reliably
+      this.mediaRecorder.start(250);
       console.log('[VoiceService] Recording started.');
       return true;
     } catch (err) {
@@ -78,13 +90,55 @@ class VoiceService {
 
       this.mediaRecorder.onstop = async () => {
         try {
-          const audioBlob = new Blob(this.audioChunks, { type: 'audio/wav' });
+          const mimeType = this.mediaRecorder?.mimeType || 'audio/webm';
+          console.log(`[VoiceService] Stop recording. Total chunks: ${this.audioChunks.length}, mimeType: ${mimeType}`);
+          const audioBlob = new Blob(this.audioChunks, { type: mimeType });
+          console.log(`[VoiceService] Audio Blob size: ${audioBlob.size} bytes`);
+
+          if (audioBlob.size === 0) {
+            console.warn('[VoiceService] Audio Blob is empty!');
+            resolve('');
+            return;
+          }
+
           const arrayBuffer = await audioBlob.arrayBuffer();
 
-          // Decode Audio Buffer into 16kHz Float32Array required by Whisper
-          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-          const channelData = audioBuffer.getChannelData(0);
+          // 1. Decode recorded audio with default/native AudioContext sample rate
+          const defaultCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const decodedBuffer = await defaultCtx.decodeAudioData(arrayBuffer);
+          console.log(`[VoiceService] Decoded AudioBuffer duration: ${decodedBuffer.duration}s, sampleRate: ${decodedBuffer.sampleRate}, channels: ${decodedBuffer.numberOfChannels}`);
+          await defaultCtx.close();
+
+          // 2. Resample to 16kHz OfflineAudioContext as required by Whisper
+          const offlineCtx = new OfflineAudioContext(
+            decodedBuffer.numberOfChannels,
+            Math.ceil(decodedBuffer.duration * 16000),
+            16000
+          );
+          const bufferSource = offlineCtx.createBufferSource();
+          bufferSource.buffer = decodedBuffer;
+          bufferSource.connect(offlineCtx.destination);
+          bufferSource.start();
+
+          const resampledBuffer = await offlineCtx.startRendering();
+          const channelData = resampledBuffer.getChannelData(0);
+
+          // Calculate max amplitude and normalize audio if peak is low
+          let maxVal = 0;
+          for (let i = 0; i < channelData.length; i++) {
+            const abs = Math.abs(channelData[i]);
+            if (abs > maxVal) maxVal = abs;
+          }
+          console.log(`[VoiceService] 16kHz resampled Float32Array samples: ${channelData.length}, Peak volume: ${maxVal.toFixed(4)}`);
+
+          // Normalize audio buffer to peak 0.75 if peak volume is low, avoiding over-amplification of noise floor
+          if (maxVal > 0.001) {
+            const scale = Math.min(0.75 / maxVal, 20.0);
+            for (let i = 0; i < channelData.length; i++) {
+              channelData[i] *= scale;
+            }
+            console.log(`[VoiceService] Audio normalized with factor ${scale.toFixed(2)}`);
+          }
 
           if (!this.transcriber) {
             await this.initSTT();
@@ -92,7 +146,14 @@ class VoiceService {
 
           if (this.transcriber) {
             console.log('[VoiceService] Transcribing audio with Whisper-tiny...');
-            const output = await this.transcriber(channelData);
+            const output = await this.transcriber(channelData, {
+              language: 'english',
+              task: 'transcribe',
+              return_timestamps: false,
+              chunk_length_s: 30,
+              stride_length_s: 5,
+            });
+            console.log('[VoiceService] Raw Whisper output:', output);
             const text = typeof output === 'string' ? output : output.text || '';
             console.log('[VoiceService] Transcription:', text);
             resolve(text.trim());
@@ -121,7 +182,7 @@ class VoiceService {
       if (this.tts) {
         console.log('[VoiceService] Synthesizing speech with Kokoro TTS:', text.slice(0, 60));
         const audio = await this.tts.generate(text, { voice });
-        
+
         // Play Audio Buffer using Web Audio API
         const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
         const buffer = audioCtx.createBuffer(1, audio.audio.length, audio.sampling_rate);
