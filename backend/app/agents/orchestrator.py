@@ -62,38 +62,21 @@ class ExecutiveOrchestrator:
         self, query: str, chat_history: Optional[List[Dict[str, str]]] = None
     ) -> str:
         """Classifies user input into DIRECT_CONVERSATION, GRAPH_RETRIEVAL, or DOCUMENT_INGESTION using query and recent chat history."""
-        history_context = ""
+        system_prompt = (
+            "You are the Executive Orchestrator intent classifier.\n"
+            "Analyze the conversation history and current user message, then classify the primary intent into exactly ONE category:\n\n"
+            "Categories:\n"
+            '- "DIRECT_CONVERSATION": Greetings, general questions, conversational follow-ups, formatting, math, or basic Q&A that does not require deep graph traversal or new document ingestion.\n'
+            '- "GRAPH_RETRIEVAL": Domain research, cross-paper synthesis, concept exploration, or queries asking about concepts/departments in the system.\n'
+            '- "DOCUMENT_INGESTION": Input containing URLs (e.g. arXiv, YouTube, blogs), raw document text, paper abstracts, or explicit instructions to ingest/store content.\n\n'
+            'Return JSON format: {"intent": "DIRECT_CONVERSATION" | "GRAPH_RETRIEVAL" | "DOCUMENT_INGESTION"}'
+        )
+
+        messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
-            formatted_turns = []
-            for msg in chat_history[-4:]:
-                role = msg.get("role", "user")
-                text = msg.get("content") or msg.get("text", "")
-                if text:
-                    formatted_turns.append(f"{role}: {text}")
-            if formatted_turns:
-                history_context = f"\nRecent Chat History:\n" + "\n".join(
-                    formatted_turns
-                )
+            messages.extend(chat_history[-4:])
+        messages.append({"role": "user", "content": query})
 
-        prompt = f"""
-        Analyze the user input in context of recent conversation history and classify its primary intent into exactly ONE category:
-
-        Categories:
-        - "DIRECT_CONVERSATION": Greetings, general questions, conversational follow-ups, formatting, math, or basic Q&A that does not require deep graph traversal or new document ingestion.
-        - "GRAPH_RETRIEVAL": Domain research, cross-paper synthesis, concept exploration, or queries asking about concepts/departments in the system.
-        - "DOCUMENT_INGESTION": Input containing URLs (e.g. arXiv, YouTube, blogs), raw document text, paper abstracts, or explicit instructions to ingest/store content.
-        {history_context}
-        Current User Input: "{query}"
-
-        Return JSON format: {{"intent": "DIRECT_CONVERSATION" | "GRAPH_RETRIEVAL" | "DOCUMENT_INGESTION"}}
-        """
-        messages = [
-            {
-                "role": "system",
-                "content": "You are the Executive Orchestrator intent classifier.",
-            },
-            {"role": "user", "content": prompt},
-        ]
         try:
             res = self.llm.generate_chat_completion(
                 messages,
