@@ -145,3 +145,12 @@ class ChatMessageRecord(BaseModel):
     is_voice: bool = False
     grounded_node_ids: List[str] = Field(default_factory=list)
     created_at: float = Field(default_factory=time.time)
+
+
+# 9. Project-Scoped System Event Record (Last 15 Queue)
+class ProjectEventRecord(BaseModel):
+    id: str = Field(alias="_id")
+    project_id: str = "global"
+    event_type: str
+    data: Dict[str, Any] = Field(default_factory=dict)
+    timestamp: float = Field(default_factory=time.time)

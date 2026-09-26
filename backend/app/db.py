@@ -10,6 +10,7 @@ from app.models import (
     StagingRecord,
     ProjectWorkspace,
     ChatMessageRecord,
+    ProjectEventRecord,
 )
 
 # Try PyMongo import, fall back gracefully if MongoDB server is offline/not installed
@@ -44,6 +45,7 @@ class GraphMemexDatabase:
         self.mem_staging: Dict[str, StagingRecord] = {}
         self.mem_projects: Dict[str, ProjectWorkspace] = {}
         self.mem_messages: Dict[str, ChatMessageRecord] = {}
+        self.mem_events: Dict[str, List[ProjectEventRecord]] = {}
 
         if HAS_PYMONGO:
             try:

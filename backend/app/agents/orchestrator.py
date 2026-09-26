@@ -14,6 +14,7 @@ from app.models import (
 from app.agents.department_persona import (
     DepartmentPersonaAgent,
 )
+from app.services.event_queue import event_queue
 from app.services.graph_analytics import graph_analytics
 from app.services.llm_gateway import llm_gateway
 from app.tools.search_tools import search_tools
@@ -27,6 +28,7 @@ class ExecutiveOrchestrator:
         self.analytics = graph_analytics
         self.llm = llm_gateway
         self.tools = search_tools
+        self.event_queue = event_queue
         self.top_k_hubs = top_k_hubs
 
     def _extract_document_title(self, raw_text: str) -> str:
@@ -149,36 +151,43 @@ class ExecutiveOrchestrator:
         try:
             intent = self.classify_intent(query, chat_history)
 
-            yield {
+            intent_evt = {
                 "event": "intent_classified",
                 "intent": intent,
                 "message": f"Executive Orchestrator evaluated user input intent: '{intent}'",
                 "timestamp": time.time(),
             }
+            self.event_queue.push(project_id, intent_evt)
+            yield intent_evt
 
             if intent == "DIRECT_CONVERSATION":
                 async for event in self.execute_direct_conversation_flow(
                     query, chat_history, project_id=project_id
                 ):
+                    self.event_queue.push(project_id, event)
                     yield event
             elif intent == "DOCUMENT_INGESTION":
                 title = self._extract_document_title(query)
                 async for event in self.execute_ingestion_flow(
                     title, query, project_id=project_id
                 ):
+                    self.event_queue.push(project_id, event)
                     yield event
             else:
                 async for event in self.execute_retrieval_flow(
                     query, project_id=project_id
                 ):
+                    self.event_queue.push(project_id, event)
                     yield event
         except Exception as e:
-            yield {
+            err_evt = {
                 "event": "error",
                 "error": str(e),
                 "message": f"Orchestrator encountered an error: {str(e)}",
                 "timestamp": time.time(),
             }
+            self.event_queue.push(project_id, err_evt)
+            yield err_evt
 
     async def execute_direct_conversation_flow(
         self,
@@ -193,12 +202,28 @@ class ExecutiveOrchestrator:
             "timestamp": time.time(),
         }
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are Executive Orchestrator, an intelligent research assistant for Graph-Memex. Answer directly, concisely, and helpfully.",
-            }
-        ]
+        # Fetch last 15 system execution events for active project from in-memory queue
+        recent_events = self.event_queue.get_events(project_id=project_id, limit=15)
+        events_summary = ""
+        if recent_events:
+            formatted_events = [
+                f"- [{e.event_type}] {e.data.get('message') or e.data}"
+                for e in recent_events
+            ]
+            events_summary = (
+                "\n\nRecent System & Execution Events (Last 15 Queue):\n"
+                + "\n".join(formatted_events)
+            )
+
+        system_prompt = (
+            "You are Me-Mex, an intelligent conversational research assistant. "
+            "Your goal is to maintain an engaging, helpful, and continuous conversation with the user. "
+            "Answer directly and thoroughly based on the provided context, chat history, and system events. "
+            "Actively answer questions, provide relevant technical details, keep the conversation going, "
+            f"and invite further exploration or follow-up questions.{events_summary}"
+        )
+
+        messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": query})

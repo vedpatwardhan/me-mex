@@ -30,6 +30,7 @@ os.environ["DB_NAME"] = "test-me-mex"
 from fastapi.testclient import TestClient
 from main import app
 from app.db import db_engine
+from app.services.event_queue import event_queue
 from app.models import ProjectWorkspace, GraphNode, GraphEdge, ChatMessageRecord
 
 
@@ -49,6 +50,8 @@ def reset_test_database():
         db_engine.mem_messages.clear()
         db_engine.mem_documents.clear()
         db_engine.mem_passages.clear()
+
+    event_queue.clear()
 
     # Seed default global project
     global_proj = ProjectWorkspace(
@@ -143,6 +146,8 @@ def teardown_test_database():
         db_engine.mem_messages.clear()
         db_engine.mem_documents.clear()
         db_engine.mem_passages.clear()
+
+    event_queue.clear()
 
 
 @pytest.fixture(autouse=True)

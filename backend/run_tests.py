@@ -29,6 +29,10 @@ from tests.test_orchestrator import (
     test_extract_document_title,
 )
 from tests.test_department_persona import test_department_persona_project_scoping
+from tests.test_direct_conversation import (
+    test_direct_conversation_flow_continuity,
+    test_external_event_understanding,
+)
 from tests.test_api_routes import (
     test_root_endpoint,
     test_projects_endpoints,
@@ -78,6 +82,16 @@ def run_all_tests():
         (
             "Persona: Project-Scoped Traversal",
             test_department_persona_project_scoping,
+            True,
+        ),
+        (
+            "Direct Conversation: Flow Continuity",
+            test_direct_conversation_flow_continuity,
+            True,
+        ),
+        (
+            "Direct Conversation: External Event Understanding",
+            test_external_event_understanding,
             True,
         ),
     ]
