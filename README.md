@@ -30,25 +30,21 @@ Graph-Memex operates on a continuous **Retrieval $\rightarrow$ Exploration & Edi
    (`HISTORICAL_SUPERSEDED`), preserving history without cluttering path searches.
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                     3. Search, Multi-Persona Retrieval & Telemetry                      │
+│                     3. Dynamic Concept Hub Personas & Telemetry                        │
 └────────────────────────────────────────────────────────────────────────────────────────┘
- - Department Macro Documents: High-level summaries partitioning the graph into 3–4
-   Department Communities using NetworkX Louvain & rustworkx Hub Centrality.
- - Department Specialist Personas: Specialized agents with visual color coding:
-     * Latent World Models & Architectures (`#38bdf8` - Sky Blue)
-     * Planning & Policy Control (`#fbbf24` - Amber Yellow)
-     * Perceptual Representations & Sensors (`#c084fc` - Purple)
-     * Foundation Robotics Systems (`#4ade80` - Emerald Green)
- - Real-Time SSE Telemetry: Streams persona traversal events (`traversingNodeIds`) in color
-   to the WebGL canvas (`react-force-graph-2d`).
+ - Dynamic Concept Hub Discovery: High-centrality concept nodes detected in real time (<5ms)
+   via `rustworkx` eigenvector/degree centrality.
+ - Concept Specialist Personas: Instantiated dynamically per hub node with adjacent subgraph context.
+   Personas execute `duckduckgo_web_search` tool calls to retrieve live external evidence.
+ - Real-Time SSE Telemetry: Streams persona traversal events (`traversing_node_ids`) to animate the
+   WebGL canvas (`react-force-graph-2d`).
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                   4. Multi-Agent Debate & Human-in-the-Loop Ingestion                  │
+│                      4. Agentic Tool Ingestion & Edge Evolution                        │
 └────────────────────────────────────────────────────────────────────────────────────────┘
- - Multi-Agent Integration Debate: Personas debate whether new concepts should `MERGE` into
-   existing nodes, `SUPERSEDE` older concepts, or create new seed hubs.
- - Human-in-the-Loop Prompts: Emits clarification events in chat for user input on trade-offs.
- - Delta Macro Updates: Re-partitions and patches only the affected Department Macro Documents.
+ - Tool-Based Ingestion: Executive Orchestrator calls `ingest_document_tool` when URLs/PDFs are pasted.
+ - Out-of-Graph Passage Storage: Stores raw text chunks in `passages` collection.
+ - Dynamic Edge Weight Decay: Superseded relations decay in weight (`1.0` -> `0.3`) without deleting history.
 ```
 
 ---

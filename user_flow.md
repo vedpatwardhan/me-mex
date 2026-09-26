@@ -15,9 +15,9 @@ It incorporates full theoretical literature mappings from all eight surveyed fra
 
 ---
 
-## 1. Unified Department / Persona Architecture
+## 1. Unified Concept Hub Persona Architecture
 
-Both **Retrieval** and **Ingestion** operate on a single unified multi-agent pattern structured around **Departments** (Thematic Concept Hubs):
+Both **Retrieval** and **Ingestion** operate on a single conversational gateway (`POST /api/chat`) structured around **Dynamic Concept Hub Personas**:
 
 ```
                        [Compressed Macro Documents]

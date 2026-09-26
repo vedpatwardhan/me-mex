@@ -96,7 +96,7 @@ class ExecutiveOrchestrator:
         intent = self.classify_intent(query, chat_history)
 
         yield {
-            "event": "orchestrator_intent_classified",
+            "event": "intent_classified",
             "intent": intent,
             "message": f"Executive Orchestrator evaluated user input intent: '{intent}'",
             "timestamp": time.time(),
@@ -138,7 +138,7 @@ class ExecutiveOrchestrator:
         direct_response = llm_gateway.generate_chat_completion(messages)
 
         yield {
-            "event": "conversation_complete",
+            "event": "chat_complete",
             "final_answer": direct_response,
             "timestamp": time.time(),
         }
@@ -146,25 +146,23 @@ class ExecutiveOrchestrator:
     async def execute_retrieval_flow(
         self, query: str
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Multi-Persona Parallel Debate Retrieval over dynamic DB Macro Documents."""
+        """Multi-Persona Parallel Retrieval over dynamically discovered Concept Hubs."""
         yield {
-            "event": "orchestrator_start",
-            "message": f"Executive Orchestrator initiating multi-department retrieval for query: '{query}'",
+            "event": "persona_traversal_start",
+            "message": f"Executive Orchestrator identifying dynamic concept hubs for query: '{query}'",
             "timestamp": time.time(),
         }
 
-        # Dynamically load active departments from macro documents stored in DB
-        macros = db_engine.get_macros()
-        active_departments = (
-            [DepartmentPersonaAgent(m.department_name, m.department_id) for m in macros]
-            if macros
-            else []
-        )
+        # Dynamically discover top concept hubs via rustworkx centrality
+        top_hubs = graph_analytics.get_top_concept_hubs(top_k=4)
+        active_departments = [
+            DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
+        ]
 
         if not active_departments:
             yield {
                 "event": "no_personas_active",
-                "message": "No department communities exist in database yet. Falling back to direct executive response.",
+                "message": "No active concept hubs found in database yet. Falling back to direct conversation.",
                 "timestamp": time.time(),
             }
             async for event in self.execute_direct_conversation_flow(query):
@@ -177,12 +175,35 @@ class ExecutiveOrchestrator:
                 "event": "persona_traversal_start",
                 "department_id": dept.department_id,
                 "department_name": dept.department_name,
-                "message": f"Specialist {dept.department_name} traversing department seed concept hubs...",
+                "hub_id": dept.hub_node.id,
+                "message": f"Specialist Persona for '{dept.hub_node.title}' traversing adjacent concept edges...",
                 "timestamp": time.time(),
             }
 
             finding = dept.explore_and_debate_retrieval(query)
             department_findings.append(finding)
+
+            # Emit granular node_touched events as persona traverses adjacent nodes
+            for node_id in finding["traversing_node_ids"]:
+                node = db_engine.get_node(node_id)
+                yield {
+                    "event": "node_touched",
+                    "persona_id": dept.department_id,
+                    "persona_name": dept.department_name,
+                    "node_id": node_id,
+                    "node_title": node.title if node else node_id,
+                    "message": f"Concept '{node.title if node else node_id}' touched by {dept.department_name}.",
+                    "timestamp": time.time(),
+                }
+
+            if finding.get("web_search_used"):
+                yield {
+                    "event": "persona_web_search",
+                    "department_id": dept.department_id,
+                    "search_query": f"{dept.hub_node.title} {query}",
+                    "message": f"Persona '{dept.department_name}' executed DuckDuckGo web search tool.",
+                    "timestamp": time.time(),
+                }
 
             yield {
                 "event": "persona_traversal_active",
@@ -193,7 +214,7 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
-        synthesis_prompt = f"Executive Orchestrator: Synthesize findings from department personas into a final cohesive response for query: '{query}'.\nDepartment Findings: {json.dumps(department_findings)}"
+        synthesis_prompt = f"Executive Orchestrator: Synthesize findings from concept hub personas into a final cohesive answer for query: '{query}'.\nDepartment Findings: {json.dumps(department_findings)}"
         messages = [
             {
                 "role": "system",
@@ -204,7 +225,7 @@ class ExecutiveOrchestrator:
         final_answer = llm_gateway.generate_chat_completion(messages)
 
         yield {
-            "event": "retrieval_complete",
+            "event": "chat_complete",
             "final_answer": final_answer,
             "department_findings": department_findings,
             "timestamp": time.time(),
@@ -213,7 +234,15 @@ class ExecutiveOrchestrator:
     async def execute_ingestion_flow(
         self, title: str, raw_text: str, source_url: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Staging -> Dynamic Ingestion Debate -> Concept Evolution -> Passage Storage -> Macro Patch."""
+        """Tool-based Ingestion: Save passage records, extract concept nodes, and form edges."""
+        yield {
+            "event": "orchestrator_tool_call",
+            "tool_name": "ingest_document_tool",
+            "args": {"title": title, "source_url": source_url},
+            "message": f"Executive Orchestrator invoking document ingestion tool for '{title}'...",
+            "timestamp": time.time(),
+        }
+
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
         passage_id = f"pass_{uuid.uuid4().hex[:8]}"
 
@@ -230,48 +259,10 @@ class ExecutiveOrchestrator:
         )
         db_engine.upsert_passage(pass_rec)
 
-        yield {
-            "event": "ingestion_staged",
-            "doc_id": doc_id,
-            "passage_id": passage_id,
-            "message": f"Document '{title}' staged and stored in plain text passage records.",
-            "timestamp": time.time(),
-        }
-
-        candidate_concepts = [
-            {"title": f"{title} Dynamic Concept", "description": raw_text[:300]}
-        ]
-
-        delta_proposals = []
-        macros = db_engine.get_macros()
-        active_departments = [
-            DepartmentPersonaAgent(m.department_name, m.department_id) for m in macros
-        ]
-        for dept in active_departments:
-            yield {
-                "event": "persona_ingestion_debate",
-                "department_id": dept.department_id,
-                "department_name": dept.department_name,
-                "message": f"{dept.department_name} evaluating graph evolution deltas and concept merging...",
-                "timestamp": time.time(),
-            }
-            prop = dept.debate_ingestion_deltas(raw_text, candidate_concepts)
-            delta_proposals.append(prop)
-
-        yield {
-            "event": "human_in_the_loop_prompt",
-            "prompt_question": f"Should concept '{title}' supersede older pixel-space world model concepts or merge as a sub-concept?",
-            "suggested_actions": [
-                "SUPERSEDE_OLD",
-                "MERGE_INTO_EXISTING",
-                "CREATE_NEW_HUB",
-            ],
-            "timestamp": time.time(),
-        }
-
-        concept_id = f"concept_{title.lower().replace(' ', '_')}"
+        concept_id = f"concept_{uuid.uuid4().hex[:6]}"
         new_node = GraphNode(
             _id=concept_id,
+            node_type="concept",
             title=title,
             text_body=f"# {title}\n{raw_text[:500]}",
             passage_pointers=[passage_id],
@@ -279,25 +270,38 @@ class ExecutiveOrchestrator:
         )
         db_engine.upsert_node(new_node)
 
-        edge_id = f"edge_{concept_id}_to_mpc"
-        new_edge = GraphEdge(
-            _id=edge_id,
-            source_id=concept_id,
-            target_id="concept_action_mpc",
-            is_directional=True,
-            text_body=f"Integration edge from {title} to MPC action planning.",
-            weight=1.0,
-            status="PRIMARY_ACTIVE",
-        )
-        db_engine.upsert_edge(new_edge)
+        # Connect new node to existing concept hubs if available
+        top_hubs = graph_analytics.get_top_concept_hubs(top_k=1)
+        if top_hubs:
+            target_hub = top_hubs[0][0]
+            edge_id = f"edge_{concept_id}_to_{target_hub.id}"
+            new_edge = GraphEdge(
+                _id=edge_id,
+                source_id=concept_id,
+                target_id=target_hub.id,
+                is_directional=True,
+                text_body=f"Ingested concept link from {title} to {target_hub.title}.",
+                weight=1.0,
+                status="PRIMARY_ACTIVE",
+            )
+            db_engine.upsert_edge(new_edge)
 
-        graph_analytics.update_macro_documents()
+            yield {
+                "event": "node_touched",
+                "persona_id": "orchestrator",
+                "persona_name": "Ingestion Engine",
+                "node_id": concept_id,
+                "node_title": title,
+                "message": f"New node '{title}' created and linked to '{target_hub.title}'.",
+                "timestamp": time.time(),
+            }
 
         yield {
-            "event": "ingestion_complete",
+            "event": "tool_complete",
+            "tool_name": "ingest_document_tool",
             "concept_id": concept_id,
             "passage_pointers": [passage_id],
-            "message": f"Successfully integrated node '{concept_id}' with passage pointers and patched Macro Documents.",
+            "message": f"Successfully integrated node '{concept_id}' with passage pointers.",
             "timestamp": time.time(),
         }
 

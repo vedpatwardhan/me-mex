@@ -55,19 +55,36 @@ class ChatRequest(BaseModel):
 
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
-    """Unified Orchestrated Chat Endpoint: Classifies intent & queries Executive Orchestrator / vLLM."""
+    """Unified Orchestrated Chat Endpoint: Classifies intent, streams events, and collects traversal/tool evidence."""
     final_reply = ""
     intent = "DIRECT_CONVERSATION"
     department_findings = []
+    touched_nodes = []
+    tool_calls = []
+    events_log = []
 
     async for event in orchestrator.process_user_message(req.query, req.chat_history):
         evt_type = event.get("event")
-        if evt_type == "orchestrator_intent_classified":
+        events_log.append(event)
+
+        if evt_type == "intent_classified":
             intent = event.get("intent", "DIRECT_CONVERSATION")
-        elif evt_type in ["conversation_complete", "retrieval_complete"]:
+        elif evt_type == "node_touched":
+            touched_nodes.append({
+                "node_id": event.get("node_id"),
+                "node_title": event.get("node_title"),
+                "persona_id": event.get("persona_id"),
+                "persona_name": event.get("persona_name"),
+            })
+        elif evt_type == "orchestrator_tool_call":
+            tool_calls.append({
+                "tool_name": event.get("tool_name"),
+                "args": event.get("args"),
+            })
+        elif evt_type == "chat_complete":
             final_reply = event.get("final_answer", "")
             department_findings = event.get("department_findings", [])
-        elif evt_type == "ingestion_complete":
+        elif evt_type == "tool_complete":
             final_reply = event.get("message", "")
 
     if not final_reply:
@@ -77,6 +94,9 @@ async def chat_endpoint(req: ChatRequest):
         "reply": final_reply,
         "intent": intent,
         "department_findings": department_findings,
+        "touched_nodes": touched_nodes,
+        "tool_calls": tool_calls,
+        "events": events_log,
         "status": "success",
     }
 
@@ -152,140 +172,6 @@ def get_projects():
 @app.post("/api/projects")
 def create_project(project: ProjectWorkspace):
     return {"status": "created", "project": project.model_dump()}
-
-
-# --- Ingestion Pipeline ---
-@app.post("/api/intake")
-def intake_content(req: IntakeRequest, background_tasks: BackgroundTasks):
-    """Bi-directional Seeded Ingestion Endpoint (URL printer, PDF, Voice note, Text)."""
-    new_doc_id = f"doc_{int(time.time())}"
-    new_node_id = f"node_{int(time.time())}"
-
-    node_type = "post"
-    if req.source_type == "voice" or req.source_type == "text":
-        node_type = "post"
-    elif req.source_type == "url":
-        if (
-            "arxiv.org" in req.content_or_url.lower()
-            or "paper" in req.content_or_url.lower()
-        ):
-            node_type = "paper"
-        elif (
-            "youtube.com" in req.content_or_url.lower()
-            or "youtu.be" in req.content_or_url.lower()
-        ):
-            node_type = "video"
-        else:
-            node_type = "blog"
-
-    title = (
-        req.title_hint
-        or f"Ingested {req.source_type.upper()}: {req.content_or_url[:30]}..."
-    )
-
-    new_node = GraphNode(
-        _id=new_node_id,
-        node_type=node_type,
-        title=title,
-        takeaway_2line=f"Bi-directionally extracted concept from {req.source_type} stream.",
-        text_body=f"# {title}\n\nProcessed content from intake stream:\n\n{req.content_or_url}",
-        project_ids=["global", req.project_id]
-        if req.project_id != "global"
-        else ["global"],
-        metadata={"source_type": req.source_type, "input": req.content_or_url},
-    )
-
-    db_engine.upsert_node(new_node)
-
-    # Generate seed edge connection to an existing relevant node
-    existing_nodes = db_engine.get_nodes()
-    existing_node_ids = [n.id for n in existing_nodes]
-    target_id = new_node_id
-    if len(existing_node_ids) > 1:
-        target_id = random.choice(
-            [nid for nid in existing_node_ids if nid != new_node_id]
-        )
-        edge_id = f"edge_{int(time.time())}"
-        seed_edge = GraphEdge(
-            _id=edge_id,
-            source_id=new_node_id,
-            target_id=target_id,
-            is_directional=True,
-            text_body="Bi-directional seeded trajectory match",
-            provenance_quote="Bi-directional seeded trajectory match",
-            project_ids=["global", req.project_id],
-        )
-        db_engine.upsert_edge(seed_edge)
-
-    return {
-        "status": "ingested",
-        "node": new_node.model_dump(),
-        "seed_traversal": [new_node_id, target_id]
-        if len(existing_node_ids) > 1
-        else [new_node_id],
-    }
-
-
-# --- Agent Proposals ---
-@app.get("/api/proposals")
-def get_proposals():
-    return []
-
-
-@app.post("/api/proposals/{proposal_id}/action")
-def proposal_action(proposal_id: str, action: str):
-    return {"status": "accepted"}
-
-
-# --- Interactive Node-Grounded Report Studio ---
-@app.post("/api/reports/generate", response_model=ReportResponse)
-def generate_report(req: ReportRequest):
-    """Generates an interactive markdown report with node-provenance highlight mappings."""
-    report_id = f"rep_{int(time.time())}"
-
-    all_nodes = db_engine.get_nodes()
-    selected_nodes = [n for n in all_nodes if n.id in req.target_node_ids]
-    if not selected_nodes:
-        selected_nodes = all_nodes[:4]
-
-    md_lines = [
-        f"# Research Report: {req.title}\n",
-        f"**Generated Scope:** {req.project_id} workspace | **Node Count:** {len(selected_nodes)}\n",
-        "---",
-        "## 1. Executive Synthesis\n",
-    ]
-
-    provenance_map = {}
-
-    for idx, node in enumerate(selected_nodes):
-        phrase = f"Key Finding {idx+1}: {node.takeaway_2line}"
-        provenance_map[phrase] = node.id
-
-        node_color_tag = "blue"
-        if node.node_type == "concept":
-            node_color_tag = "yellow"
-        elif node.node_type == "video":
-            node_color_tag = "red"
-        elif node.node_type == "post":
-            node_color_tag = "purple"
-
-        md_lines.append(f"### 1.{idx+1} {node.title}\n")
-        md_lines.append(
-            f'<span class="provenance-highlight tag-{node_color_tag}" data-node-id="{node.id}">{phrase}</span>\n'
-        )
-        md_lines.append(
-            f"**Node Type:** `{node.node_type}` | **Source:** [`{node.id}`]\n"
-        )
-        md_lines.append(f"{node.text_body[:300]}...\n")
-
-    full_md = "\n".join(md_lines)
-
-    return ReportResponse(
-        _id=report_id,
-        title=req.title,
-        markdown_content=full_md,
-        provenance_mappings=provenance_map,
-    )
 
 
 if __name__ == "__main__":

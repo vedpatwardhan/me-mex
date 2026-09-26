@@ -10,48 +10,12 @@ router = APIRouter(prefix="/api/sse", tags=["SSE Telemetry"])
 
 @router.get("/chat")
 async def stream_chat_telemetry(request: Request, query: str = Query("Hello")):
-    """Stream real-time SSE events for intent-classified executive conversation, retrieval, or ingestion."""
+    """Stream real-time SSE events (intent_classified, node_touched, persona_traversal_active, tool_complete, chat_complete) over unified chat gateway."""
 
     async def event_generator():
         async for event in orchestrator.process_user_message(query):
             if await request.is_disconnected():
                 print("[SSE] Client disconnected from chat stream.")
-                break
-            yield {"event": event["event"], "data": json.dumps(event)}
-
-    return EventSourceResponse(event_generator())
-
-
-@router.get("/retrieval")
-async def stream_retrieval_telemetry(
-    request: Request, query: str = Query("latent world models")
-):
-    """Stream real-time SSE events for multi-persona graph traversal telemetry during retrieval."""
-
-    async def event_generator():
-        async for event in orchestrator.execute_retrieval_flow(query):
-            if await request.is_disconnected():
-                print("[SSE] Client disconnected from retrieval stream.")
-                break
-            yield {"event": event["event"], "data": json.dumps(event)}
-
-    return EventSourceResponse(event_generator())
-
-
-@router.get("/ingestion")
-async def stream_ingestion_telemetry(
-    request: Request,
-    title: str = Query("JEPA Latent World Model"),
-    content: str = Query(
-        "Joint-Embedding Predictive Architecture for robotics latent rollouts."
-    ),
-):
-    """Stream real-time SSE events for ingestion debate, concept creation, passage linking, and macro patching."""
-
-    async def event_generator():
-        async for event in orchestrator.execute_ingestion_flow(title, content):
-            if await request.is_disconnected():
-                print("[SSE] Client disconnected from ingestion stream.")
                 break
             yield {"event": event["event"], "data": json.dumps(event)}
 

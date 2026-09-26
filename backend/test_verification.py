@@ -33,17 +33,14 @@ async def test_backend_verification():
         f"✓ Dual-Mode Edge Schema verified: {len(undirected_edges)} undirected symmetric edge(s) found."
     )
 
-    # 2. Test Graph Analytics & Community Partitioning
-    print("\n--- Testing Graph Analytics (rustworkx & NetworkX Louvain) ---")
+    # 2. Test Graph Analytics & Concept Hub Discovery
+    print("\n--- Testing Graph Analytics (rustworkx Centrality & Concept Hubs) ---")
     centrality = graph_analytics.calculate_hub_centrality()
     print(f"✓ Calculated Centrality: {centrality}")
-    graph_analytics.update_macro_documents()
-    macros = db_engine.get_macros()
-    print(f"✓ Macro Documents Updated: {len(macros)} departments.")
-    for m in macros:
-        print(
-            f"  - Department Macro: '{m.department_name}' | Hubs: {m.hub_concept_ids}"
-        )
+    top_hubs = graph_analytics.get_top_concept_hubs(top_k=4)
+    print(f"✓ Discovered {len(top_hubs)} Dynamic Concept Hubs:")
+    for hub_node, score in top_hubs:
+        print(f"  - Concept Hub: '{hub_node.title}' (ID: {hub_node.id}, Score: {score})")
 
     # 3. Test Intent Router & Direct Conversation Flow
     print("\n--- Testing Executive Orchestrator Intent Router ---")
@@ -66,9 +63,9 @@ async def test_backend_verification():
     print("\n--- Testing Unified Process User Message Stream ---")
     async for event in orchestrator.process_user_message("What can you help me with?"):
         evt_type = event.get("event")
-        if evt_type == "orchestrator_intent_classified":
+        if evt_type == "intent_classified":
             print(f"  [SSE Event] Intent: {event['intent']}")
-        elif evt_type == "conversation_complete":
+        elif evt_type == "chat_complete":
             print(f"  [SSE Event] Direct Response: {event['final_answer'][:100]}...")
 
     # 4. Test Retrieval Stream (User Flow 2)
@@ -82,9 +79,9 @@ async def test_backend_verification():
             dept_id = event.get("department_id")
             traversed = event.get("traversing_node_ids")
             print(f"  [SSE Event] {dept} ({dept_id}) traversing nodes -> {traversed}")
-        elif evt_type == "retrieval_complete":
+        elif evt_type == "chat_complete":
             print(
-                f"  [SSE Event] Retrieval Complete!\nSynthesis: {event['final_answer'][:120]}..."
+                f"  [SSE Event] Chat Complete!\nSynthesis: {event['final_answer'][:120]}..."
             )
 
     # 5. Test Ingestion Stream (User Flow 1)
@@ -93,17 +90,17 @@ async def test_backend_verification():
     text = "LeWM introduces a joint-embedding predictive architecture for 100x faster trajectory rollouts in latent state representation."
     async for event in orchestrator.execute_ingestion_flow(title, text):
         evt_type = event.get("event")
-        if evt_type == "ingestion_staged":
+        if evt_type == "orchestrator_tool_call":
             print(
-                f"  [SSE Event] Document Staged: doc_id={event['doc_id']}, passage_id={event['passage_id']}"
+                f"  [SSE Event] Tool Call: {event['tool_name']} ({event['args']})"
             )
-        elif evt_type == "human_in_the_loop_prompt":
+        elif evt_type == "node_touched":
             print(
-                f"  [SSE Event] Human-in-the-Loop Clarification emitted: '{event['prompt_question']}'"
+                f"  [SSE Event] Node Touched: '{event['node_title']}' by {event['persona_name']}"
             )
-        elif evt_type == "ingestion_complete":
+        elif evt_type == "tool_complete":
             print(
-                f"  [SSE Event] Ingestion Complete! Concept ID: {event['concept_id']}, Passages: {event['passage_pointers']}"
+                f"  [SSE Event] Tool Complete! Concept ID: {event['concept_id']}, Passages: {event['passage_pointers']}"
             )
 
     print("\n=== ALL GRAPH-MEMEX BACKEND CHECKS PASSED SUCCESSFULLY! ===")

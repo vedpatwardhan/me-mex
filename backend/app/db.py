@@ -37,7 +37,6 @@ class GraphMemexDatabase:
         self.mem_passages: Dict[str, PassageRecord] = {}
         self.mem_nodes: Dict[str, GraphNode] = {}
         self.mem_edges: Dict[str, GraphEdge] = {}
-        self.mem_macro: Dict[str, MacroDocumentRecord] = {}
         self.mem_staging: Dict[str, StagingRecord] = {}
 
         if HAS_PYMONGO:
@@ -122,16 +121,6 @@ class GraphMemexDatabase:
             )
             for e in [e1, e2, e3]:
                 self.upsert_edge(e)
-
-            macro1 = MacroDocumentRecord(
-                _id="macro_dept_world_models",
-                department_name="World Models & Latent Dynamics",
-                hub_concept_ids=["concept_world_models", "concept_latent_world_models"],
-                summary_text="# Macro Department: World Models\nSummary of transition from pixel-space to latent-space world models.",
-            )
-            self.upsert_macro(macro1)
-
-    # --- Node Operations ---
     def upsert_node(self, node: GraphNode):
         if self.use_mongo:
             self.db.nodes.update_one(
@@ -171,24 +160,6 @@ class GraphMemexDatabase:
             return [GraphEdge(**d) for d in docs]
         else:
             return list(self.mem_edges.values())
-
-    # --- Macro Documents ---
-    def upsert_macro(self, macro: MacroDocumentRecord):
-        if self.use_mongo:
-            self.db.macro_documents.update_one(
-                {"_id": macro.id},
-                {"$set": macro.model_dump(by_alias=True)},
-                upsert=True,
-            )
-        else:
-            self.mem_macro[macro.id] = macro
-
-    def get_macros(self) -> List[MacroDocumentRecord]:
-        if self.use_mongo:
-            docs = list(self.db.macro_documents.find())
-            return [MacroDocumentRecord(**d) for d in docs]
-        else:
-            return list(self.mem_macro.values())
 
     # --- Passage Operations ---
     def upsert_passage(self, passage: PassageRecord):

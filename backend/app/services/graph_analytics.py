@@ -119,33 +119,29 @@ class GraphAnalyticsWorker:
         return department_map
 
     @staticmethod
-    def update_macro_documents(theme_id: Optional[str] = None):
-        """Update Macro Documents based on updated Leiden/Louvain community partitions."""
-        partitions = GraphAnalyticsWorker.partition_department_communities(theme_id)
+    def get_top_concept_hubs(
+        theme_id: Optional[str] = None, top_k: int = 4
+    ) -> List[Tuple[GraphNode, float]]:
+        """Identify top K concept hub nodes using eigenvector/degree centrality."""
         centralities = GraphAnalyticsWorker.calculate_hub_centrality(theme_id)
+        if not centralities:
+            # Fallback to returning all existing concept nodes
+            nodes = [n for n in db_engine.get_nodes(theme_id) if n.node_type == "concept"]
+            return [(n, 1.0) for n in nodes[:top_k]]
 
-        for dept_name, member_node_ids in partitions.items():
-            # Rank hubs in this department
-            dept_hubs = sorted(
-                member_node_ids,
-                key=lambda nid: centralities.get(nid, 0.0),
-                reverse=True,
-            )[:3]
-            macro_id = (
-                f"macro_{dept_name.lower().replace(' ', '_').replace('&', 'and')}"
-            )
-
-            macro_rec = MacroDocumentRecord(
-                _id=macro_id,
-                theme_id=theme_id or "vla_research",
-                department_name=dept_name,
-                hub_concept_ids=dept_hubs,
-                summary_text=f"# Macro Department: {dept_name}\nCovers high-level concept hubs: {', '.join(dept_hubs)}.\nContains {len(member_node_ids)} total interlinked concepts.",
-            )
-            db_engine.upsert_macro(macro_rec)
-        print(
-            f"[GraphAnalyticsWorker] Successfully updated {len(partitions)} Department Macro Documents."
+        sorted_hubs = sorted(
+            centralities.items(), key=lambda item: item[1], reverse=True
         )
+        result: List[Tuple[GraphNode, float]] = []
+
+        for node_id, score in sorted_hubs:
+            node = db_engine.get_node(node_id)
+            if node and node.node_type == "concept":
+                result.append((node, score))
+                if len(result) >= top_k:
+                    break
+
+        return result
 
 
 graph_analytics = GraphAnalyticsWorker()
