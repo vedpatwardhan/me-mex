@@ -42,11 +42,11 @@ Both **Retrieval** and **Ingestion** operate on a single conversational gateway 
 
 ### The 3-Step Department Workflow
 
-1. **Macro Routing (Which Offices to Visit):** The Executive Orchestrator consults the **Compressed Macro Documents** to determine which specific "Departments" (e.g. *World Models*, *VLA Decoupling*) are relevant to the target query or document preview.
-2. **Sub-Agent Persona Exploration:** A specialized **Department Sub-Agent Persona** is dispatched to each selected office.
-   - **In Retrieval Mode:** The persona traverses its subgraph relations (`BUILDS_UPON`, `CONTRASTS_WITH`), evaluates evidence, and summarizes relevant concepts.
+1. **Macro Routing (Which Offices to Visit):** The Executive Orchestrator evaluates the query, recent project `chat_history`, and project workspace context to determine which specific concept hub "Departments" are relevant to the query.
+2. **Project-Scoped Persona Exploration:** A specialized **Department Sub-Agent Persona** is dispatched to each top concept hub discovered via `rustworkx` centrality within the active `project_id` workspace.
+   - **In Retrieval Mode:** The persona traverses its project-scoped subgraph relations (`BUILDS_UPON`, `CONTRASTS_WITH`), executes DuckDuckGo web search when needed, and summarizes relevant concepts.
    - **In Ingestion Mode:** The persona additionally debates concept merging, new concept instantiation, edge weight decay (`1.0` $\rightarrow$ `0.3`), and legacy refutations.
-3. **Executive Synthesis / Commit:** The Executive Orchestrator collects reports from visited Department offices to synthesize the final answer (Retrieval) or commit graph updates to MongoDB (Ingestion).
+3. **Executive Synthesis & Chat Persistence:** The Executive Orchestrator synthesizes reports from visited Department offices into a final grounded reply, emits SSE telemetry (`node_touched`, `chat_complete`), and persists user/agent messages to MongoDB under `project_id`.
 
 ---
 

@@ -82,12 +82,26 @@ Graph-Memex operates on a continuous **Retrieval $\rightarrow$ Exploration & Edi
 
 The backend engine (`me-mex/backend`) is fully implemented and verified:
 
-- ✅ **`app/db.py`**: MongoDB Database Engine with models for Documents, Passages, Graph Nodes, Connection Edges, Macro Documents, and Staging Records.
+- ✅ **`app/db.py`**: MongoDB Database Engine with models for Documents, Passages, Graph Nodes, Connection Edges, Project Workspaces, Chat Messages, and Staging Records.
 - ✅ **`app/services/llm_gateway.py`**: vLLM gateway client targeting Colab Ministral 3-8B with local rule-based fallback.
-- ✅ **`app/services/graph_analytics.py`**: `rustworkx` Hub Centrality worker & `NetworkX` Louvain community partitioner.
+- ✅ **`app/services/graph_analytics.py`**: `rustworkx` Hub Centrality worker & `NetworkX` Louvain community partitioner with project-scoped graph filtering.
 - ✅ **`app/tools/search_tools.py`**: ArXiv research paper search and Trafilatura web article text extractor.
-- ✅ **`app/agents/department_persona.py`**: Color-coded Department Personas for parallel graph exploration and ingestion debates.
-- ✅ **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating User Flow 1 (Ingestion) and User Flow 2 (Retrieval).
-- ✅ **`app/api/sse.py`**: FastAPI SSE endpoints (`/api/sse/retrieval` & `/api/sse/ingestion`) streaming live persona traversal telemetry.
-- ✅ **`app/mcp/server.py`**: FastMCP server exposing graph search, passage retrieval, and analytics tools.
-- ✅ **`test_verification.py`**: Automated verification test suite passing all database, analytics, retrieval stream, and ingestion delta checks.
+- ✅ **`app/agents/department_persona.py`**: Color-coded Department Personas for parallel project-scoped graph exploration.
+- ✅ **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating User Flow 1 (Ingestion) and User Flow 2 (Retrieval) with `chat_history` context-aware intent classification.
+- ✅ **`app/api/sse.py`**: FastAPI SSE endpoint (`/api/sse/chat`) streaming live persona traversal telemetry.
+- ✅ **`main.py`**: REST API endpoints for unified chat (`POST /api/chat`), project workspaces (`GET/POST /api/projects`), project chat history (`GET /api/projects/{id}/chat`), and graph querying (`GET /api/graph?project_id=...`).
+- ✅ **`tests/` & `test_verification.py`**: Pytest test suite and backend verification suite passing all database, project scoping, analytics, retrieval stream, and ingestion delta checks.
+
+---
+
+## 🧪 Running Backend Unit & Integration Tests
+
+Run the backend verification suite and granular `pytest` test suite:
+
+```bash
+# Run legacy verification suite
+me-mex/.venv/bin/python3.14 me-mex/backend/test_verification.py
+
+# Run modular pytest suite (max 2 parallel workers per project rule)
+me-mex/.venv/bin/python3.14 -m pytest me-mex/backend/tests -n 2
+```

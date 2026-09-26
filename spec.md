@@ -78,19 +78,20 @@ Graph-Memex operates on a **Single Conversational Gateway (`POST /api/chat`)** c
 
 ### Lifecycle Detailed Steps
 
-1. **Phase 0: Single Conversational Gateway (`POST /api/chat`)**
-   - The user inputs text, a URL, a paper abstract, or a question into the central chat interface.
-   - The **Executive Orchestrator** classifies the prompt intent into `DIRECT_CONVERSATION`, `GRAPH_RETRIEVAL`, or `DOCUMENT_INGESTION`.
+1. **Phase 0: Single Conversational Gateway (`POST /api/chat` & `GET /api/sse/chat`)**
+   - The user inputs text, a URL, a paper abstract, or a question within a selected **Project Workspace** (or `"global"` master superset).
+   - The **Executive Orchestrator** evaluates the prompt in context of recent project `chat_history` and classifies intent into `DIRECT_CONVERSATION`, `GRAPH_RETRIEVAL`, or `DOCUMENT_INGESTION`.
+   - User messages and agent responses are automatically persisted to MongoDB / In-Memory store under `project_id` and isolated per workspace.
 
-2. **Phase 1: Dynamic Concept Hub Personas & Web Search**
-   - Concept hubs are discovered in real time (<5ms) using `rustworkx` eigenvector/degree centrality on the graph network.
-   - A **Specialist Persona** is instantiated dynamically per top concept hub, receiving the user task, its hub node text, and adjacent subgraph edges.
+2. **Phase 1: Dynamic Project-Scoped Concept Hub Personas & Web Search**
+   - Concept hubs are discovered in real time (<5ms) using `rustworkx` eigenvector/degree centrality filtered to the active `project_id` workspace.
+   - A **Specialist Persona** is instantiated dynamically per top concept hub, receiving the user task, hub node text, and adjacent subgraph edges scoped to `project_id`.
    - If internal context is missing, the persona executes `duckduckgo_web_search` tool calls to retrieve live external evidence.
    - Streams active node highlights (`traversing_node_ids`) to animate the visual WebGL canvas in real time.
 
 3. **Phase 2: Orchestrator Tool-Based Ingestion**
    - Ingestion is an agent tool call (`ingest_document_tool`) executed autonomously by the Orchestrator when URLs or documents are pasted.
-   - Scrapes raw text, creates plain-text out-of-graph `PassageRecord`s, extracts atomic `GraphNode` concepts, and links them via `GraphEdge` relations (`BUILDS_UPON`, `SUPERSEDES`, `PARALLEL_TO`).
+   - Generates concise 3-7 word titles via LLM, creates plain-text out-of-graph `PassageRecord`s, extracts atomic `GraphNode` concepts, and links them via `GraphEdge` relations (`BUILDS_UPON`, `SUPERSEDES`, `PARALLEL_TO`) tagged with `project_ids: ["global", active_project_id]`.
 
 ---
 
