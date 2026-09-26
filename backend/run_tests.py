@@ -9,7 +9,7 @@ if backend_dir not in sys.path:
 
 os.environ["DB_NAME"] = "test-me-mex"
 
-from tests.conftest import reset_test_database
+from tests.conftest import reset_test_database, teardown_test_database
 from tests.test_db import (
     test_project_workspace_crud,
     test_node_and_edge_project_scoping,
@@ -61,27 +61,39 @@ def run_all_tests():
         ("Persona: Project-Scoped Traversal", test_department_persona_project_scoping),
     ]
 
-    for name, func in test_funcs:
-        reset_test_database()
-        func()
-        print(f"  ✓ {name} passed.")
-
-    # API Route tests with TestClient
-    with TestClient(app) as client:
-        api_funcs = [
-            ("API: Root Endpoint", test_root_endpoint),
-            ("API: Projects Endpoints", test_projects_endpoints),
-            ("API: Graph Endpoint", test_graph_endpoint),
-            ("API: Chat POST Endpoint", test_chat_endpoint_post),
-            ("API: Project Chat History Endpoint", test_project_chat_history_endpoint),
-            ("API: SSE Chat Stream", test_sse_chat_stream),
-        ]
-        for name, func in api_funcs:
+    try:
+        for name, func in test_funcs:
             reset_test_database()
-            func(client)
-            print(f"  ✓ {name} passed.")
+            try:
+                func()
+                print(f"  ✓ {name} passed.")
+            finally:
+                teardown_test_database()
 
-    print("\n=== ALL TEST SUITE MODULES PASSED SUCCESSFULLY! ===")
+        # API Route tests with TestClient
+        with TestClient(app) as client:
+            api_funcs = [
+                ("API: Root Endpoint", test_root_endpoint),
+                ("API: Projects Endpoints", test_projects_endpoints),
+                ("API: Graph Endpoint", test_graph_endpoint),
+                ("API: Chat POST Endpoint", test_chat_endpoint_post),
+                (
+                    "API: Project Chat History Endpoint",
+                    test_project_chat_history_endpoint,
+                ),
+                ("API: SSE Chat Stream", test_sse_chat_stream),
+            ]
+            for name, func in api_funcs:
+                reset_test_database()
+                try:
+                    func(client)
+                    print(f"  ✓ {name} passed.")
+                finally:
+                    teardown_test_database()
+
+        print("\n=== ALL TEST SUITE MODULES PASSED SUCCESSFULLY! ===")
+    finally:
+        teardown_test_database()
 
 
 if __name__ == "__main__":

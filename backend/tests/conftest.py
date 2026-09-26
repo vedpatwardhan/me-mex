@@ -126,11 +126,32 @@ def reset_test_database():
         db_engine.upsert_edge(e)
 
 
+def teardown_test_database():
+    """Wipe all collections in test-me-mex (MongoDB or in-memory) at test completion."""
+    if db_engine.use_mongo:
+        db_engine.db.nodes.delete_many({})
+        db_engine.db.edges.delete_many({})
+        db_engine.db.projects.delete_many({})
+        db_engine.db.chat_messages.delete_many({})
+        db_engine.db.documents.delete_many({})
+        db_engine.db.passages.delete_many({})
+    else:
+        db_engine.mem_nodes.clear()
+        db_engine.mem_edges.clear()
+        db_engine.mem_projects.clear()
+        db_engine.mem_messages.clear()
+        db_engine.mem_documents.clear()
+        db_engine.mem_passages.clear()
+
+
 @pytest.fixture(autouse=True)
 def clean_test_db() -> Generator[None, None, None]:
-    """Autouse fixture resetting test-me-mex database before each test function."""
+    """Autouse fixture resetting test-me-mex before each test and guaranteeing teardown afterwards."""
     reset_test_database()
-    yield
+    try:
+        yield
+    finally:
+        teardown_test_database()
 
 
 @pytest.fixture
