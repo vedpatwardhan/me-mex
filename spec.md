@@ -81,6 +81,7 @@ Graph-Memex operates on a **Single Conversational Gateway (`POST /api/chat`)** c
 1. **Phase 0: Single Conversational Gateway (`POST /api/chat` & `GET /api/sse/chat`)**
    - The user inputs text, a URL, a paper abstract, or a question within a selected **Project Workspace** (or `"global"` master superset).
    - The **Executive Orchestrator** evaluates the prompt in context of recent project `chat_history` and classifies intent into `DIRECT_CONVERSATION`, `GRAPH_RETRIEVAL`, or `DOCUMENT_INGESTION`.
+   - **Non-Reasoning Fast Intent Decoding**: To minimize latency and eliminate unnecessary `[THINK]` token generation during routing, `classify_intent` and `_extract_document_title` query the LLM gateway with `enable_reasoning=False`, `max_tokens=128`, and strict `response_format={"type": "json_object"}`.
    - User messages and agent responses are automatically persisted to MongoDB / In-Memory store under `project_id` and isolated per workspace.
 
 2. **Phase 1: Dynamic Project-Scoped Concept Hub Personas & Web Search**

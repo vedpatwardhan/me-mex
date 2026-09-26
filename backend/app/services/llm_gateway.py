@@ -4,9 +4,11 @@ import json
 import httpx
 from typing import List, Dict, Any, Optional
 
+from app.config import settings
+
 # Configuration for vLLM Server on Colab / Remote
-COLAB_VLLM_URL = os.getenv("COLAB_VLLM_URL", "http://localhost:8000/v1")
-MODEL_NAME = os.getenv("LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512")
+COLAB_VLLM_URL = settings.COLAB_VLLM_URL
+MODEL_NAME = settings.LLM_MODEL_NAME
 
 # Official Reasoning System Prompt Template for Ministral-3B-Reasoning
 OFFICIAL_REASONING_SYSTEM_PROMPT = """# HOW YOU SHOULD THINK AND ANSWER
@@ -22,7 +24,12 @@ Here, provide a self-contained response."""
 class LLMGateway:
     """Gateway for querying Ministral 3-8B Reasoning running on vLLM Colab instance with structured reasoning support."""
 
-    def __init__(self, base_url: str = COLAB_VLLM_URL, model: str = MODEL_NAME):
+    def __init__(
+        self,
+        base_url: str = COLAB_VLLM_URL,
+        model: str = MODEL_NAME,
+        timeout: float = settings.LLM_TIMEOUT,
+    ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         headers = {
@@ -30,7 +37,7 @@ class LLMGateway:
             "Bypass-Tunnel-Reminder": "true",
             "User-Agent": "Me-Mex-Client",
         }
-        self.client = httpx.Client(timeout=90.0, headers=headers)
+        self.client = httpx.Client(timeout=timeout, headers=headers)
 
     def prepare_reasoning_messages(
         self, messages: List[Dict[str, Any]]

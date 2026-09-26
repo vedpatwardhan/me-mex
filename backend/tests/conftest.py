@@ -23,7 +23,8 @@ backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-# Set test database name before importing backend modules
+# Set environment to testing mode
+os.environ["TESTING"] = "1"
 os.environ["DB_NAME"] = "test-me-mex"
 
 from fastapi.testclient import TestClient

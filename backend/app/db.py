@@ -21,9 +21,11 @@ try:
 except ImportError:
     HAS_PYMONGO = False
 
+from app.config import settings
+
 # MongoDB Connection Configuration
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-DB_NAME = os.getenv("DB_NAME", "me-mex")
+MONGO_URI = settings.MONGO_URI
+DB_NAME = settings.DB_NAME
 
 
 class GraphMemexDatabase:

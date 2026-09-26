@@ -15,7 +15,10 @@ The backend testing framework validates Graph-Memex's core agentic intelligence,
    - The test fixture in `conftest.py` automatically clears all collections/in-memory stores before each test run and seeds baseline entities.
 2. **Zero Headless UI Dependency**:
    - Every system feature (Graph retrieval, tool ingestion, multi-persona exploration, project chat isolation) is verified headlessly via Python unit/integration tests and FastAPI `TestClient`.
-3. **Execution Limits**:
+3. **Clean LLM Test Skipping when Offline**:
+   - Tests requiring live LLM completions (Orchestrator intent classification, title extraction, persona traversal, chat endpoints) inspect `llm_gateway.is_server_available()`.
+   - When the vLLM Colab server is disconnected or offline, LLM-dependent tests are **SKIPPED cleanly** (`⏭️ [SKIPPED - vLLM Server Offline]`) rather than passing via synthetic fallback or failing with connection errors.
+4. **Execution Limits**:
    - Whenever parallel testing tools are invoked, worker count must **never exceed 2** (`-n 2`).
    - Python virtual environment executable: `me-mex/.venv/bin/python3.14`.
 

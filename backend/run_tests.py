@@ -7,6 +7,7 @@ backend_dir = os.path.abspath(os.path.dirname(__file__))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
+os.environ["TESTING"] = "1"
 os.environ["DB_NAME"] = "test-me-mex"
 
 from tests.conftest import reset_test_database, teardown_test_database
