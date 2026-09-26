@@ -40,7 +40,16 @@ class ExecutiveOrchestrator:
             {"role": "user", "content": prompt},
         ]
         try:
-            title = self.llm.generate_chat_completion(messages).strip().strip('"')
+            title = (
+                self.llm.generate_chat_completion(
+                    messages,
+                    temperature=0.3,
+                    max_tokens=128,
+                    enable_reasoning=False,
+                )
+                .strip()
+                .strip('"')
+            )
             if title and len(title) > 3:
                 return title
         except Exception:
@@ -84,7 +93,13 @@ class ExecutiveOrchestrator:
             {"role": "user", "content": prompt},
         ]
         try:
-            res = self.llm.generate_chat_completion(messages)
+            res = self.llm.generate_chat_completion(
+                messages,
+                temperature=0.0,
+                max_tokens=128,
+                response_format={"type": "json_object"},
+                enable_reasoning=False,
+            )
             data = json.loads(res)
             intent = data.get("intent", "DIRECT_CONVERSATION").upper()
             if intent in [

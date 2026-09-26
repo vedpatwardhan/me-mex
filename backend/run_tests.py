@@ -38,31 +38,55 @@ from tests.test_api_routes import (
 from tests.test_sse_telemetry import test_sse_chat_stream
 from fastapi.testclient import TestClient
 from main import app
+from app.services.llm_gateway import llm_gateway
 
 
 def run_all_tests():
     print("=== Running Backend Test Suite on 'test-me-mex' Database ===")
 
-    test_funcs = [
-        ("DB: Project Workspace CRUD", test_project_workspace_crud),
-        ("DB: Node/Edge Project Scoping", test_node_and_edge_project_scoping),
+    server_online = llm_gateway.is_server_available()
+    if not server_online:
+        print(
+            "⚠️ [vLLM Colab Server Offline] LLM-dependent tests will be SKIPPED cleanly."
+        )
+
+    unit_test_funcs = [
+        ("DB: Project Workspace CRUD", test_project_workspace_crud, False),
+        ("DB: Node/Edge Project Scoping", test_node_and_edge_project_scoping, False),
         (
             "DB: Chat Message Persistence & Isolation",
             test_chat_message_persistence_and_isolation,
+            False,
         ),
-        ("Analytics: PyDiGraph Construction", test_rustworkx_graph_construction),
-        ("Analytics: Hub Centrality Ranking", test_hub_centrality_calculation),
-        ("Analytics: Project-Scoped Concept Hubs", test_project_scoped_concept_hubs),
-        ("Orchestrator: Direct Intent", test_classify_intent_direct),
-        ("Orchestrator: Retrieval Intent", test_classify_intent_retrieval),
-        ("Orchestrator: Ingestion Intent", test_classify_intent_ingestion),
-        ("Orchestrator: Chat History Intent", test_classify_intent_with_chat_history),
-        ("Orchestrator: Extract Title", test_extract_document_title),
-        ("Persona: Project-Scoped Traversal", test_department_persona_project_scoping),
+        ("Analytics: PyDiGraph Construction", test_rustworkx_graph_construction, False),
+        ("Analytics: Hub Centrality Ranking", test_hub_centrality_calculation, False),
+        (
+            "Analytics: Project-Scoped Concept Hubs",
+            test_project_scoped_concept_hubs,
+            False,
+        ),
+        ("Orchestrator: Direct Intent", test_classify_intent_direct, True),
+        ("Orchestrator: Retrieval Intent", test_classify_intent_retrieval, True),
+        ("Orchestrator: Ingestion Intent", test_classify_intent_ingestion, True),
+        (
+            "Orchestrator: Chat History Intent",
+            test_classify_intent_with_chat_history,
+            True,
+        ),
+        ("Orchestrator: Extract Title", test_extract_document_title, True),
+        (
+            "Persona: Project-Scoped Traversal",
+            test_department_persona_project_scoping,
+            True,
+        ),
     ]
 
     try:
-        for name, func in test_funcs:
+        for name, func, requires_llm in unit_test_funcs:
+            if requires_llm and not server_online:
+                print(f"  ⏭️ {name} [SKIPPED - vLLM Server Offline]")
+                continue
+
             reset_test_database()
             try:
                 func()
@@ -73,17 +97,22 @@ def run_all_tests():
         # API Route tests with TestClient
         with TestClient(app) as client:
             api_funcs = [
-                ("API: Root Endpoint", test_root_endpoint),
-                ("API: Projects Endpoints", test_projects_endpoints),
-                ("API: Graph Endpoint", test_graph_endpoint),
-                ("API: Chat POST Endpoint", test_chat_endpoint_post),
+                ("API: Root Endpoint", test_root_endpoint, False),
+                ("API: Projects Endpoints", test_projects_endpoints, False),
+                ("API: Graph Endpoint", test_graph_endpoint, False),
+                ("API: Chat POST Endpoint", test_chat_endpoint_post, True),
                 (
                     "API: Project Chat History Endpoint",
                     test_project_chat_history_endpoint,
+                    True,
                 ),
-                ("API: SSE Chat Stream", test_sse_chat_stream),
+                ("API: SSE Chat Stream", test_sse_chat_stream, True),
             ]
-            for name, func in api_funcs:
+            for name, func, requires_llm in api_funcs:
+                if requires_llm and not server_online:
+                    print(f"  ⏭️ {name} [SKIPPED - vLLM Server Offline]")
+                    continue
+
                 reset_test_database()
                 try:
                     func(client)
@@ -91,7 +120,7 @@ def run_all_tests():
                 finally:
                     teardown_test_database()
 
-        print("\n=== ALL TEST SUITE MODULES PASSED SUCCESSFULLY! ===")
+        print("\n=== BACKEND TEST SUITE EXECUTION COMPLETED! ===")
     finally:
         teardown_test_database()
 

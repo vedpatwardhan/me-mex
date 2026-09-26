@@ -74,24 +74,42 @@ class LLMGateway:
             return {"thinking": thinking, "final_response": final_response}
         return {"thinking": "", "final_response": content.strip()}
 
+    def is_server_available(self) -> bool:
+        """Ping vLLM server endpoint to verify live availability."""
+        try:
+            resp = self.client.get(f"{self.base_url}/models", timeout=2.0)
+            return resp.status_code == 200
+        except Exception:
+            return False
+
     def generate_chat_completion(
         self,
         messages: List[Dict[str, Any]],
         temperature: float = 0.7,
         max_tokens: int = 8192,
         top_p: float = 0.95,
+        response_format: Optional[Dict[str, Any]] = None,
+        guided_json: Optional[Dict[str, Any]] = None,
+        enable_reasoning: bool = True,
     ) -> str:
-        """Call vLLM OpenAI-compatible endpoint with automatic reasoning prompt formatting & output parsing."""
+        """Call vLLM OpenAI-compatible endpoint with optional reasoning prompt formatting & structured output decoding."""
         url = f"{self.base_url}/chat/completions"
-        formatted_messages = self.prepare_reasoning_messages(messages)
+        formatted_messages = (
+            self.prepare_reasoning_messages(messages) if enable_reasoning else messages
+        )
 
-        payload = {
+        payload: Dict[str, Any] = {
             "model": self.model,
             "messages": formatted_messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "top_p": top_p,
         }
+        if response_format:
+            payload["response_format"] = response_format
+        if guided_json:
+            payload["guided_json"] = guided_json
+
         try:
             resp = self.client.post(url, json=payload)
             if resp.status_code == 200:
@@ -111,23 +129,20 @@ class LLMGateway:
                     )
                     return raw_content.strip()
 
-                parsed = self.parse_reasoning_output(raw_content)
-                if parsed["thinking"]:
-                    print(
-                        f"[LLMGateway] Parsed [THINK] Reasoning Tokens: {len(parsed['thinking'])} chars"
-                    )
-                return parsed["final_response"]
+                if enable_reasoning:
+                    parsed = self.parse_reasoning_output(raw_content)
+                    if parsed["thinking"]:
+                        print(
+                            f"[LLMGateway] Parsed [THINK] Reasoning Tokens: {len(parsed['thinking'])} chars"
+                        )
+                    return parsed["final_response"]
+                return raw_content.strip()
             else:
-                print(
-                    f"[LLMGateway] HTTP error {resp.status_code}: {resp.text}. Using synthetic fallback."
+                raise ConnectionError(
+                    f"vLLM Server returned HTTP {resp.status_code}: {resp.text}"
                 )
-                return self._rule_based_fallback(messages)
-                return self._rule_based_fallback(messages)
         except Exception as e:
-            print(
-                f"[LLMGateway] Network/Connection error ({e}). Using synthetic fallback response."
-            )
-            return self._rule_based_fallback(messages)
+            raise ConnectionError(f"vLLM Server unreachable or error ({e})")
 
     def _rule_based_fallback(self, messages: List[Dict[str, Any]]) -> str:
         """Synthetic structured responses for local testing when Colab vLLM server is disconnected."""
