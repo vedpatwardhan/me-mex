@@ -13,7 +13,6 @@ Return JSON format:
     {
       "source_title": "Concept A",
       "target_title": "Concept B",
-      "relation_type": "BUILDS_UPON" | "SUPERSEDES" | "PARALLEL_TO",
       "description": "Qualitative link explanation"
     }
   ]

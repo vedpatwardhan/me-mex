@@ -39,3 +39,16 @@ def test_classify_intent_with_chat_history():
         "Compare this with diffusion policies", chat_history=history
     )
     assert res["intent"] == "GRAPH_RETRIEVAL"
+
+
+def test_merge_extracted_concepts():
+    """Verify empty raw concepts handling in merge_extracted_concepts."""
+    res = orchestrator.merge_extracted_concepts(
+        raw_extracted_concepts=[],
+        extracted_relations=[],
+        doc_title="Test Document",
+        query="Test query",
+        chat_history=[],
+    )
+    assert res["concepts"] == []
+    assert res["relations"] == []

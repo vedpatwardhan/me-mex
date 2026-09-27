@@ -26,6 +26,7 @@ from tests.test_orchestrator import (
     test_classify_intent_retrieval,
     test_classify_intent_ingestion,
     test_classify_intent_with_chat_history,
+    test_merge_extracted_concepts,
 )
 from tests.test_department_persona import test_department_persona_project_scoping
 from tests.test_direct_conversation import (
@@ -75,6 +76,11 @@ def run_all_tests():
             "Orchestrator: Chat History Intent",
             test_classify_intent_with_chat_history,
             True,
+        ),
+        (
+            "Orchestrator: Merge Extracted Concepts",
+            test_merge_extracted_concepts,
+            False,
         ),
         (
             "Persona: Project-Scoped Traversal",

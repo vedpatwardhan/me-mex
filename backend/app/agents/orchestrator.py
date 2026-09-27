@@ -92,6 +92,52 @@ class ExecutiveOrchestrator:
                 "relations": [],
             }
 
+    def merge_extracted_concepts(
+        self,
+        raw_extracted_concepts: List[Dict[str, Any]],
+        extracted_relations: List[Dict[str, Any]],
+        doc_title: str,
+        query: str,
+        chat_history: List[Dict[str, str]],
+    ) -> Dict[str, Any]:
+        """Merges and consolidates raw passage concepts into canonical concepts with aggregated passage pointers and simple directed edges."""
+        if not raw_extracted_concepts:
+            return {"concepts": [], "relations": []}
+
+        system_prompt = load_prompt("merge_concepts").format(doc_title=doc_title)
+        messages = [{"role": "system", "content": system_prompt}]
+        if chat_history:
+            messages.extend(chat_history[-4:])
+
+        payload_content = (
+            f"User Query Context: {query}\n\n"
+            f"Raw Passage Concept Extractions ({len(raw_extracted_concepts)} items):\n"
+            f"{json.dumps(raw_extracted_concepts, indent=2)}\n\n"
+            f"Raw Passage Relations ({len(extracted_relations)} items):\n"
+            f"{json.dumps(extracted_relations, indent=2)}"
+        )
+        messages.append({"role": "user", "content": payload_content})
+
+        try:
+            res = self.llm.generate_chat_completion(
+                messages,
+                temperature=0.2,
+                max_tokens=2048,
+                response_format={"type": "json_object"},
+                enable_reasoning=False,
+            )
+            data = json.loads(res)
+            return {
+                "concepts": data.get("concepts", []),
+                "relations": data.get("relations", []),
+            }
+        except Exception as e:
+            print(f"[ExecutiveOrchestrator] Concept merging LLM pass error: {e}")
+            return {
+                "concepts": raw_extracted_concepts,
+                "relations": extracted_relations,
+            }
+
     def classify_intent(
         self, query: str, chat_history: List[Dict[str, str]]
     ) -> Dict[str, Any]:
@@ -406,6 +452,13 @@ class ExecutiveOrchestrator:
                 )
             extracted_relations.extend(extraction.get("relations", []))
 
+        # Step 4: In-Memory Concept Merging & Consolidation
+        merged_result = self.merge_extracted_concepts(
+            raw_extracted_concepts, extracted_relations, title, query, chat_history
+        )
+        merged_concepts = merged_result.get("concepts", [])
+        merged_relations = merged_result.get("relations", [])
+
         proj_list = ["global"]
         if project_id and project_id != "global":
             proj_list.append(project_id)
@@ -414,14 +467,17 @@ class ExecutiveOrchestrator:
         top_hubs = self.analytics.get_top_concept_hubs(project_id=project_id, top_k=2)
 
         created_node_ids = []
-        for c_data in raw_extracted_concepts:
+        for c_data in merged_concepts:
             concept_id = f"concept_{uuid.uuid4().hex[:6]}"
+            passage_ptrs = c_data.get("passage_ids") or (
+                [c_data.get("passage_id")] if c_data.get("passage_id") else []
+            )
             c_node = GraphNode(
                 _id=concept_id,
                 node_type="concept",
                 title=c_data["title"],
                 text_body=f"# {c_data['title']}\n{c_data['description']}",
-                passage_pointers=[c_data["passage_id"]],
+                passage_pointers=passage_ptrs,
                 project_ids=proj_list,
                 metadata={"status": "PRIMARY_ACTIVE"},
             )
