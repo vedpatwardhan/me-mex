@@ -20,6 +20,7 @@ from tests.test_graph_analytics import (
     test_rustworkx_graph_construction,
     test_hub_centrality_calculation,
     test_project_scoped_concept_hubs,
+    test_pure_centrality_dynamic_hub_selection,
 )
 from tests.test_orchestrator import (
     test_classify_intent_direct,
@@ -70,6 +71,11 @@ def run_all_tests():
         (
             "Analytics: Project-Scoped Concept Hubs",
             test_project_scoped_concept_hubs,
+            False,
+        ),
+        (
+            "Analytics: Dynamic Pure Centrality Hub Selection",
+            test_pure_centrality_dynamic_hub_selection,
             False,
         ),
         ("Orchestrator: Direct Intent", test_classify_intent_direct, True),

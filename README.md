@@ -58,7 +58,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 
 * **Database Engine:** **MongoDB** document database (`documents`, `passages`, `nodes`, `edges`, `macro_documents`, `staging_sandbox`, `projects`, `chat_messages`) with in-memory fallback for local execution.
 * **LLM Gateway:** **Ministral 3-8B** running remotely via Colab vLLM server (`http://localhost:8000/v1`) with local rule-based fallback.
-* **Graph Analytics Worker:** **`rustworkx`** PyDiGraph for eigenvector/degree Hub Centrality ranking + **`NetworkX`** Louvain community partitioning.
+* **Graph Analytics Worker:** **`rustworkx`** PyDiGraph for fast (<1ms) eigenvector/degree Hub Centrality ranking with dynamic node-type filtering and relative score thresholding.
 * **Agent Protocol & Tools:** **FastMCP** (Python MCP SDK) exposing typed tools (`search_duckduckgo_web`, `search_arxiv_papers`, `fetch_web_article`, `get_graph_nodes`, `get_passages_by_ids`, `get_macro_documents`, `calculate_hub_rankings`).
 * **Search Integrations:** **`arxiv`** API client and **`trafilatura`** web page markdown extractor.
 * **Telemetry Streaming:** **FastAPI + SSE Starlette** streaming real-time colored persona node traversal events to the WebGL canvas.
@@ -72,7 +72,7 @@ The backend engine (`me-mex/backend`) is fully implemented and verified:
 
 - ✅ **`app/db.py`**: MongoDB Database Engine with models for Documents, Passages, Graph Nodes, Connection Edges, Project Workspaces, Chat Messages, and Staging Records.
 - ✅ **`app/services/llm_gateway.py`**: vLLM gateway client targeting Colab Ministral 3-8B with local rule-based fallback.
-- ✅ **`app/services/graph_analytics.py`**: `rustworkx` Hub Centrality worker & `NetworkX` Louvain community partitioner with project-scoped graph filtering.
+- ✅ **`app/services/graph_analytics.py`**: `rustworkx` Hub Centrality worker with pure centrality dynamic thresholding and project-scoped graph filtering.
 - ✅ **`app/tools/search_tools.py`**: ArXiv research paper search and Trafilatura web article text extractor.
 - ✅ **`app/agents/department_persona.py`**: Specialist Personas for shared sub-graph exploration, relevance debate, and multi-persona concept merging.
 - ✅ **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating Direct Conversation, Ingestion, and Persona Retrieval flows with `chat_history` context-aware intent classification.

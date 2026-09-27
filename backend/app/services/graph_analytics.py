@@ -123,30 +123,46 @@ class GraphAnalyticsWorker:
 
     @staticmethod
     def get_top_concept_hubs(
-        project_id: Optional[str] = None, top_k: int = 4
+        project_id: Optional[str] = None,
+        max_k: int = 8,
+        relative_threshold: float = 0.30,
     ) -> List[Tuple[GraphNode, float]]:
-        """Identify top K concept hub nodes using eigenvector/degree centrality."""
+        """Identify concept hub nodes dynamically using eigenvector/degree centrality with relative thresholding."""
         centralities = GraphAnalyticsWorker.calculate_hub_centrality(project_id)
+        concept_nodes = [
+            n for n in db_engine.get_nodes(project_id) if n.node_type == "concept"
+        ]
+
+        if not concept_nodes:
+            return []
+
         if not centralities:
-            # Fallback to returning all existing concept nodes
-            nodes = [
-                n for n in db_engine.get_nodes(project_id) if n.node_type == "concept"
-            ]
-            return [(n, 1.0) for n in nodes[:top_k]]
+            return [(n, 1.0) for n in concept_nodes[:max_k]]
 
-        sorted_hubs = sorted(
-            centralities.items(), key=lambda item: item[1], reverse=True
-        )
-        result: List[Tuple[GraphNode, float]] = []
+        # Filter candidates strictly to 'concept' nodes
+        concept_scores: List[Tuple[GraphNode, float]] = []
+        for c_node in concept_nodes:
+            score = centralities.get(c_node.id, 0.0)
+            concept_scores.append((c_node, score))
 
-        for node_id, score in sorted_hubs:
-            node = db_engine.get_node(node_id)
-            if node and node.node_type == "concept":
-                result.append((node, score))
-                if len(result) >= top_k:
+        # Sort descending by centrality score
+        concept_scores.sort(key=lambda x: x[1], reverse=True)
+
+        if not concept_scores:
+            return []
+
+        max_score = concept_scores[0][1]
+
+        # Apply relative thresholding (s_i >= relative_threshold * max_score)
+        selected_hubs: List[Tuple[GraphNode, float]] = []
+        for c_node, score in concept_scores:
+            # Always include the top hub; for others, enforce relative thresholding
+            if not selected_hubs or score >= (max_score * relative_threshold):
+                selected_hubs.append((c_node, score))
+                if len(selected_hubs) >= max_k:
                     break
 
-        return result
+        return selected_hubs
 
 
 graph_analytics = GraphAnalyticsWorker()

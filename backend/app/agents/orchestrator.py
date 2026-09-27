@@ -22,13 +22,13 @@ from app.prompts import load_prompt
 class ExecutiveOrchestrator:
     """Executive Orchestrator agent acting as central intent classifier and coordinator for conversation, retrieval, and ingestion."""
 
-    def __init__(self, top_k_hubs: int = 4):
+    def __init__(self, max_k_hubs: int = 8):
         self.db = db_engine
         self.analytics = graph_analytics
         self.llm = llm_gateway
         self.tools = search_tools
         self.event_queue = event_queue
-        self.top_k_hubs = top_k_hubs
+        self.max_k_hubs = max_k_hubs
 
     def _chunk_text(self, text: str, chunk_size: int = 1500) -> List[str]:
         """Splits raw document text into fixed ~500 token (~1500 character) passage chunks."""
@@ -278,7 +278,7 @@ class ExecutiveOrchestrator:
 
         # Dynamically discover top concept hubs via rustworkx centrality in project scope
         top_hubs = self.analytics.get_top_concept_hubs(
-            project_id=project_id, top_k=self.top_k_hubs
+            project_id=project_id, max_k=self.max_k_hubs
         )
         active_departments = [
             DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
@@ -467,7 +467,7 @@ class ExecutiveOrchestrator:
 
         # Step 5: Discover Top Concept Hubs & Instantiate Hub Persona Agents
         top_hubs = self.analytics.get_top_concept_hubs(
-            project_id=project_id, top_k=self.top_k_hubs
+            project_id=project_id, max_k=self.max_k_hubs
         )
         active_departments = [
             DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs

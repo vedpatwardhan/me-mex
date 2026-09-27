@@ -276,7 +276,7 @@ Both Retrieval and Ingestion operate on a single unified multi-agent pattern str
 - **Constraint**: Do **NOT** use Neo4j.
 - **Storage Model**: **MongoDB** (with automatic in-memory dictionary fallback for local development).
   - Storage partitioned across `nodes` (`ROOT_MEDIA`, `CONCEPT`), `edges` (`GraphEdge`), `documents`, `passages`, and `macros` collections.
-  - Deep graph algorithms (Centrality rankings, Louvain hub partitioning) execute in Python memory via `rustworkx` or `scipy.sparse`.
+  - Deep graph algorithms (Eigenvector/Degree Centrality rankings, node-type filtering, relative score thresholding) execute in Python memory via `rustworkx`.
 
 ### B. FastMCP Protocol & Bidirectional Markdown Sync
 - **FastMCP Protocol**: Exposes atomic graph tools (`add_paper_node`, `connect_nodes`, `query_neighborhood`, `patch_macro_document`) via Python `fastmcp`.
