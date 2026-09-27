@@ -488,62 +488,67 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
-            eval_res = dept.explore_and_ingest(
+            ingest_res = dept.persona_ingestion(
                 consolidated_concepts, title, query, chat_history, project_id=project_id
             )
 
-            # Process merged_into_existing updates
-            for m_item in eval_res.get("merged_into_existing", []):
-                existing_id = m_item.get("existing_node_id")
-                existing_node = self.db.get_node(existing_id)
-                if existing_node:
-                    if m_item.get("additional_text"):
-                        existing_node.text_body += f"\n\n## Addition from '{title}':\n{m_item['additional_text']}"
-                    for pid in m_item.get("passage_ids", []):
-                        if pid not in existing_node.passage_pointers:
-                            existing_node.passage_pointers.append(pid)
-                    self.db.upsert_node(existing_node)
-                    merged_existing_node_ids.add(existing_id)
-                    title_to_node_id[existing_node.title.lower()] = existing_id
+            # Process command list emitted by persona ingestion
+            for cmd in ingest_res.get("commands", []):
+                cmd_type = cmd.get("command_type")
+                if cmd_type == "EDIT_EXISTING_CONCEPT":
+                    existing_id = cmd.get("existing_node_id")
+                    existing_node = self.db.get_node(existing_id)
+                    if existing_node:
+                        if cmd.get("additional_text"):
+                            existing_node.text_body += f"\n\n## Addition from '{title}':\n{cmd['additional_text']}"
+                        for pid in cmd.get("passage_ids", []):
+                            if pid not in existing_node.passage_pointers:
+                                existing_node.passage_pointers.append(pid)
+                        self.db.upsert_node(existing_node)
+                        merged_existing_node_ids.add(existing_id)
+                        title_to_node_id[existing_node.title.lower()] = existing_id
 
-                    node_evt = {
-                        "event": "node_touched",
-                        "persona_id": dept.department_id,
-                        "persona_name": dept.department_name,
-                        "node_id": existing_id,
-                        "node_title": existing_node.title,
-                        "message": f"Concept '{existing_node.title}' updated with new insights from '{title}'.",
-                        "timestamp": time.time(),
-                    }
-                    self.event_queue.push(project_id, node_evt)
-                    yield node_evt
+                        node_evt = {
+                            "event": "node_touched",
+                            "persona_id": dept.department_id,
+                            "persona_name": dept.department_name,
+                            "node_id": existing_id,
+                            "node_title": existing_node.title,
+                            "message": f"Concept '{existing_node.title}' updated with new insights from '{title}'.",
+                            "timestamp": time.time(),
+                        }
+                        self.event_queue.push(project_id, node_evt)
+                        yield node_evt
 
-            # Process new edges from persona evaluation
-            for e_item in eval_res.get("new_edges", []):
-                src_key = e_item.get("source_title", "").lower()
-                tgt_key = e_item.get("target_title", "").lower()
-                src_id = title_to_node_id.get(src_key) or (
-                    dept.hub_node.id if dept.hub_node.title.lower() in src_key else None
-                )
-                tgt_id = title_to_node_id.get(tgt_key) or (
-                    dept.hub_node.id if dept.hub_node.title.lower() in tgt_key else None
-                )
-                if src_id and tgt_id and src_id != tgt_id:
-                    edge_id = f"edge_{src_id}_to_{tgt_id}"
-                    new_edge = GraphEdge(
-                        _id=edge_id,
-                        source_id=src_id,
-                        target_id=tgt_id,
-                        is_directional=True,
-                        text_body=e_item.get(
-                            "description",
-                            f"Link from {e_item.get('source_title')} to {e_item.get('target_title')}",
-                        ),
-                        weight=1.0,
-                        project_ids=proj_list,
-                        status="PRIMARY_ACTIVE",
+                elif cmd_type == "CONSTRUCT_EDGE":
+                    src_key = str(cmd.get("source_title", "")).lower()
+                    tgt_key = str(cmd.get("target_title", "")).lower()
+                    src_id = title_to_node_id.get(src_key) or (
+                        dept.hub_node.id
+                        if dept.hub_node.title.lower() in src_key
+                        else None
                     )
-                    self.db.upsert_edge(new_edge)
+                    tgt_id = title_to_node_id.get(tgt_key) or (
+                        dept.hub_node.id
+                        if dept.hub_node.title.lower() in tgt_key
+                        else None
+                    )
+                    if src_id and tgt_id and src_id != tgt_id:
+                        edge_id = f"edge_{src_id}_to_{tgt_id}"
+                        new_edge = GraphEdge(
+                            _id=edge_id,
+                            source_id=src_id,
+                            target_id=tgt_id,
+                            is_directional=True,
+                            text_body=cmd.get(
+                                "description",
+                                f"Link from {cmd.get('source_title')} to {cmd.get('target_title')}",
+                            ),
+                            weight=1.0,
+                            project_ids=proj_list,
+                            status="PRIMARY_ACTIVE",
+                        )
+                        self.db.upsert_edge(new_edge)
 
         # Step 7: Create GraphNodes ONLY for novel consolidated concepts NOT merged into existing nodes
         for c_data in consolidated_concepts:

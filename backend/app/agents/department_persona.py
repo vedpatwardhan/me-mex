@@ -201,7 +201,7 @@ class DepartmentPersonaAgent:
             "web_search_used": False,
         }
 
-    def explore_and_ingest(
+    def persona_ingestion(
         self,
         consolidated_concepts: List[Dict[str, Any]],
         doc_title: str,
@@ -209,7 +209,7 @@ class DepartmentPersonaAgent:
         chat_history: List[Dict[str, str]],
         project_id: str = "global",
     ) -> Dict[str, Any]:
-        """Ingestion mode: Executes shared exploration first, then evaluates concept merging against hub knowledge."""
+        """Ingestion mode: Executes shared exploration first, then outputs a structured command list for graph integration."""
         exploration = self.explore_concept_hub(
             query=query,
             chat_history=chat_history,
@@ -224,16 +224,16 @@ class DepartmentPersonaAgent:
             f"User Query Context: {query}\n\n"
             f"Hub Concept: '{self.hub_node.title}' (ID: {self.hub_node.id})\n"
             f"Hub Description: {self.hub_node.text_body}\n\n"
-            f"Adjacent Subgraph Concepts:\n"
+            f"Explored Subgraph Concepts ({len(subgraph_nodes)} nodes):\n"
             f"{json.dumps([{'id': n.id, 'title': n.title, 'body': n.text_body[:200]} for n in subgraph_nodes], indent=2)}\n\n"
-            f"Newly Extracted Candidate Concepts ({len(consolidated_concepts)} items):\n"
+            f"Candidate Intra-Document Concepts ({len(consolidated_concepts)} items):\n"
             f"{json.dumps(consolidated_concepts, indent=2)}"
         )
 
         messages = [
             {
                 "role": "system",
-                "content": load_prompt("persona_ingestion_evaluation").format(
+                "content": load_prompt("persona_ingestion").format(
                     hub_title=self.hub_node.title
                 ),
             }
@@ -251,21 +251,20 @@ class DepartmentPersonaAgent:
                 enable_reasoning=False,
             )
             data = json.loads(res)
+            commands = data.get("commands", [])
             return {
                 "department_id": self.department_id,
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
                 "traversing_node_ids": exploration.get("traversing_node_ids", []),
-                "new_edges": data.get("new_edges", []),
-                "merged_into_existing": data.get("merged_into_existing", []),
+                "commands": commands,
             }
         except Exception as e:
-            print(f"[{self.department_name}] Ingestion evaluation error: {e}")
+            print(f"[{self.department_name}] Persona ingestion error: {e}")
             return {
                 "department_id": self.department_id,
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
                 "traversing_node_ids": exploration.get("traversing_node_ids", []),
-                "new_edges": [],
-                "merged_into_existing": [],
+                "commands": [],
             }
