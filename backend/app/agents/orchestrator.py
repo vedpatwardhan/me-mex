@@ -495,9 +495,19 @@ class ExecutiveOrchestrator:
             # Process command list emitted by persona ingestion
             for cmd in ingest_res.get("commands", []):
                 cmd_type = cmd.get("command_type")
-                if cmd_type == "EDIT_EXISTING_CONCEPT":
+                if cmd_type == "EDIT_CONCEPT":
                     existing_id = cmd.get("existing_node_id")
-                    existing_node = self.db.get_node(existing_id)
+                    if not existing_id and "subgraph_idx" in cmd:
+                        try:
+                            s_idx = int(cmd["subgraph_idx"])
+                            sub_nodes = ingest_res.get("traversing_node_ids", [])
+                            if 0 <= s_idx < len(sub_nodes):
+                                existing_id = sub_nodes[s_idx]
+                        except Exception:
+                            pass
+                    existing_node = (
+                        self.db.get_node(existing_id) if existing_id else None
+                    )
                     if existing_node:
                         if cmd.get("additional_text"):
                             existing_node.text_body += f"\n\n## Addition from '{title}':\n{cmd['additional_text']}"
@@ -505,14 +515,14 @@ class ExecutiveOrchestrator:
                             if pid not in existing_node.passage_pointers:
                                 existing_node.passage_pointers.append(pid)
                         self.db.upsert_node(existing_node)
-                        merged_existing_node_ids.add(existing_id)
-                        title_to_node_id[existing_node.title.lower()] = existing_id
+                        merged_existing_node_ids.add(existing_node.id)
+                        title_to_node_id[existing_node.title.lower()] = existing_node.id
 
                         node_evt = {
                             "event": "node_touched",
                             "persona_id": dept.department_id,
                             "persona_name": dept.department_name,
-                            "node_id": existing_id,
+                            "node_id": existing_node.id,
                             "node_title": existing_node.title,
                             "message": f"Concept '{existing_node.title}' updated with new insights from '{title}'.",
                             "timestamp": time.time(),

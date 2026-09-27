@@ -218,6 +218,24 @@ class DepartmentPersonaAgent:
         )
 
         subgraph_nodes = exploration.get("subgraph_nodes", [])
+        subgraph_nodes_payload = [
+            {
+                "subgraph_idx": idx,
+                "id": n.id,
+                "title": n.title,
+                "body": n.text_body[:200],
+            }
+            for idx, n in enumerate(subgraph_nodes)
+        ]
+        candidate_concepts_payload = [
+            {
+                "candidate_idx": idx,
+                "title": c.get("title"),
+                "description": c.get("description"),
+                "passage_ids": c.get("passage_ids", []),
+            }
+            for idx, c in enumerate(consolidated_concepts)
+        ]
 
         prompt_payload = (
             f"Document Title: {doc_title}\n"
@@ -225,9 +243,9 @@ class DepartmentPersonaAgent:
             f"Hub Concept: '{self.hub_node.title}' (ID: {self.hub_node.id})\n"
             f"Hub Description: {self.hub_node.text_body}\n\n"
             f"Explored Subgraph Concepts ({len(subgraph_nodes)} nodes):\n"
-            f"{json.dumps([{'id': n.id, 'title': n.title, 'body': n.text_body[:200]} for n in subgraph_nodes], indent=2)}\n\n"
+            f"{json.dumps(subgraph_nodes_payload, indent=2)}\n\n"
             f"Candidate Intra-Document Concepts ({len(consolidated_concepts)} items):\n"
-            f"{json.dumps(consolidated_concepts, indent=2)}"
+            f"{json.dumps(candidate_concepts_payload, indent=2)}"
         )
 
         messages = [
