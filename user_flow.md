@@ -56,9 +56,10 @@ Both **Retrieval** and **Ingestion** operate on a single conversational gateway 
    - **In Retrieval Mode:** The debate determines how closely each concept hub relates to the query topic, emitting glowing `traversing_node_ids` to the WebGL visualizer and providing grounded evidence to the Orchestrator for synthesis.
 
 3. **Multi-Persona Concept Merging Debate (Ingestion Specific Step):**
-   - Ingestion adds an explicit **Concept Merging Debate Step** on top of the shared exploration and relevance debate.
-   - **Persona Knowledge Base:** Each persona treats its hub and adjacent neighborhood as its specialized knowledge base (*"Everything I know about this domain in the database"*).
-   - **Ingestion Evaluation:** All candidate concepts extracted from the incoming document (after initial passage extraction and deduplication) are passed to **every relevant concept hub persona**.
+   - Ingestion adds an explicit **Concept Merging Debate Step** on top of shared exploration and relevance debate.
+   - **Document-Level Consolidation**: Passage-level concepts extracted from the incoming document are first consolidated into a set of document-specific canonical concepts (`consolidate_extracted_concepts`).
+   - **Persona Knowledge Base**: Each persona treats its hub and adjacent neighborhood as its specialized knowledge base (*"Everything I know about this domain in the database"*).
+   - **Ingestion Merging Evaluation**: All consolidated concepts from the document are passed to every relevant concept hub persona to merge them into the global graph topology.
    - **Per-Persona Graph Integration:** Each persona independently evaluates the document's concepts against its domain knowledge:
      - **Inclusion & Merging:** Decides whether a concept should be merged into an existing node, updated with new text, or instantiated as a new concept.
      - **Multi-Hub Connection (Multiple Edges):** If a single concept from the document is relevant to multiple concept hub personas, each persona creates its own connection edges (`GraphEdge`), naturally attaching the concept to multiple hubs across the graph.

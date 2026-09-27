@@ -92,7 +92,7 @@ class ExecutiveOrchestrator:
                 "relations": [],
             }
 
-    def merge_extracted_concepts(
+    def consolidate_extracted_concepts(
         self,
         raw_extracted_concepts: List[Dict[str, Any]],
         extracted_relations: List[Dict[str, Any]],
@@ -100,11 +100,11 @@ class ExecutiveOrchestrator:
         query: str,
         chat_history: List[Dict[str, str]],
     ) -> Dict[str, Any]:
-        """Merges and consolidates raw passage concepts into canonical concepts with aggregated passage pointers and simple directed edges."""
+        """Consolidates raw passage concepts into document-specific canonical concepts with aggregated passage pointers."""
         if not raw_extracted_concepts:
             return {"concepts": [], "relations": []}
 
-        system_prompt = load_prompt("merge_concepts").format(doc_title=doc_title)
+        system_prompt = load_prompt("consolidate_concepts").format(doc_title=doc_title)
         messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
             messages.extend(chat_history[-4:])
@@ -132,7 +132,7 @@ class ExecutiveOrchestrator:
                 "relations": data.get("relations", []),
             }
         except Exception as e:
-            print(f"[ExecutiveOrchestrator] Concept merging LLM pass error: {e}")
+            print(f"[ExecutiveOrchestrator] Concept consolidation LLM pass error: {e}")
             return {
                 "concepts": raw_extracted_concepts,
                 "relations": extracted_relations,
@@ -454,12 +454,12 @@ class ExecutiveOrchestrator:
                 )
             extracted_relations.extend(extraction.get("relations", []))
 
-        # Step 4: In-Memory Concept Merging & Consolidation
-        merged_result = self.merge_extracted_concepts(
+        # Step 4: In-Memory Concept Consolidation Across Passages
+        consolidated_result = self.consolidate_extracted_concepts(
             raw_extracted_concepts, extracted_relations, title, query, chat_history
         )
-        merged_concepts = merged_result.get("concepts", [])
-        merged_relations = merged_result.get("relations", [])
+        consolidated_concepts = consolidated_result.get("concepts", [])
+        consolidated_relations = consolidated_result.get("relations", [])
 
         proj_list = ["global"]
         if project_id and project_id != "global":
@@ -474,52 +474,22 @@ class ExecutiveOrchestrator:
         ]
 
         title_to_node_id: Dict[str, str] = {}
-        created_node_ids = []
+        created_node_ids: List[str] = []
+        merged_existing_node_ids: set = set()
 
-        # Create or update nodes for merged concepts
-        for c_data in merged_concepts:
-            concept_id = f"concept_{uuid.uuid4().hex[:6]}"
-            passage_ptrs = c_data.get("passage_ids") or (
-                [c_data.get("passage_id")] if c_data.get("passage_id") else []
-            )
-            c_node = GraphNode(
-                _id=concept_id,
-                node_type="concept",
-                title=c_data["title"],
-                text_body=f"# {c_data['title']}\n{c_data['description']}",
-                passage_pointers=passage_ptrs,
-                project_ids=proj_list,
-                metadata={"status": "PRIMARY_ACTIVE"},
-            )
-            self.db.upsert_node(c_node)
-            created_node_ids.append(concept_id)
-            title_to_node_id[c_data["title"].lower()] = concept_id
-
-            node_evt = {
-                "event": "node_touched",
-                "persona_id": "orchestrator",
-                "persona_name": "Ingestion Engine",
-                "node_id": concept_id,
-                "node_title": c_data["title"],
-                "message": f"Concept '{c_data['title']}' extracted and integrated into knowledge graph.",
-                "timestamp": time.time(),
-            }
-            self.event_queue.push(project_id, node_evt)
-            yield node_evt
-
-        # Hub Persona Agents evaluation & edge formation
+        # Step 5: Hub Persona Agents evaluation & edge formation (Merging into Global Graph)
         for dept in active_departments:
             yield {
                 "event": "persona_traversal_start",
                 "department_id": dept.department_id,
                 "department_name": dept.department_name,
                 "hub_id": dept.hub_node.id,
-                "message": f"Specialist Persona '{dept.hub_node.title}' evaluating newly merged concepts...",
+                "message": f"Specialist Persona '{dept.hub_node.title}' evaluating newly consolidated concepts for global graph merging...",
                 "timestamp": time.time(),
             }
 
             eval_res = dept.evaluate_and_debate_ingestion(
-                merged_concepts, title, query, chat_history, project_id=project_id
+                consolidated_concepts, title, query, chat_history, project_id=project_id
             )
 
             # Process merged_into_existing updates
@@ -533,6 +503,20 @@ class ExecutiveOrchestrator:
                         if pid not in existing_node.passage_pointers:
                             existing_node.passage_pointers.append(pid)
                     self.db.upsert_node(existing_node)
+                    merged_existing_node_ids.add(existing_id)
+                    title_to_node_id[existing_node.title.lower()] = existing_id
+
+                    node_evt = {
+                        "event": "node_touched",
+                        "persona_id": dept.department_id,
+                        "persona_name": dept.department_name,
+                        "node_id": existing_id,
+                        "node_title": existing_node.title,
+                        "message": f"Concept '{existing_node.title}' updated with new insights from '{title}'.",
+                        "timestamp": time.time(),
+                    }
+                    self.event_queue.push(project_id, node_evt)
+                    yield node_evt
 
             # Process new edges from persona evaluation
             for e_item in eval_res.get("new_edges", []):
@@ -561,8 +545,41 @@ class ExecutiveOrchestrator:
                     )
                     self.db.upsert_edge(new_edge)
 
-        # Process directly extracted relations from multi-passage merging
-        for rel in merged_relations:
+        # Step 6: Create GraphNodes ONLY for novel consolidated concepts NOT merged into existing nodes
+        for c_data in consolidated_concepts:
+            c_title_lower = c_data["title"].lower()
+            if c_title_lower not in title_to_node_id:
+                concept_id = f"concept_{uuid.uuid4().hex[:6]}"
+                passage_ptrs = c_data.get("passage_ids") or (
+                    [c_data.get("passage_id")] if c_data.get("passage_id") else []
+                )
+                c_node = GraphNode(
+                    _id=concept_id,
+                    node_type="concept",
+                    title=c_data["title"],
+                    text_body=f"# {c_data['title']}\n{c_data['description']}",
+                    passage_pointers=passage_ptrs,
+                    project_ids=proj_list,
+                    metadata={"status": "PRIMARY_ACTIVE"},
+                )
+                self.db.upsert_node(c_node)
+                created_node_ids.append(concept_id)
+                title_to_node_id[c_title_lower] = concept_id
+
+                node_evt = {
+                    "event": "node_touched",
+                    "persona_id": "orchestrator",
+                    "persona_name": "Ingestion Engine",
+                    "node_id": concept_id,
+                    "node_title": c_data["title"],
+                    "message": f"Novel concept '{c_data['title']}' integrated into knowledge graph.",
+                    "timestamp": time.time(),
+                }
+                self.event_queue.push(project_id, node_evt)
+                yield node_evt
+
+        # Step 7: Process directly extracted relations from multi-passage consolidation
+        for rel in consolidated_relations:
             src_key = rel.get("source_title", "").lower()
             tgt_key = rel.get("target_title", "").lower()
             src_id = title_to_node_id.get(src_key)

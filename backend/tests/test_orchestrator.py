@@ -41,9 +41,9 @@ def test_classify_intent_with_chat_history():
     assert res["intent"] == "GRAPH_RETRIEVAL"
 
 
-def test_merge_extracted_concepts():
-    """Verify empty raw concepts handling in merge_extracted_concepts."""
-    res = orchestrator.merge_extracted_concepts(
+def test_consolidate_extracted_concepts():
+    """Verify empty raw concepts handling in consolidate_extracted_concepts."""
+    res = orchestrator.consolidate_extracted_concepts(
         raw_extracted_concepts=[],
         extracted_relations=[],
         doc_title="Test Document",

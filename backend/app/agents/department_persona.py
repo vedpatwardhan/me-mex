@@ -117,7 +117,7 @@ class DepartmentPersonaAgent:
 
     def evaluate_and_debate_ingestion(
         self,
-        merged_concepts: List[Dict[str, Any]],
+        consolidated_concepts: List[Dict[str, Any]],
         doc_title: str,
         query: str,
         chat_history: List[Dict[str, str]],
@@ -141,8 +141,8 @@ class DepartmentPersonaAgent:
             f"Persona Hub Knowledge Base & Observations:\n{exploration.get('perspective', '')}\n\n"
             f"Adjacent Subgraph Concepts:\n"
             f"{json.dumps([{'id': n.id, 'title': n.title, 'body': n.text_body[:200]} for n in subgraph_nodes], indent=2)}\n\n"
-            f"Newly Extracted Candidate Concepts ({len(merged_concepts)} items):\n"
-            f"{json.dumps(merged_concepts, indent=2)}"
+            f"Newly Extracted Candidate Concepts ({len(consolidated_concepts)} items):\n"
+            f"{json.dumps(consolidated_concepts, indent=2)}"
         )
 
         messages = [

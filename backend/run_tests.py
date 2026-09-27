@@ -27,7 +27,7 @@ from tests.test_orchestrator import (
     test_classify_intent_retrieval,
     test_classify_intent_ingestion,
     test_classify_intent_with_chat_history,
-    test_merge_extracted_concepts,
+    test_consolidate_extracted_concepts,
 )
 from tests.test_department_persona import (
     test_department_persona_project_scoping,
@@ -87,8 +87,8 @@ def run_all_tests():
             True,
         ),
         (
-            "Orchestrator: Merge Extracted Concepts",
-            test_merge_extracted_concepts,
+            "Orchestrator: Consolidate Extracted Concepts",
+            test_consolidate_extracted_concepts,
             False,
         ),
         (
