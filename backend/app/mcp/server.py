@@ -32,9 +32,9 @@ def fetch_web_article(url: str) -> str:
 
 
 @mcp.tool()
-def get_graph_nodes(theme_id: str = "vla_research") -> str:
+def get_graph_nodes(project_id: str = "global") -> str:
     """Retrieve all atomic graph concept nodes from the database."""
-    nodes = db_engine.get_nodes(theme_id)
+    nodes = db_engine.get_nodes(project_id)
     return json.dumps([n.model_dump(by_alias=True) for n in nodes], indent=2)
 
 

@@ -307,7 +307,9 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
-            finding = dept.explore_and_debate_retrieval(query, project_id=project_id)
+            finding = dept.explore_and_debate_retrieval(
+                query=query, chat_history=chat_history, project_id=project_id
+            )
             department_findings.append(finding)
 
             # Emit granular node_touched events as persona traverses adjacent nodes
@@ -463,10 +465,18 @@ class ExecutiveOrchestrator:
         if project_id and project_id != "global":
             proj_list.append(project_id)
 
-        # Discover top project concept hubs via rustworkx centrality
-        top_hubs = self.analytics.get_top_concept_hubs(project_id=project_id, top_k=2)
+        # Step 5: Discover Top Concept Hubs & Instantiate Hub Persona Agents
+        top_hubs = self.analytics.get_top_concept_hubs(
+            project_id=project_id, top_k=self.top_k_hubs
+        )
+        active_departments = [
+            DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
+        ]
 
+        title_to_node_id: Dict[str, str] = {}
         created_node_ids = []
+
+        # Create or update nodes for merged concepts
         for c_data in merged_concepts:
             concept_id = f"concept_{uuid.uuid4().hex[:6]}"
             passage_ptrs = c_data.get("passage_ids") or (
@@ -483,22 +493,7 @@ class ExecutiveOrchestrator:
             )
             self.db.upsert_node(c_node)
             created_node_ids.append(concept_id)
-
-            # Form edge to top concept hub
-            if top_hubs:
-                target_hub = top_hubs[0][0]
-                edge_id = f"edge_{concept_id}_to_{target_hub.id}"
-                new_edge = GraphEdge(
-                    _id=edge_id,
-                    source_id=concept_id,
-                    target_id=target_hub.id,
-                    is_directional=True,
-                    text_body=f"Ingested concept '{c_data['title']}' linked to concept hub '{target_hub.title}'.",
-                    weight=1.0,
-                    project_ids=proj_list,
-                    status="PRIMARY_ACTIVE",
-                )
-                self.db.upsert_edge(new_edge)
+            title_to_node_id[c_data["title"].lower()] = concept_id
 
             node_evt = {
                 "event": "node_touched",
@@ -511,6 +506,101 @@ class ExecutiveOrchestrator:
             }
             self.event_queue.push(project_id, node_evt)
             yield node_evt
+
+        # Hub Persona Agents evaluation & edge formation
+        for dept in active_departments:
+            yield {
+                "event": "persona_traversal_start",
+                "department_id": dept.department_id,
+                "department_name": dept.department_name,
+                "hub_id": dept.hub_node.id,
+                "message": f"Specialist Persona '{dept.hub_node.title}' evaluating newly merged concepts...",
+                "timestamp": time.time(),
+            }
+
+            eval_res = dept.evaluate_and_debate_ingestion(
+                merged_concepts, title, query, chat_history, project_id=project_id
+            )
+
+            # Process merged_into_existing updates
+            for m_item in eval_res.get("merged_into_existing", []):
+                existing_id = m_item.get("existing_node_id")
+                existing_node = self.db.get_node(existing_id)
+                if existing_node:
+                    if m_item.get("additional_text"):
+                        existing_node.text_body += f"\n\n## Addition from '{title}':\n{m_item['additional_text']}"
+                    for pid in m_item.get("passage_ids", []):
+                        if pid not in existing_node.passage_pointers:
+                            existing_node.passage_pointers.append(pid)
+                    self.db.upsert_node(existing_node)
+
+            # Process new edges from persona evaluation
+            for e_item in eval_res.get("new_edges", []):
+                src_key = e_item.get("source_title", "").lower()
+                tgt_key = e_item.get("target_title", "").lower()
+                src_id = title_to_node_id.get(src_key) or (
+                    dept.hub_node.id if dept.hub_node.title.lower() in src_key else None
+                )
+                tgt_id = title_to_node_id.get(tgt_key) or (
+                    dept.hub_node.id if dept.hub_node.title.lower() in tgt_key else None
+                )
+                if src_id and tgt_id and src_id != tgt_id:
+                    edge_id = f"edge_{src_id}_to_{tgt_id}"
+                    new_edge = GraphEdge(
+                        _id=edge_id,
+                        source_id=src_id,
+                        target_id=tgt_id,
+                        is_directional=True,
+                        text_body=e_item.get(
+                            "description",
+                            f"Link from {e_item.get('source_title')} to {e_item.get('target_title')}",
+                        ),
+                        weight=1.0,
+                        project_ids=proj_list,
+                        status="PRIMARY_ACTIVE",
+                    )
+                    self.db.upsert_edge(new_edge)
+
+        # Process directly extracted relations from multi-passage merging
+        for rel in merged_relations:
+            src_key = rel.get("source_title", "").lower()
+            tgt_key = rel.get("target_title", "").lower()
+            src_id = title_to_node_id.get(src_key)
+            tgt_id = title_to_node_id.get(tgt_key)
+            if src_id and tgt_id and src_id != tgt_id:
+                edge_id = f"edge_{src_id}_to_{tgt_id}"
+                direct_edge = GraphEdge(
+                    _id=edge_id,
+                    source_id=src_id,
+                    target_id=tgt_id,
+                    is_directional=True,
+                    text_body=rel.get(
+                        "description",
+                        f"Link from {rel.get('source_title')} to {rel.get('target_title')}",
+                    ),
+                    weight=1.0,
+                    project_ids=proj_list,
+                    status="PRIMARY_ACTIVE",
+                )
+                self.db.upsert_edge(direct_edge)
+
+        # Fallback default edges to top hub if no persona edges created
+        if top_hubs and created_node_ids:
+            target_hub = top_hubs[0][0]
+            for c_id in created_node_ids:
+                edge_id = f"edge_{c_id}_to_{target_hub.id}"
+                if not self.db.get_edge(edge_id):
+                    fallback_edge = GraphEdge(
+                        _id=edge_id,
+                        source_id=c_id,
+                        target_id=target_hub.id,
+                        is_directional=True,
+                        text_body=f"Ingested concept linked to concept hub '{target_hub.title}'.",
+                        weight=1.0,
+                        project_ids=proj_list,
+                        status="PRIMARY_ACTIVE",
+                    )
+                    self.db.upsert_edge(fallback_edge)
 
         comp_evt = {
             "event": "tool_complete",

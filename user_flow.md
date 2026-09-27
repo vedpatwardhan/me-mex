@@ -15,14 +15,14 @@ It incorporates full theoretical literature mappings from all eight surveyed fra
 
 ---
 
-## 1. Unified Concept Hub Persona Architecture
+### 1. Unified Concept Hub Persona Architecture
 
 Both **Retrieval** and **Ingestion** operate on a single conversational gateway (`POST /api/chat`) structured around **Dynamic Concept Hub Personas**:
 
 ```
                        [Compressed Macro Documents]
                        (Department Registry Overview)
-                                     │
+                                      │
         ┌────────────────────────────┼────────────────────────────┐
         ▼                            ▼                            ▼
 [Department 1 Persona]    [Department 2 Persona]    [Department 3 Persona]
@@ -35,18 +35,34 @@ Both **Retrieval** and **Ingestion** operate on a single conversational gateway 
              ┌───────────────────────┴───────────────────────┐
              ▼                                               ▼
      [RETRIEVAL MODE]                                [INGESTION MODE]
- - Explores relevant subgraphs                   - Debates concept merging & new nodes
- - Synthesizes retrieved context                 - Adjusts edge weights (1.0 -> 0.3)
- - Animates visual graph canvas                  - Incrementally patches affected Macro
+ 1. Shared Concept Exploration                   1. Shared Concept Exploration
+    (Sub-graph traversal & search)                  (Sub-graph traversal & search)
+ 2. Relevance Debate                             2. Relevance Debate
+    (Relevance to prompt & query)                   (Relevance to prompt & query)
+ 3. Persona Synthesis                            3. Multi-Persona Merging Debate
+    (Answer generation & glows)                     (Evaluates extracted concepts against
+                                                     local hub knowledge, decides node 
+                                                     updates, edge creation & topology additions)
 ```
 
-### The 3-Step Department Workflow
+### The Unified 3-Step Persona Workflow
 
-1. **Macro Routing (Which Offices to Visit):** The Executive Orchestrator evaluates the query, recent project `chat_history`, and project workspace context to determine which specific concept hub "Departments" are relevant to the query.
-2. **Project-Scoped Persona Exploration:** A specialized **Department Sub-Agent Persona** is dispatched to each top concept hub discovered via `rustworkx` centrality within the active `project_id` workspace.
-   - **In Retrieval Mode:** The persona traverses its project-scoped subgraph relations (`BUILDS_UPON`, `CONTRASTS_WITH`), executes DuckDuckGo web search when needed, and summarizes relevant concepts.
-   - **In Ingestion Mode:** The persona additionally debates concept merging, new concept instantiation, edge weight decay (`1.0` $\rightarrow$ `0.3`), and legacy refutations.
-3. **Executive Synthesis & Chat Persistence:** The Executive Orchestrator synthesizes reports from visited Department offices into a final grounded reply, emits SSE telemetry (`node_touched`, `chat_complete`), and persists user/agent messages to MongoDB under `project_id`.
+1. **Shared Concept Exploration (Common to Retrieval & Ingestion):**
+   - The Executive Orchestrator evaluates the user prompt, full conversation history (`chat_history`), system events, and active workspace context (`project_id`).
+   - `rustworkx` centrality identifies top project-scoped concept hubs ("Department Offices"). Each concept hub persona explores its local sub-graph neighborhood (`BUILDS_UPON`, `SUPERSEDES`, etc.) and retrieves connected concept nodes and out-of-graph passages.
+
+2. **Relevance Debate (Common to Retrieval & Ingestion):**
+   - Each Specialist Persona debates the relevance of its retrieved sub-graph context against the user prompt, current chat context, and external web search evidence.
+   - **In Retrieval Mode:** The debate determines how closely each concept hub relates to the query topic, emitting glowing `traversing_node_ids` to the WebGL visualizer and providing grounded evidence to the Orchestrator for synthesis.
+
+3. **Multi-Persona Concept Merging Debate (Ingestion Specific Step):**
+   - Ingestion adds an explicit **Concept Merging Debate Step** on top of the shared exploration and relevance debate.
+   - **Persona Knowledge Base:** Each persona treats its hub and adjacent neighborhood as its specialized knowledge base (*"Everything I know about this domain in the database"*).
+   - **Ingestion Evaluation:** All candidate concepts extracted from the incoming document (after initial passage extraction and deduplication) are passed to **every relevant concept hub persona**.
+   - **Per-Persona Graph Integration:** Each persona independently evaluates the document's concepts against its domain knowledge:
+     - **Inclusion & Merging:** Decides whether a concept should be merged into an existing node, updated with new text, or instantiated as a new concept.
+     - **Multi-Hub Connection (Multiple Edges):** If a single concept from the document is relevant to multiple concept hub personas, each persona creates its own connection edges (`GraphEdge`), naturally attaching the concept to multiple hubs across the graph.
+     - **Decomposition:** Personas break down high-level or compound concepts into lower-level atomic components if necessary for clean domain alignment.
 
 ---
 

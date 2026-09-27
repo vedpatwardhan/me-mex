@@ -30,3 +30,22 @@ def test_department_persona_project_scoping():
 
     assert "traversing_node_ids" in finding_global
     assert "traversing_node_ids" in finding_scoped
+
+
+def test_department_persona_shared_exploration():
+    """Verify DepartmentPersonaAgent.explore_and_debate_hub performs sub-graph traversal and relevance debate."""
+    hub_node = db_engine.get_node("concept_world_models")
+    assert hub_node is not None
+
+    agent = DepartmentPersonaAgent(hub_node)
+    exploration = agent.explore_and_debate_hub(
+        query="world models research",
+        chat_history=[{"role": "user", "content": "Tell me about world models"}],
+        allow_web_search=False,
+        project_id="global",
+    )
+
+    assert exploration["department_id"] == "dept_concept_world_models"
+    assert exploration["hub_node_id"] == "concept_world_models"
+    assert "concept_world_models" in exploration["traversing_node_ids"]
+    assert "subgraph_nodes" in exploration

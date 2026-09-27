@@ -65,16 +65,6 @@ export const RightDrawer: React.FC = () => {
           <div className="text-[10px] text-slate-500 font-mono">ID: {selectedNode.id}</div>
         </div>
 
-        {/* Executive 2-Line Takeaway Callout Box */}
-        <div className="bg-[#121824] p-4 rounded-2xl border border-amber-500/30 space-y-2 shadow-lg relative overflow-hidden">
-          <div className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5" /> Executive 2-Line Takeaway
-          </div>
-          <p className="text-slate-200 text-[11px] leading-relaxed italic font-medium">
-            "{selectedNode.takeaway_2line}"
-          </p>
-        </div>
-
         {/* Metadata Badges */}
         {selectedNode.metadata && Object.keys(selectedNode.metadata).length > 0 && (
           <div className="bg-[#121824] p-3.5 rounded-2xl border border-white/10 space-y-2 text-[11px] shadow-sm">

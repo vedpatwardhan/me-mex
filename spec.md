@@ -246,18 +246,27 @@ Both Retrieval and Ingestion operate on a single unified multi-agent pattern str
                                      ▼
                       [Executive Orchestrator Agent]
                                      │
-             ┌───────────────────────┼───────────────────────┐
-             ▼                       ▼                       ▼
-    [DIRECT CONVERSATION]     [RETRIEVAL MODE]        [INGESTION MODE]
- - Fast-path LLM chat     - Explores subgraphs    - Debates concept merging
- - Zero persona overhead  - Persona synthesis     - Adjusts edge weights
-                          - WebGL node glows      - Incremental Macro patch
+             ┌───────────────────────┴───────────────────────┐
+             ▼                                               ▼
+     [RETRIEVAL MODE]                                [INGESTION MODE]
+ 1. Shared Concept Exploration                   1. Shared Concept Exploration
+ 2. Relevance Debate to Prompt                   2. Relevance Debate to Prompt
+ 3. Output Synthesis & Glows                     3. Multi-Persona Merging Debate
+                                                    - Evaluates new concepts against local hub
+                                                    - Decides merging, new nodes & edges
+                                                    - Single concept can link to multiple hubs
 ```
 
-### Concept Hub Detection & Incremental Delta Patching
-To avoid re-generating macro documents across the entire corpus after every single ingestion pass:
-1. **Hub Detection:** Python graph analytics (`rustworkx` degree centrality + `NetworkX` Louvain community partitioning) identify primary concept hubs and group them into dynamic Department Communities.
-2. **Incremental Delta Patching:** When a new paper is merged into a department, a background Macro Synthesis Agent updates **ONLY that Department's Macro Document**. Other Macro Documents remain untouched, keeping execution fast and token-efficient.
+### Unified Multi-Agent Persona Workflow
+
+1. **Shared Sub-Graph Exploration:**
+   - Both modes start by identifying top concept hubs via `rustworkx` centrality. Each hub persona retrieves its adjacent neighborhood (`GraphNode`s & `GraphEdge`s).
+2. **Relevance Debate:**
+   - Personas debate the relevance of their hub knowledge against the user prompt, full conversation history (`chat_history`), system events, and optional live web search evidence.
+3. **Ingestion-Specific Concept Merging Debate:**
+   - Ingestion executes an additional **Multi-Persona Merging Debate**. Each persona treats its hub neighborhood as its authoritative domain knowledge.
+   - All extracted concepts from an ingested document are presented to every relevant persona.
+   - Personas independently evaluate how the document's concepts map to their domain knowledge—merging into existing concepts, breaking down compound ideas, or connecting new nodes. If a concept is relevant to multiple personas, each persona creates its own connection edges (`GraphEdge`), attaching the concept to multiple hubs in the graph network.
 
 ---
 

@@ -29,7 +29,7 @@ export const GraphCanvas: React.FC = () => {
       const matchesSearch =
         !searchQuery ||
         n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        n.takeaway_2line.toLowerCase().includes(searchQuery.toLowerCase());
+        (n.content && n.content.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesType = selectedNodeTypeFilter === 'all' || n.node_type === selectedNodeTypeFilter;
       return matchesSearch && matchesType;
     });

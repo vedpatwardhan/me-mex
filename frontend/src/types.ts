@@ -9,7 +9,6 @@ export interface GraphNode {
   id: string;
   node_type: NodeType;
   title: string;
-  takeaway_2line: string;
   content: string;
   raw_doc_id?: string;
   project_ids: string[];

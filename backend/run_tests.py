@@ -28,7 +28,10 @@ from tests.test_orchestrator import (
     test_classify_intent_with_chat_history,
     test_merge_extracted_concepts,
 )
-from tests.test_department_persona import test_department_persona_project_scoping
+from tests.test_department_persona import (
+    test_department_persona_project_scoping,
+    test_department_persona_shared_exploration,
+)
 from tests.test_direct_conversation import (
     test_direct_conversation_flow_continuity,
     test_external_event_understanding,
@@ -85,6 +88,11 @@ def run_all_tests():
         (
             "Persona: Project-Scoped Traversal",
             test_department_persona_project_scoping,
+            True,
+        ),
+        (
+            "Persona: Shared Exploration & Debate",
+            test_department_persona_shared_exploration,
             True,
         ),
         (

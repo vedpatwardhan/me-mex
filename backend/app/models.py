@@ -8,18 +8,14 @@ NodeType = Literal["paper", "blog", "video", "post", "concept"]
 # 1. Universal Graph Node Model
 class GraphNode(BaseModel):
     id: str = Field(alias="_id")
-    theme_id: str = "vla_research"
-    node_class: str = "CONCEPT"  # "ROOT_MEDIA" | "CONCEPT"
     node_type: NodeType = "concept"
     title: str
-    takeaway_2line: str = ""
     text_body: str = ""
     passage_pointers: List[str] = Field(
         default_factory=list
     )  # Out-of-graph passage chunk IDs
     project_ids: List[str] = Field(default_factory=lambda: ["global"])
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    embedding_vector: Optional[List[float]] = None
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
 
@@ -27,7 +23,6 @@ class GraphNode(BaseModel):
 # 2. Dual-Mode Connection Edge Model
 class GraphEdge(BaseModel):
     id: str = Field(alias="_id")
-    theme_id: str = "vla_research"
     source_id: str
     target_id: str
     is_directional: bool = True  # False for symmetric parallel concepts
@@ -51,7 +46,6 @@ class GraphEdge(BaseModel):
 # 3. Document Metadata Record
 class DocumentRecord(BaseModel):
     id: str = Field(alias="_id")
-    theme_id: str = "vla_research"
     title: str
     file_path: str
     media_type: str = "PAPER"  # "PAPER" | "BLOG" | "TRANSCRIPT" | "CODE"
@@ -65,14 +59,12 @@ class PassageRecord(BaseModel):
     doc_id: str
     chunk_index: int
     text_content: str
-    embedding_vector: Optional[List[float]] = None
     created_at: float = Field(default_factory=time.time)
 
 
 # 5. Department Macro Document Record
 class MacroDocumentRecord(BaseModel):
     id: str = Field(alias="_id")
-    theme_id: str = "vla_research"
     department_name: str
     hub_concept_ids: List[str] = Field(default_factory=list)
     summary_text: str
@@ -86,7 +78,6 @@ class MacroDocumentRecord(BaseModel):
 # 6. Staging Sandbox Record
 class StagingRecord(BaseModel):
     id: str = Field(alias="_id")
-    theme_id: str = "vla_research"
     title: str
     raw_content: str
     source_type: str = "url"
