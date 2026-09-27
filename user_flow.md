@@ -51,6 +51,7 @@ Both **Retrieval** and **Ingestion** operate on a single conversational gateway 
    - The Executive Orchestrator evaluates the user prompt, full conversation history (`chat_history`), system events, and active workspace context (`project_id`).
    - `rustworkx` centrality identifies top project-scoped concept hubs ("Department Offices").
    - **Iterative Multi-Hop Traversal**: Each concept hub persona iteratively expands its frontier up to a maximum depth (`max_depth = 3`). At each hop, candidate unvisited neighbor nodes are evaluated by the persona to decide which nodes are relevant and worth exploring deeper to build full domain context.
+   - **Root Media Traversal Blocking**: Traversal visits Root Media nodes (`paper`, `blog`, `video`, `post`) for textual description/provenance context, but strictly **blocks Root Media nodes from expanding further hops** (preventing artificial shortcutting like $Concept_A \rightarrow Paper_D \rightarrow Concept_E$).
 
 2. **Relevance Debate (Common to Retrieval & Ingestion):**
    - Each Specialist Persona debates the relevance of its accumulated multi-hop sub-graph context against the user prompt and current chat context.

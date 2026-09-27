@@ -32,6 +32,7 @@ from tests.test_orchestrator import (
 from tests.test_department_persona import (
     test_department_persona_project_scoping,
     test_department_persona_shared_exploration,
+    test_department_persona_root_media_traversal_blocking,
 )
 from tests.test_direct_conversation import (
     test_direct_conversation_flow_continuity,
@@ -99,6 +100,11 @@ def run_all_tests():
         (
             "Persona: Shared Exploration & Debate",
             test_department_persona_shared_exploration,
+            True,
+        ),
+        (
+            "Persona: Root Media Traversal Blocking",
+            test_department_persona_root_media_traversal_blocking,
             True,
         ),
         (

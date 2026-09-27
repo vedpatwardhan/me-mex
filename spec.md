@@ -262,6 +262,7 @@ Both Retrieval and Ingestion operate on a single unified multi-agent pattern str
 1. **Shared Multi-Hop Sub-Graph Exploration:**
    - Both modes start by identifying top concept hubs via `rustworkx` centrality.
    - **Iterative Multi-Hop Traversal**: Each hub persona iteratively expands its frontier up to a maximum depth (`max_depth = 3`). At each hop level, candidate unvisited neighbor nodes are evaluated by the persona to decide which nodes are relevant and worth exploring deeper to build full domain context.
+   - **Root Media Traversal Blocking**: Traversal visits Root Media nodes (`paper`, `blog`, `video`, `post`) for provenance context, but strictly **blocks Root Media nodes from expanding further hops** (preventing artificial shortcutting across unrelated concepts contained in the same paper).
 2. **Relevance Debate:**
    - Personas debate the relevance of their accumulated multi-hop sub-graph context against the user prompt, full conversation history (`chat_history`), and system execution events.
 3. **Ingestion-Specific Concept Merging Debate:**

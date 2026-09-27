@@ -125,7 +125,13 @@ class DepartmentPersonaAgent:
                 if node_obj:
                     explored_nodes_map[nid] = node_obj
 
-            current_frontier = next_frontier
+            # Filter next_frontier to ONLY concept nodes (blocking root media nodes from expanding further hops)
+            current_frontier = [
+                nid
+                for nid in next_frontier
+                if explored_nodes_map.get(nid)
+                and explored_nodes_map[nid].node_type == "concept"
+            ]
 
         traversed_node_ids = list(visited_node_ids)
         subgraph_nodes = list(explored_nodes_map.values())
