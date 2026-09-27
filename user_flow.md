@@ -47,13 +47,14 @@ Both **Retrieval** and **Ingestion** operate on a single conversational gateway 
 
 ### The Unified 3-Step Persona Workflow
 
-1. **Shared Concept Exploration (Common to Retrieval & Ingestion):**
+1. **Shared Multi-Hop Sub-Graph Exploration (Common to Retrieval & Ingestion):**
    - The Executive Orchestrator evaluates the user prompt, full conversation history (`chat_history`), system events, and active workspace context (`project_id`).
-   - `rustworkx` centrality identifies top project-scoped concept hubs ("Department Offices"). Each concept hub persona explores its local sub-graph neighborhood (`BUILDS_UPON`, `SUPERSEDES`, etc.) and retrieves connected concept nodes and out-of-graph passages.
+   - `rustworkx` centrality identifies top project-scoped concept hubs ("Department Offices").
+   - **Iterative Multi-Hop Traversal**: Each concept hub persona iteratively expands its frontier up to a maximum depth (`max_depth = 3`). At each hop, candidate unvisited neighbor nodes are evaluated by the persona to decide which nodes are relevant and worth exploring deeper to build full domain context.
 
 2. **Relevance Debate (Common to Retrieval & Ingestion):**
-   - Each Specialist Persona debates the relevance of its retrieved sub-graph context against the user prompt, current chat context, and external web search evidence.
-   - **In Retrieval Mode:** The debate determines how closely each concept hub relates to the query topic, emitting glowing `traversing_node_ids` to the WebGL visualizer and providing grounded evidence to the Orchestrator for synthesis.
+   - Each Specialist Persona debates the relevance of its accumulated multi-hop sub-graph context against the user prompt and current chat context.
+   - **In Retrieval Mode:** The debate determines how closely the explored multi-hop sub-graph relates to the query topic, emitting glowing `traversing_node_ids` to the WebGL visualizer and providing grounded evidence to the Orchestrator for synthesis.
 
 3. **Multi-Persona Concept Merging Debate (Ingestion Specific Step):**
    - Ingestion adds an explicit **Concept Merging Debate Step** on top of shared exploration and relevance debate.

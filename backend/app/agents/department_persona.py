@@ -23,57 +23,126 @@ class DepartmentPersonaAgent:
         self,
         query: str,
         chat_history: Optional[List[Dict[str, str]]] = None,
-        allow_web_search: bool = True,
+        allow_web_search: bool = False,
         project_id: str = "global",
+        max_depth: int = 3,
     ) -> Dict[str, Any]:
-        """Shared sub-graph exploration, web search, and hub relevance debate common to retrieval and ingestion."""
+        """Multi-hop sub-graph exploration and hub relevance debate common to retrieval and ingestion.
+
+        Iteratively expands frontier nodes up to max_depth, asking the persona LLM to evaluate candidate
+        neighbors at each hop to build a rich multi-hop domain context.
+        """
         all_edges = db_engine.get_edges(project_id)
-        adjacent_edges = [
-            e
-            for e in all_edges
-            if e.source_id == self.hub_node.id or e.target_id == self.hub_node.id
-        ]
-        adjacent_node_ids = set([self.hub_node.id])
-        for e in adjacent_edges:
-            adjacent_node_ids.add(e.source_id)
-            adjacent_node_ids.add(e.target_id)
 
-        traversed_node_ids = list(adjacent_node_ids)
-        subgraph_nodes = [
-            db_engine.get_node(nid)
-            for nid in traversed_node_ids
-            if db_engine.get_node(nid)
-        ]
+        visited_node_ids = set([self.hub_node.id])
+        current_frontier = [self.hub_node.id]
+        explored_nodes_map: Dict[str, GraphNode] = {self.hub_node.id: self.hub_node}
 
-        # Web Search Context Supplementation via DuckDuckGo tool if allowed
-        web_search_results = ""
-        if allow_web_search and any(
-            k in query.lower()
-            for k in ["search", "latest", "recent", "what is", "web", "news"]
-        ):
-            try:
-                web_res = search_tools.search_duckduckgo(
-                    f"{self.hub_node.title} {query}"
-                )
-                web_search_results = (
-                    f"\nDuckDuckGo Live Web Context:\n{json.dumps(web_res[:2])}"
-                )
-            except Exception as e:
-                web_search_results = f"\nWeb search attempt: {e}"
+        for depth in range(1, max_depth + 1):
+            if not current_frontier:
+                break
 
+            # Find all unvisited candidate neighbors connected to current frontier nodes
+            candidate_neighbors: Dict[str, Dict[str, Any]] = {}
+            for e in all_edges:
+                connected_id = None
+                if (
+                    e.source_id in current_frontier
+                    and e.target_id not in visited_node_ids
+                ):
+                    connected_id = e.target_id
+                elif (
+                    e.target_id in current_frontier
+                    and e.source_id not in visited_node_ids
+                ):
+                    connected_id = e.source_id
+
+                if connected_id and connected_id not in candidate_neighbors:
+                    neighbor_node = db_engine.get_node(connected_id)
+                    if neighbor_node:
+                        candidate_neighbors[connected_id] = {
+                            "id": neighbor_node.id,
+                            "title": neighbor_node.title,
+                            "body": neighbor_node.text_body[:200],
+                            "relation_desc": e.text_body,
+                        }
+
+            if not candidate_neighbors:
+                break
+
+            # If small candidate set (<= 3), auto-expand; otherwise ask persona to select relevant neighbors
+            next_frontier = []
+            if len(candidate_neighbors) <= 3:
+                next_frontier = list(candidate_neighbors.keys())
+            else:
+                prompt_payload = f"""
+                Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
+                User Query / Context: "{query}"
+                Current Hop Level: {depth} / {max_depth}
+
+                Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
+                {json.dumps(list(candidate_neighbors.values()), indent=2)}
+
+                Evaluate which neighbor concepts are relevant and worth exploring deeper for this query.
+                """
+                messages = [
+                    {
+                        "role": "system",
+                        "content": load_prompt("persona_subgraph_expansion").format(
+                            hub_title=self.hub_node.title
+                        ),
+                    }
+                ]
+                if chat_history:
+                    messages.extend(chat_history[-4:])
+                messages.append({"role": "user", "content": prompt_payload})
+
+                try:
+                    res = llm_gateway.generate_chat_completion(
+                        messages,
+                        temperature=0.2,
+                        max_tokens=512,
+                        response_format={"type": "json_object"},
+                        enable_reasoning=False,
+                    )
+                    data = json.loads(res)
+                    selected_ids = data.get("selected_neighbor_ids", [])
+                    next_frontier = [
+                        nid for nid in selected_ids if nid in candidate_neighbors
+                    ]
+                except Exception as e:
+                    print(
+                        f"[{self.department_name}] Hop {depth} expansion error ({e}); selecting top 3 candidates."
+                    )
+                    next_frontier = list(candidate_neighbors.keys())[:3]
+
+            if not next_frontier:
+                break
+
+            for nid in next_frontier:
+                visited_node_ids.add(nid)
+                node_obj = db_engine.get_node(nid)
+                if node_obj:
+                    explored_nodes_map[nid] = node_obj
+
+            current_frontier = next_frontier
+
+        traversed_node_ids = list(visited_node_ids)
+        subgraph_nodes = list(explored_nodes_map.values())
+
+        # Synthesize persona perspective over accumulated multi-hop sub-graph
         prompt_payload = f"""
         You are the Specialist Agent for Concept Hub '{self.hub_node.title}'.
         Your Hub Concept Node Details:
         - Title: {self.hub_node.title}
         - Description: {self.hub_node.text_body}
 
-        Adjacent Subgraph Concepts:
+        Explored Multi-Hop Subgraph Concepts ({len(subgraph_nodes)} nodes across depth {max_depth}):
         {json.dumps([{"id": n.id, "title": n.title, "body": n.text_body[:200]} for n in subgraph_nodes])}
-        {web_search_results}
 
         Task / User Query: "{query}"
 
-        Analyze the task from your concept hub perspective. Debate the relevance of your domain knowledge to the prompt and provide expert observations.
+        Analyze the task from your concept hub perspective using your deep multi-hop graph context. Debate the relevance of your domain knowledge to the prompt and provide expert observations.
         """
         messages = [
             {
@@ -97,21 +166,21 @@ class DepartmentPersonaAgent:
             "traversing_node_ids": traversed_node_ids,
             "subgraph_nodes": subgraph_nodes,
             "perspective": llm_response,
-            "web_search_used": bool(web_search_results),
+            "web_search_used": False,
         }
 
     def explore_and_debate_retrieval(
         self,
         query: str,
         chat_history: Optional[List[Dict[str, str]]] = None,
-        allow_web_search: bool = True,
+        allow_web_search: bool = False,
         project_id: str = "global",
     ) -> Dict[str, Any]:
         """Retrieval mode wrapper around shared explore_and_debate_hub."""
         return self.explore_and_debate_hub(
             query=query,
             chat_history=chat_history,
-            allow_web_search=allow_web_search,
+            allow_web_search=False,
             project_id=project_id,
         )
 

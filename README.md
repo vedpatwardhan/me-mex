@@ -34,12 +34,12 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 └────────────────────────────────────────────────────────────────────────────────────────┘
  - Dynamic Concept Hub Discovery: High-centrality concept nodes detected in real time (<5ms)
    via `rustworkx` eigenvector/degree centrality.
- - Shared Sub-Graph Exploration: Both Retrieval and Ingestion start with shared concept hub
-   exploration (`explore_and_debate_hub`), sub-graph traversal, and optional DuckDuckGo search.
- - Relevance Debate: Personas debate the relevance of their domain knowledge against the user prompt,
+ - Shared Multi-Hop Sub-Graph Exploration: Both Retrieval and Ingestion start with shared concept hub
+   exploration (`explore_and_debate_hub`), iteratively expanding neighbor nodes up to `max_depth` (guided by LLM persona selection).
+ - Relevance Debate: Personas debate the relevance of their accumulated multi-hop domain knowledge against the user prompt,
    full conversation history (`chat_history`), and system execution events.
- - Multi-Persona Merging Debate (Ingestion Specific): Evaluates candidate concepts against each
-   persona's hub domain knowledge, supporting concept decomposition, node merging, and multi-hub edge creation.
+ - Multi-Persona Merging Debate (Ingestion Specific): Evaluates consolidated concepts against each
+   persona's multi-hop domain knowledge, supporting concept decomposition, node merging, and multi-hub edge creation.
  - Real-Time SSE Telemetry: Streams persona traversal events (`traversing_node_ids`) to animate the
    WebGL canvas (`react-force-graph-2d`).
 

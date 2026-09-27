@@ -477,7 +477,7 @@ class ExecutiveOrchestrator:
         created_node_ids: List[str] = []
         merged_existing_node_ids: set = set()
 
-        # Step 5: Hub Persona Agents evaluation & edge formation (Merging into Global Graph)
+        # Step 6: Hub Persona Agents evaluation & edge formation (Merging into Global Graph)
         for dept in active_departments:
             yield {
                 "event": "persona_traversal_start",
@@ -545,7 +545,7 @@ class ExecutiveOrchestrator:
                     )
                     self.db.upsert_edge(new_edge)
 
-        # Step 6: Create GraphNodes ONLY for novel consolidated concepts NOT merged into existing nodes
+        # Step 7: Create GraphNodes ONLY for novel consolidated concepts NOT merged into existing nodes
         for c_data in consolidated_concepts:
             c_title_lower = c_data["title"].lower()
             if c_title_lower not in title_to_node_id:
@@ -578,7 +578,7 @@ class ExecutiveOrchestrator:
                 self.event_queue.push(project_id, node_evt)
                 yield node_evt
 
-        # Step 7: Process directly extracted relations from multi-passage consolidation
+        # Step 8: Process directly extracted relations from multi-passage consolidation
         for rel in consolidated_relations:
             src_key = rel.get("source_title", "").lower()
             tgt_key = rel.get("target_title", "").lower()
@@ -631,7 +631,7 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, comp_evt)
         yield comp_evt
 
-        # Step 4: Delegate final assistant response turn directly to execute_direct_conversation_flow
+        # Step 9: Delegate final assistant response turn directly to execute_direct_conversation_flow
         ingest_query = f"I just ingested document '{title}'. Summarize the key additions and integrated graph concepts."
         async for event in self.execute_direct_conversation_flow(
             ingest_query, chat_history, project_id=project_id

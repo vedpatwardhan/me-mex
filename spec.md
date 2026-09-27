@@ -259,13 +259,14 @@ Both Retrieval and Ingestion operate on a single unified multi-agent pattern str
 
 ### Unified Multi-Agent Persona Workflow
 
-1. **Shared Sub-Graph Exploration:**
-   - Both modes start by identifying top concept hubs via `rustworkx` centrality. Each hub persona retrieves its adjacent neighborhood (`GraphNode`s & `GraphEdge`s).
+1. **Shared Multi-Hop Sub-Graph Exploration:**
+   - Both modes start by identifying top concept hubs via `rustworkx` centrality.
+   - **Iterative Multi-Hop Traversal**: Each hub persona iteratively expands its frontier up to a maximum depth (`max_depth = 3`). At each hop level, candidate unvisited neighbor nodes are evaluated by the persona to decide which nodes are relevant and worth exploring deeper to build full domain context.
 2. **Relevance Debate:**
-   - Personas debate the relevance of their hub knowledge against the user prompt, full conversation history (`chat_history`), system events, and optional live web search evidence.
+   - Personas debate the relevance of their accumulated multi-hop sub-graph context against the user prompt, full conversation history (`chat_history`), and system execution events.
 3. **Ingestion-Specific Concept Merging Debate:**
-   - Ingestion executes an additional **Multi-Persona Merging Debate**. Each persona treats its hub neighborhood as its authoritative domain knowledge.
-   - All extracted concepts from an ingested document are presented to every relevant persona.
+   - Ingestion executes an additional **Multi-Persona Merging Debate**. Each persona treats its accumulated multi-hop sub-graph as its authoritative domain knowledge base.
+   - All consolidated concepts from an ingested document are presented to every relevant persona.
    - Personas independently evaluate how the document's concepts map to their domain knowledge—merging into existing concepts, breaking down compound ideas, or connecting new nodes. If a concept is relevant to multiple personas, each persona creates its own connection edges (`GraphEdge`), attaching the concept to multiple hubs in the graph network.
 
 ---
