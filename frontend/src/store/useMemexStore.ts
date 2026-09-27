@@ -137,134 +137,48 @@ export const useMemexStore = create<MemexState>((set, get) => ({
     });
 
     try {
-      const sseUrl = `/api/sse/chat?query=${encodeURIComponent(text)}`;
-      const eventSource = new EventSource(sseUrl);
-      const visitedIdsSet = new Set<string>();
+      const currentHistory = (get().chatHistory[projId] || []).map((m) => ({
+        role: m.sender === "user" ? "user" : "assistant",
+        content: m.text,
+      }));
 
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          const evtType = data.event;
-
-          if (evtType === 'intent_classified') {
-            set({
-              thinkingState: {
-                ...get().thinkingState,
-                currentAction: `Intent classified: ${data.intent}`
-              }
-            });
-          } else if (evtType === 'node_touched') {
-            if (data.node_id) {
-              visitedIdsSet.add(data.node_id);
-              set({
-                thinkingState: {
-                  ...get().thinkingState,
-                  currentAction: `Concept '${data.node_title || data.node_id}' touched by ${data.persona_name}`,
-                  visitedNodeIds: Array.from(visitedIdsSet)
-                }
-              });
-            }
-          } else if (evtType === 'persona_traversal_active') {
-            if (data.traversing_node_ids) {
-              data.traversing_node_ids.forEach((id: string) => visitedIdsSet.add(id));
-              set({
-                thinkingState: {
-                  ...get().thinkingState,
-                  currentAction: `${data.department_name} traversing adjacent concepts...`,
-                  visitedNodeIds: Array.from(visitedIdsSet)
-                }
-              });
-            }
-          } else if (evtType === 'persona_web_search') {
-            set({
-              thinkingState: {
-                ...get().thinkingState,
-                currentAction: `Executing DuckDuckGo web search: ${data.search_query}`
-              }
-            });
-          } else if (evtType === 'orchestrator_tool_call') {
-            set({
-              thinkingState: {
-                ...get().thinkingState,
-                currentAction: `Invoking tool ${data.tool_name}...`
-              }
-            });
-          } else if (evtType === 'tool_complete') {
-            get().fetchGraphData();
-            if (data.concept_id) {
-              set({ selectedNodeId: data.concept_id });
-            }
-          } else if (evtType === 'chat_complete') {
-            eventSource.close();
-            const finalAnswer = data.final_answer || `Processed message.`;
-            const agentMsg: ChatMessage = {
-              id: `agent_msg_${Date.now()}`,
-              sender: 'agent',
-              text: finalAnswer,
-              timestamp: new Date().toISOString(),
-              grounded_node_ids: Array.from(visitedIdsSet)
-            };
-
-            if (isVoice && finalAnswer) {
-              voiceService.speakText(finalAnswer);
-            }
-
-            set({
-              chatHistory: {
-                ...get().chatHistory,
-                [projId]: [...(get().chatHistory[projId] || []), agentMsg]
-              },
-              thinkingState: {
-                isThinking: false,
-                currentAction: 'Idle',
-                visitedNodeIds: Array.from(visitedIdsSet)
-              }
-            });
-          }
-        } catch (e) {
-          console.error('[MemexStore] SSE parse error:', e);
-        }
-      };
-
-      eventSource.onerror = (err) => {
-        console.warn('[MemexStore] SSE Connection closed or error, falling back to POST /api/chat:', err);
-        eventSource.close();
-
-        // Fallback to standard POST /api/chat REST call if EventSource fails
-        fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: text, project_id: projId, is_voice: isVoice })
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: text,
+          project_id: projId,
+          is_voice: isVoice,
+          chat_history: currentHistory,
         })
-          .then((res) => res.json())
-          .then((chatData) => {
-            get().fetchGraphData();
-            const agentText = chatData.reply || 'Processed input successfully.';
-            const agentMsg: ChatMessage = {
-              id: `agent_msg_${Date.now()}`,
-              sender: 'agent',
-              text: agentText,
-              timestamp: new Date().toISOString(),
-              grounded_node_ids: (chatData.touched_nodes || []).map((n: any) => n.node_id)
-            };
+      });
+      const chatData = await res.json();
 
-            if (isVoice && agentText) {
-              voiceService.speakText(agentText);
-            }
-
-            set({
-              chatHistory: {
-                ...get().chatHistory,
-                [projId]: [...(get().chatHistory[projId] || []), agentMsg]
-              },
-              thinkingState: {
-                isThinking: false,
-                currentAction: 'Idle',
-                visitedNodeIds: (chatData.touched_nodes || []).map((n: any) => n.node_id)
-              }
-            });
-          });
+      await get().fetchGraphData();
+      const agentText = chatData.reply || 'Processed input successfully.';
+      const agentMsg: ChatMessage = {
+        id: `agent_msg_${Date.now()}`,
+        sender: 'agent',
+        text: agentText,
+        timestamp: new Date().toISOString(),
+        grounded_node_ids: (chatData.touched_nodes || []).map((n: any) => n.node_id)
       };
+
+      if (isVoice && agentText) {
+        voiceService.speakText(agentText);
+      }
+
+      set({
+        chatHistory: {
+          ...get().chatHistory,
+          [projId]: [...(get().chatHistory[projId] || []), agentMsg]
+        },
+        thinkingState: {
+          isThinking: false,
+          currentAction: 'Idle',
+          visitedNodeIds: (chatData.touched_nodes || []).map((n: any) => n.node_id)
+        }
+      });
     } catch (err) {
       console.error('Chat execution failed:', err);
       set({

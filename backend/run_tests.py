@@ -39,7 +39,6 @@ from tests.test_api_routes import (
     test_chat_endpoint_post,
     test_project_chat_history_endpoint,
 )
-from tests.test_sse_telemetry import test_sse_chat_stream
 from fastapi.testclient import TestClient
 from main import app
 from app.services.llm_gateway import llm_gateway
@@ -119,7 +118,6 @@ def run_all_tests():
                     test_project_chat_history_endpoint,
                     True,
                 ),
-                ("API: SSE Chat Stream", test_sse_chat_stream, True),
             ]
             for name, func, requires_llm in api_funcs:
                 if requires_llm and not server_online:

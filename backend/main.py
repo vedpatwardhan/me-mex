@@ -9,7 +9,6 @@ from app.models import (
     ChatMessageRecord,
 )
 from app.agents.orchestrator import orchestrator
-from app.api.sse import router as sse_router
 from app.db import db_engine
 
 app = FastAPI(title="Me-Mex (me-mex) Backend Engine", version="0.1.0")
@@ -21,8 +20,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.include_router(sse_router)
 
 
 @app.get("/")
@@ -41,7 +38,7 @@ class ChatRequest(BaseModel):
     query: str
     project_id: str = "global"
     is_voice: bool = False
-    chat_history: Optional[List[Dict[str, str]]] = None
+    chat_history: List[Dict[str, str]] = []
 
 
 @app.post("/api/chat")

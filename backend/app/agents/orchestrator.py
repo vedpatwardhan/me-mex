@@ -84,7 +84,7 @@ class ExecutiveOrchestrator:
             }
 
     def classify_intent(
-        self, query: str, chat_history: Optional[List[Dict[str, str]]] = None
+        self, query: str, chat_history: List[Dict[str, str]]
     ) -> Dict[str, Any]:
         """Classifies user input into DIRECT_CONVERSATION, GRAPH_RETRIEVAL, or DOCUMENT_INGESTION and extracts ingestion target details (source_url, raw_text) in a single pass."""
         system_prompt = load_prompt("classify_intent")
@@ -118,7 +118,7 @@ class ExecutiveOrchestrator:
     async def process_user_message(
         self,
         query: str,
-        chat_history: Optional[List[Dict[str, str]]] = None,
+        chat_history: List[Dict[str, str]],
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Central conversational entry point routing user input dynamically with error handling."""
@@ -169,7 +169,7 @@ class ExecutiveOrchestrator:
     async def execute_direct_conversation_flow(
         self,
         query: str,
-        chat_history: Optional[List[Dict[str, str]]] = None,
+        chat_history: List[Dict[str, str]],
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Direct conversational response without graph traversal overhead."""
@@ -209,7 +209,10 @@ class ExecutiveOrchestrator:
         }
 
     async def execute_retrieval_flow(
-        self, query: str, project_id: str = "global"
+        self,
+        query: str,
+        chat_history: List[Dict[str, str]],
+        project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Multi-Persona Parallel Retrieval over project-scoped concept hubs."""
         yield {
@@ -232,7 +235,9 @@ class ExecutiveOrchestrator:
                 "message": "No active concept hubs found in database yet. Falling back to direct conversation.",
                 "timestamp": time.time(),
             }
-            async for event in self.execute_direct_conversation_flow(query):
+            async for event in self.execute_direct_conversation_flow(
+                query, chat_history, project_id=project_id
+            ):
                 yield event
             return
 
@@ -293,21 +298,18 @@ class ExecutiveOrchestrator:
 
         # Delegate final assistant response turn directly to execute_direct_conversation_flow
         async for event in self.execute_direct_conversation_flow(
-            query, project_id=project_id
+            query, chat_history, project_id=project_id
         ):
             yield event
 
     async def execute_ingestion_flow(
         self,
         query: str,
-        chat_history: Optional[List[Dict[str, str]]] = None,
-        target_info: Optional[Dict[str, Any]] = None,
+        chat_history: List[Dict[str, str]],
+        target_info: Dict[str, Any],
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Multi-Pass Document Ingestion: Scrapes URL/payload, chunk passages, extracts atomic concepts, links concept hubs, & dispatches to direct conversation."""
-        if not target_info:
-            target_info = self._extract_ingestion_target(query, chat_history)
-
         source_url = target_info.get("source_url")
         raw_payload = target_info.get("raw_text")
 
