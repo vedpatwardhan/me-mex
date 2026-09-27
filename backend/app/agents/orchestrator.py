@@ -307,7 +307,7 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
-            finding = dept.explore_and_debate_retrieval(
+            finding = dept.explore_and_retrieve(
                 query=query, chat_history=chat_history, project_id=project_id
             )
             department_findings.append(finding)
@@ -488,7 +488,7 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
-            eval_res = dept.evaluate_and_debate_ingestion(
+            eval_res = dept.explore_and_ingest(
                 consolidated_concepts, title, query, chat_history, project_id=project_id
             )
 

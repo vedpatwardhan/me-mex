@@ -4,7 +4,7 @@ from app.models import GraphNode, GraphEdge
 
 
 def test_department_persona_project_scoping():
-    """Verify DepartmentPersonaAgent.explore_and_debate_retrieval respects project_id edge filtering."""
+    """Verify DepartmentPersonaAgent.explore_and_retrieve respects project_id edge filtering."""
     hub_node = db_engine.get_node("concept_action_mpc")
     assert hub_node is not None
 
@@ -21,10 +21,10 @@ def test_department_persona_project_scoping():
     )
     db_engine.upsert_edge(scoped_edge)
 
-    finding_global = agent.explore_and_debate_retrieval(
+    finding_global = agent.explore_and_retrieve(
         "MPC optimization", allow_web_search=False, project_id="global"
     )
-    finding_scoped = agent.explore_and_debate_retrieval(
+    finding_scoped = agent.explore_and_retrieve(
         "MPC optimization", allow_web_search=False, project_id="proj_scoped"
     )
 
@@ -33,12 +33,12 @@ def test_department_persona_project_scoping():
 
 
 def test_department_persona_shared_exploration():
-    """Verify DepartmentPersonaAgent.explore_and_debate_hub performs sub-graph traversal and relevance debate."""
+    """Verify DepartmentPersonaAgent.explore_concept_hub performs sub-graph traversal."""
     hub_node = db_engine.get_node("concept_world_models")
     assert hub_node is not None
 
     agent = DepartmentPersonaAgent(hub_node)
-    exploration = agent.explore_and_debate_hub(
+    exploration = agent.explore_concept_hub(
         query="world models research",
         chat_history=[{"role": "user", "content": "Tell me about world models"}],
         allow_web_search=False,
@@ -98,7 +98,7 @@ def test_department_persona_root_media_traversal_blocking():
     db_engine.upsert_edge(e2)
 
     agent = DepartmentPersonaAgent(hub_a)
-    exploration = agent.explore_and_debate_hub(
+    exploration = agent.explore_concept_hub(
         query="Explore Hub A",
         allow_web_search=False,
         project_id="proj_root_blocking_test",

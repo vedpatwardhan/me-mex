@@ -19,7 +19,7 @@ class DepartmentPersonaAgent:
         self.department_id = f"dept_{hub_node.id}"
         self.department_name = f"Persona Specialist: {hub_node.title}"
 
-    def explore_and_debate_hub(
+    def explore_concept_hub(
         self,
         query: str,
         chat_history: Optional[List[Dict[str, str]]] = None,
@@ -27,7 +27,7 @@ class DepartmentPersonaAgent:
         project_id: str = "global",
         max_depth: int = 3,
     ) -> Dict[str, Any]:
-        """Multi-hop sub-graph exploration and hub relevance debate common to retrieval and ingestion.
+        """Multi-hop sub-graph exploration common to retrieval and ingestion.
 
         Iteratively expands frontier nodes up to max_depth, asking the persona LLM to evaluate candidate
         neighbors at each hop to build a rich multi-hop domain context.
@@ -136,6 +136,32 @@ class DepartmentPersonaAgent:
         traversed_node_ids = list(visited_node_ids)
         subgraph_nodes = list(explored_nodes_map.values())
 
+        return {
+            "department_id": self.department_id,
+            "department_name": self.department_name,
+            "hub_node_id": self.hub_node.id,
+            "hub_title": self.hub_node.title,
+            "traversing_node_ids": traversed_node_ids,
+            "subgraph_nodes": subgraph_nodes,
+        }
+
+    def explore_and_retrieve(
+        self,
+        query: str,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        allow_web_search: bool = False,
+        project_id: str = "global",
+    ) -> Dict[str, Any]:
+        """Retrieval mode: runs concept hub exploration, then synthesizes persona perspective."""
+        exploration = self.explore_concept_hub(
+            query=query,
+            chat_history=chat_history,
+            allow_web_search=False,
+            project_id=project_id,
+        )
+
+        subgraph_nodes = exploration.get("subgraph_nodes", [])
+
         # Synthesize persona perspective over accumulated multi-hop sub-graph
         prompt_payload = f"""
         You are the Specialist Agent for Concept Hub '{self.hub_node.title}'.
@@ -143,7 +169,7 @@ class DepartmentPersonaAgent:
         - Title: {self.hub_node.title}
         - Description: {self.hub_node.text_body}
 
-        Explored Multi-Hop Subgraph Concepts ({len(subgraph_nodes)} nodes across depth {max_depth}):
+        Explored Multi-Hop Subgraph Concepts ({len(subgraph_nodes)} nodes):
         {json.dumps([{"id": n.id, "title": n.title, "body": n.text_body[:200]} for n in subgraph_nodes])}
 
         Task / User Query: "{query}"
@@ -169,28 +195,13 @@ class DepartmentPersonaAgent:
             "department_name": self.department_name,
             "hub_node_id": self.hub_node.id,
             "hub_title": self.hub_node.title,
-            "traversing_node_ids": traversed_node_ids,
+            "traversing_node_ids": exploration.get("traversing_node_ids", []),
             "subgraph_nodes": subgraph_nodes,
             "perspective": llm_response,
             "web_search_used": False,
         }
 
-    def explore_and_debate_retrieval(
-        self,
-        query: str,
-        chat_history: Optional[List[Dict[str, str]]] = None,
-        allow_web_search: bool = False,
-        project_id: str = "global",
-    ) -> Dict[str, Any]:
-        """Retrieval mode wrapper around shared explore_and_debate_hub."""
-        return self.explore_and_debate_hub(
-            query=query,
-            chat_history=chat_history,
-            allow_web_search=False,
-            project_id=project_id,
-        )
-
-    def evaluate_and_debate_ingestion(
+    def explore_and_ingest(
         self,
         consolidated_concepts: List[Dict[str, Any]],
         doc_title: str,
@@ -198,8 +209,8 @@ class DepartmentPersonaAgent:
         chat_history: List[Dict[str, str]],
         project_id: str = "global",
     ) -> Dict[str, Any]:
-        """Ingestion mode: Executes shared exploration & relevance debate first, then evaluates concept merging against hub knowledge."""
-        exploration = self.explore_and_debate_hub(
+        """Ingestion mode: Executes shared exploration first, then evaluates concept merging against hub knowledge."""
+        exploration = self.explore_concept_hub(
             query=query,
             chat_history=chat_history,
             allow_web_search=False,
@@ -213,7 +224,6 @@ class DepartmentPersonaAgent:
             f"User Query Context: {query}\n\n"
             f"Hub Concept: '{self.hub_node.title}' (ID: {self.hub_node.id})\n"
             f"Hub Description: {self.hub_node.text_body}\n\n"
-            f"Persona Hub Knowledge Base & Observations:\n{exploration.get('perspective', '')}\n\n"
             f"Adjacent Subgraph Concepts:\n"
             f"{json.dumps([{'id': n.id, 'title': n.title, 'body': n.text_body[:200]} for n in subgraph_nodes], indent=2)}\n\n"
             f"Newly Extracted Candidate Concepts ({len(consolidated_concepts)} items):\n"
@@ -246,7 +256,6 @@ class DepartmentPersonaAgent:
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
                 "traversing_node_ids": exploration.get("traversing_node_ids", []),
-                "perspective": exploration.get("perspective", ""),
                 "new_edges": data.get("new_edges", []),
                 "merged_into_existing": data.get("merged_into_existing", []),
             }
@@ -257,7 +266,6 @@ class DepartmentPersonaAgent:
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
                 "traversing_node_ids": exploration.get("traversing_node_ids", []),
-                "perspective": exploration.get("perspective", ""),
                 "new_edges": [],
                 "merged_into_existing": [],
             }

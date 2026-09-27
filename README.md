@@ -35,7 +35,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
  - Dynamic Concept Hub Discovery: High-centrality concept nodes detected in real time (<5ms)
    via `rustworkx` eigenvector/degree centrality.
  - Shared Multi-Hop Sub-Graph Exploration: Both Retrieval and Ingestion start with shared concept hub
-   exploration (`explore_and_debate_hub`), iteratively expanding neighbor nodes up to `max_depth` (guided by LLM persona selection).
+   exploration (`explore_concept_hub`), iteratively expanding neighbor nodes up to `max_depth` (guided by LLM persona selection).
  - Relevance Debate: Personas debate the relevance of their accumulated multi-hop domain knowledge against the user prompt,
    full conversation history (`chat_history`), and system execution events.
  - Multi-Persona Merging Debate (Ingestion Specific): Evaluates consolidated concepts against each
@@ -74,7 +74,7 @@ The backend engine (`me-mex/backend`) is fully implemented and verified:
 - ✅ **`app/services/llm_gateway.py`**: vLLM gateway client targeting Colab Ministral 3-8B with local rule-based fallback.
 - ✅ **`app/services/graph_analytics.py`**: `rustworkx` Hub Centrality worker with pure centrality dynamic thresholding and project-scoped graph filtering.
 - ✅ **`app/tools/search_tools.py`**: ArXiv research paper search and Trafilatura web article text extractor.
-- ✅ **`app/agents/department_persona.py`**: Specialist Personas for shared sub-graph exploration, relevance debate, and multi-persona concept merging.
+- ✅ **`app/agents/department_persona.py`**: Specialist Personas for shared sub-graph exploration (`explore_concept_hub`), retrieval synthesis (`explore_and_retrieve`), and multi-persona concept merging (`explore_and_ingest`).
 - ✅ **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating Direct Conversation, Ingestion, and Persona Retrieval flows with `chat_history` context-aware intent classification.
 - ✅ **`app/api/sse.py`**: FastAPI SSE endpoint (`/api/sse/chat`) streaming live persona traversal telemetry.
 - ✅ **`main.py`**: REST API endpoints for unified chat (`POST /api/chat`), project workspaces (`GET/POST /api/projects`), project chat history (`GET /api/projects/{id}/chat`), and graph querying (`GET /api/graph?project_id=...`).
@@ -90,4 +90,3 @@ Run the test suite using the project virtualenv:
 # Run backend test suite (max 2 parallel workers per project rule)
 me-mex/.venv/bin/python3.14 me-mex/backend/run_tests.py
 ```
-

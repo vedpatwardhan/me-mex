@@ -61,7 +61,7 @@ me-mex/backend/
 - **`test_extract_document_title`**: Verifies LLM-driven concise title generation (3–7 words) for ingested raw documents.
 
 ### D. Department Specialist Personas (`tests/test_department_persona.py`)
-- **`test_department_persona_project_scoping`**: Verifies `DepartmentPersonaAgent.explore_and_debate_retrieval()` inspects only edges matching the active `project_id`.
+- **`test_department_persona_project_scoping`**: Verifies `DepartmentPersonaAgent.explore_and_retrieve()` inspects only edges matching the active `project_id`.
 
 ### E. REST API Routes (`tests/test_api_routes.py`)
 - **`test_root_endpoint`**: Verifies `GET /` system status response.
