@@ -49,16 +49,25 @@ class ExecutiveOrchestrator:
         return chunks if chunks else [text[:chunk_size]]
 
     def _extract_concepts_from_passage(
-        self, passage_text: str, doc_title: str
+        self,
+        passage_text: str,
+        doc_title: str,
+        query: str,
+        chat_history: List[Dict[str, str]],
     ) -> Dict[str, Any]:
-        """Performs LLM pass across a passage chunk to extract atomic concept nodes and qualitative relation edges."""
+        """Performs LLM pass across a passage chunk to extract atomic concept nodes and qualitative relation edges in the context of query and chat history."""
         system_prompt = load_prompt("passage_concept_extraction").format(
             doc_title=doc_title
         )
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Passage Chunk:\n{passage_text}"},
-        ]
+        messages = [{"role": "system", "content": system_prompt}]
+        if chat_history:
+            messages.extend(chat_history[-4:])
+        messages.append(
+            {
+                "role": "user",
+                "content": f"User Query Context: {query}\n\nPassage Chunk ({doc_title}):\n{passage_text}",
+            }
+        )
         try:
             res = self.llm.generate_chat_completion(
                 messages,
@@ -384,7 +393,9 @@ class ExecutiveOrchestrator:
         extracted_relations: List[Dict[str, Any]] = []
 
         for p_id, chunk_str in zip(passage_ids, passage_chunks):
-            extraction = self._extract_concepts_from_passage(chunk_str, title)
+            extraction = self._extract_concepts_from_passage(
+                chunk_str, title, query, chat_history
+            )
             for c in extraction.get("concepts", []):
                 c_title = c.get("title", "").strip()
                 if not c_title:
