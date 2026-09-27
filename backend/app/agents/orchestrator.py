@@ -388,8 +388,8 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, pass_chunk_evt)
         yield pass_chunk_evt
 
-        # Step 3: Multi-Pass Passage Concept Extraction & Deduplication
-        extracted_concepts_map: Dict[str, Dict[str, Any]] = {}
+        # Step 3: Multi-Pass Passage Concept Extraction
+        raw_extracted_concepts: List[Dict[str, Any]] = []
         extracted_relations: List[Dict[str, Any]] = []
 
         for p_id, chunk_str in zip(passage_ids, passage_chunks):
@@ -397,21 +397,13 @@ class ExecutiveOrchestrator:
                 chunk_str, title, query, chat_history
             )
             for c in extraction.get("concepts", []):
-                c_title = c.get("title", "").strip()
-                if not c_title:
-                    continue
-                norm_key = c_title.lower()
-                if norm_key not in extracted_concepts_map:
-                    extracted_concepts_map[norm_key] = {
-                        "title": c_title,
+                raw_extracted_concepts.append(
+                    {
+                        "title": c["title"],
                         "description": c.get("description", ""),
-                        "passage_pointers": [p_id],
+                        "passage_id": p_id,
                     }
-                else:
-                    if p_id not in extracted_concepts_map[norm_key]["passage_pointers"]:
-                        extracted_concepts_map[norm_key]["passage_pointers"].append(
-                            p_id
-                        )
+                )
             extracted_relations.extend(extraction.get("relations", []))
 
         proj_list = ["global"]
@@ -422,14 +414,14 @@ class ExecutiveOrchestrator:
         top_hubs = self.analytics.get_top_concept_hubs(project_id=project_id, top_k=2)
 
         created_node_ids = []
-        for norm_key, c_data in extracted_concepts_map.items():
+        for c_data in raw_extracted_concepts:
             concept_id = f"concept_{uuid.uuid4().hex[:6]}"
             c_node = GraphNode(
                 _id=concept_id,
                 node_type="concept",
                 title=c_data["title"],
                 text_body=f"# {c_data['title']}\n{c_data['description']}",
-                passage_pointers=c_data["passage_pointers"],
+                passage_pointers=[c_data["passage_id"]],
                 project_ids=proj_list,
                 metadata={"status": "PRIMARY_ACTIVE"},
             )
