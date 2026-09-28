@@ -488,7 +488,6 @@ class ExecutiveOrchestrator:
                 {
                     "dept": dept,
                     "commands": ingest_res.get("commands", []),
-                    "traversed_node_ids": ingest_res.get("traversed_node_ids", []),
                 }
             )
 
@@ -640,20 +639,11 @@ class ExecutiveOrchestrator:
         for res in persona_command_results:
             dept: DepartmentPersonaAgent = res["dept"]
             commands: List[Dict[str, Any]] = res["commands"]
-            traversed_node_ids: List[str] = res["traversed_node_ids"]
 
             for cmd in commands:
                 cmd_type = cmd.get("command_type")
                 if cmd_type == "EDIT_CONCEPT":
                     existing_id = cmd.get("existing_node_id")
-                    if not existing_id and "subgraph_idx" in cmd:
-                        try:
-                            s_idx = int(cmd["subgraph_idx"])
-                            if 0 <= s_idx < len(traversed_node_ids):
-                                existing_id = traversed_node_ids[s_idx]
-                        except Exception:
-                            pass
-
                     existing_node = (
                         self.db.get_node(existing_id) if existing_id else None
                     )
@@ -719,34 +709,28 @@ class ExecutiveOrchestrator:
                     yield node_evt
 
                 elif cmd_type == "CONSTRUCT_EDGE":
-                    # Resolve source node ID
-                    src_ref = cmd.get("source_ref")
+                    # Directly resolve source node ID via ID or candidate index
+                    src_ref = cmd.get("source_ref") or cmd.get("source_id")
                     src_id = None
                     if isinstance(src_ref, int) and src_ref in candidate_idx_to_node:
                         src_id = candidate_idx_to_node[src_ref].id
-                    elif isinstance(src_ref, str) and self.db.get_node(src_ref):
-                        src_id = src_ref
-                    if not src_id:
-                        src_key = str(cmd.get("source_title", "")).lower()
-                        src_id = title_to_node_id.get(src_key) or (
-                            dept.hub_node.id
-                            if dept.hub_node.title.lower() in src_key
-                            else None
+                    elif isinstance(src_ref, str):
+                        src_id = (
+                            src_ref
+                            if self.db.get_node(src_ref)
+                            else title_to_node_id.get(src_ref.lower())
                         )
 
-                    # Resolve target node ID
-                    tgt_ref = cmd.get("target_ref")
+                    # Directly resolve target node ID via ID or candidate index
+                    tgt_ref = cmd.get("target_ref") or cmd.get("target_id")
                     tgt_id = None
                     if isinstance(tgt_ref, int) and tgt_ref in candidate_idx_to_node:
                         tgt_id = candidate_idx_to_node[tgt_ref].id
-                    elif isinstance(tgt_ref, str) and self.db.get_node(tgt_ref):
-                        tgt_id = tgt_ref
-                    if not tgt_id:
-                        tgt_key = str(cmd.get("target_title", "")).lower()
-                        tgt_id = title_to_node_id.get(tgt_key) or (
-                            dept.hub_node.id
-                            if dept.hub_node.title.lower() in tgt_key
-                            else None
+                    elif isinstance(tgt_ref, str):
+                        tgt_id = (
+                            tgt_ref
+                            if self.db.get_node(tgt_ref)
+                            else title_to_node_id.get(tgt_ref.lower())
                         )
 
                     if src_id and tgt_id and src_id != tgt_id:
@@ -758,7 +742,7 @@ class ExecutiveOrchestrator:
                             is_directional=True,
                             text_body=cmd.get(
                                 "description",
-                                f"Link from {cmd.get('source_title', src_id)} to {cmd.get('target_title', tgt_id)}",
+                                f"Link from {src_id} to {tgt_id}",
                             ),
                             weight=1.0,
                             project_ids=proj_list,

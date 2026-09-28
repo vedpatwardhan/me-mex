@@ -238,12 +238,11 @@ class DepartmentPersonaAgent:
         subgraph_nodes = exploration.get("subgraph_nodes", [])
         subgraph_nodes_payload = [
             {
-                "subgraph_idx": idx,
                 "id": n.id,
                 "title": n.title,
                 "body": n.text_body[:200],
             }
-            for idx, n in enumerate(subgraph_nodes)
+            for n in subgraph_nodes
         ]
         candidate_concepts_payload = [
             {
