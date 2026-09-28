@@ -40,7 +40,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
    full conversation history (`chat_history`), and system execution events.
  - Multi-Persona Merging Debate (Ingestion Specific): Evaluates consolidated concepts against each
    persona's multi-hop domain knowledge, supporting concept decomposition, node merging, and multi-hub edge creation.
- - Real-Time SSE Telemetry: Streams persona traversal events (`traversing_node_ids`) to animate the
+ - Real-Time SSE Telemetry: Streams persona traversal events (`traversed_node_ids`) to animate the
    WebGL canvas (`react-force-graph-2d`).
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐

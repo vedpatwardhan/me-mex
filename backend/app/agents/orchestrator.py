@@ -1,7 +1,7 @@
 import json
 import uuid
 import time
-from typing import List, Dict, Any, AsyncGenerator, Optional
+from typing import List, Dict, Any, AsyncGenerator, Generator, Optional
 from app.db import db_engine
 from app.models import (
     GraphNode,
@@ -325,7 +325,7 @@ class ExecutiveOrchestrator:
                 "event": "persona_traversal_active",
                 "department_id": dept.department_id,
                 "department_name": dept.department_name,
-                "traversing_node_ids": finding["traversing_node_ids"],
+                "traversed_node_ids": finding["traversed_node_ids"],
                 "perspective_snippet": finding["perspective"][:150],
                 "timestamp": time.time(),
             }
@@ -452,19 +452,14 @@ class ExecutiveOrchestrator:
         if project_id and project_id != "global":
             proj_list.append(project_id)
 
-        # Step 5: Discover Top Concept Hubs & Instantiate Hub Persona Agents
+        # Step 5: Discover Top Concept Hubs & Run Active Department Persona Ingestion to collect commands
         top_hubs = self.analytics.get_top_concept_hubs(
             project_id=project_id, max_k=self.max_k_hubs
         )
         active_departments = [
             DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
         ]
-
-        title_to_node_id: Dict[str, str] = {}
-        created_node_ids: List[str] = []
-        merged_existing_node_ids: set = set()
-
-        # Step 6: Hub Persona Agents evaluation & edge formation (Merging into Global Graph)
+        persona_command_results: List[Dict[str, Any]] = []
         for dept in active_departments:
             yield {
                 "event": "persona_traversal_start",
@@ -478,44 +473,210 @@ class ExecutiveOrchestrator:
             ingest_res = dept.persona_ingestion(
                 consolidated_concepts, title, query, chat_history, project_id=project_id
             )
+            persona_command_results.append(
+                {
+                    "dept": dept,
+                    "commands": ingest_res.get("commands", []),
+                    "traversed_node_ids": ingest_res.get("traversed_node_ids", []),
+                }
+            )
 
-            # Process command list emitted by persona ingestion
-            for cmd in ingest_res.get("commands", []):
+        # Step 6: Apply all graph updates to DB in dedicated helper method
+        for evt in self._apply_ingestion_graph_updates(
+            doc_id=doc_id,
+            doc_title=title,
+            consolidated_concepts=consolidated_concepts,
+            consolidated_relations=consolidated_relations,
+            persona_command_results=persona_command_results,
+            project_id=project_id,
+            proj_list=proj_list,
+        ):
+            yield evt
+
+        comp_evt = {
+            "event": "tool_complete",
+            "tool_name": "ingest_document_tool",
+            "doc_id": doc_id,
+            "created_nodes_count": len(consolidated_concepts),
+            "passage_pointers": passage_ids,
+            "message": f"Successfully integrated document '{title}' with {len(consolidated_concepts)} concept nodes and {len(passage_ids)} passage pointers.",
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, comp_evt)
+        yield comp_evt
+
+        # Step 7: Delegate final assistant response turn directly to execute_direct_conversation_flow
+        ingest_query = f"I just ingested document '{title}'. Summarize the key additions and integrated graph concepts."
+        async for event in self.execute_direct_conversation_flow(
+            ingest_query, chat_history, project_id=project_id
+        ):
+            yield event
+
+    def _apply_ingestion_graph_updates(
+        self,
+        doc_id: str,
+        doc_title: str,
+        consolidated_concepts: List[Dict[str, Any]],
+        consolidated_relations: List[Dict[str, Any]],
+        persona_command_results: List[Dict[str, Any]],
+        project_id: str,
+        proj_list: List[str],
+    ) -> Generator[Dict[str, Any], None, None]:
+        """Apply all intra-document graph persistence and global graph merging edits to the DB."""
+        created_nodes: List[GraphNode] = []
+        candidate_idx_to_node: Dict[int, GraphNode] = {}
+        title_to_node_id: Dict[str, str] = {}
+
+        # 1. Intra-document graph addition
+        for idx, c_data in enumerate(consolidated_concepts):
+            c_title = c_data["title"]
+            c_title_lower = c_title.lower()
+            concept_id = f"concept_{uuid.uuid4().hex[:6]}"
+            passage_ptrs = c_data.get("passage_ids", [])
+            c_node = GraphNode(
+                _id=concept_id,
+                node_type="concept",
+                title=c_title,
+                text_body=f"# {c_title}\n{c_data.get('description', '')}",
+                passage_pointers=passage_ptrs,
+                project_ids=proj_list,
+                metadata={"status": "PRIMARY_ACTIVE"},
+            )
+            self.db.upsert_node(c_node)
+            created_nodes.append(c_node)
+            candidate_idx_to_node[idx] = c_node
+            title_to_node_id[c_title_lower] = concept_id
+
+            # Connect Root Media Node -> Concept Node
+            doc_edge_id = f"edge_{doc_id}_to_{concept_id}"
+            doc_edge = GraphEdge(
+                _id=doc_edge_id,
+                source_id=doc_id,
+                target_id=concept_id,
+                is_directional=True,
+                text_body=f"Document '{doc_title}' presents concept '{c_title}'.",
+                weight=1.0,
+                project_ids=proj_list,
+                status="PRIMARY_ACTIVE",
+            )
+            self.db.upsert_edge(doc_edge)
+
+            node_evt = {
+                "event": "concept_created",
+                "persona_id": "orchestrator",
+                "persona_name": "Ingestion Engine",
+                "node_id": concept_id,
+                "node_title": c_title,
+                "message": f"Intra-document concept '{c_title}' added to knowledge graph.",
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, node_evt)
+            yield node_evt
+
+        # Save intra-document relations directly extracted
+        for rel in consolidated_relations:
+            src_key = rel.get("source_title", "").lower()
+            tgt_key = rel.get("target_title", "").lower()
+            src_id = title_to_node_id.get(src_key)
+            tgt_id = title_to_node_id.get(tgt_key)
+            if src_id and tgt_id and src_id != tgt_id:
+                edge_id = f"edge_{src_id}_to_{tgt_id}"
+                direct_edge = GraphEdge(
+                    _id=edge_id,
+                    source_id=src_id,
+                    target_id=tgt_id,
+                    is_directional=True,
+                    text_body=rel.get(
+                        "description",
+                        f"Link from {rel.get('source_title')} to {rel.get('target_title')}",
+                    ),
+                    weight=1.0,
+                    project_ids=proj_list,
+                    status="PRIMARY_ACTIVE",
+                )
+                self.db.upsert_edge(direct_edge)
+
+        # 2. Process collected persona commands (EDIT_CONCEPT, CONSTRUCT_EDGE)
+        for res in persona_command_results:
+            dept: DepartmentPersonaAgent = res["dept"]
+            commands: List[Dict[str, Any]] = res["commands"]
+            traversed_node_ids: List[str] = res["traversed_node_ids"]
+
+            for cmd in commands:
                 cmd_type = cmd.get("command_type")
                 if cmd_type == "EDIT_CONCEPT":
                     existing_id = cmd.get("existing_node_id")
                     if not existing_id and "subgraph_idx" in cmd:
                         try:
                             s_idx = int(cmd["subgraph_idx"])
-                            sub_nodes = ingest_res.get("traversing_node_ids", [])
-                            if 0 <= s_idx < len(sub_nodes):
-                                existing_id = sub_nodes[s_idx]
+                            if 0 <= s_idx < len(traversed_node_ids):
+                                existing_id = traversed_node_ids[s_idx]
                         except Exception:
                             pass
+
                     existing_node = (
                         self.db.get_node(existing_id) if existing_id else None
                     )
-                    if existing_node:
-                        if cmd.get("additional_text"):
-                            existing_node.text_body += f"\n\n## Addition from '{title}':\n{cmd['additional_text']}"
-                        for pid in cmd.get("passage_ids", []):
-                            if pid not in existing_node.passage_pointers:
-                                existing_node.passage_pointers.append(pid)
-                        self.db.upsert_node(existing_node)
-                        merged_existing_node_ids.add(existing_node.id)
-                        title_to_node_id[existing_node.title.lower()] = existing_node.id
+                    if not existing_node:
+                        continue
 
-                        node_evt = {
-                            "event": "concept_updated",
-                            "persona_id": dept.department_id,
-                            "persona_name": dept.department_name,
-                            "node_id": existing_node.id,
-                            "node_title": existing_node.title,
-                            "message": f"Concept '{existing_node.title}' updated with new insights from '{title}'.",
-                            "timestamp": time.time(),
-                        }
-                        self.event_queue.push(project_id, node_evt)
-                        yield node_evt
+                    # Identify candidate intra-doc node to replace
+                    c_idx = cmd.get("candidate_idx")
+                    temp_intra_node = (
+                        candidate_idx_to_node.get(c_idx) if c_idx is not None else None
+                    )
+
+                    # Update existing global node body and passage pointers
+                    if cmd.get("additional_text"):
+                        existing_node.text_body += f"\n\n## Addition from '{doc_title}':\n{cmd['additional_text']}"
+                    for pid in cmd.get("passage_ids", []):
+                        if pid not in existing_node.passage_pointers:
+                            existing_node.passage_pointers.append(pid)
+                    self.db.upsert_node(existing_node)
+                    title_to_node_id[existing_node.title.lower()] = existing_node.id
+
+                    # Rewire edges and delete temporary intra-document concept node if found
+                    if temp_intra_node and temp_intra_node.id != existing_node.id:
+                        temp_id = temp_intra_node.id
+                        all_edges = self.db.get_all_edges()
+                        for edge in all_edges:
+                            if edge.source_id == temp_id or edge.target_id == temp_id:
+                                new_src = (
+                                    existing_node.id
+                                    if edge.source_id == temp_id
+                                    else edge.source_id
+                                )
+                                new_tgt = (
+                                    existing_node.id
+                                    if edge.target_id == temp_id
+                                    else edge.target_id
+                                )
+                                if new_src != new_tgt:
+                                    rewired_edge = GraphEdge(
+                                        _id=f"edge_{new_src}_to_{new_tgt}",
+                                        source_id=new_src,
+                                        target_id=new_tgt,
+                                        is_directional=edge.is_directional,
+                                        text_body=edge.text_body,
+                                        weight=edge.weight,
+                                        project_ids=edge.project_ids,
+                                        status=edge.status,
+                                    )
+                                    self.db.upsert_edge(rewired_edge)
+                                self.db.delete_edge(edge.id)
+                        self.db.delete_node(temp_id)
+
+                    node_evt = {
+                        "event": "concept_updated",
+                        "persona_id": dept.department_id,
+                        "persona_name": dept.department_name,
+                        "node_id": existing_node.id,
+                        "node_title": existing_node.title,
+                        "message": f"Concept '{existing_node.title}' updated with new insights from '{doc_title}'.",
+                        "timestamp": time.time(),
+                    }
+                    self.event_queue.push(project_id, node_evt)
+                    yield node_evt
 
                 elif cmd_type == "CONSTRUCT_EDGE":
                     src_key = str(cmd.get("source_title", "")).lower()
@@ -547,96 +708,16 @@ class ExecutiveOrchestrator:
                         )
                         self.db.upsert_edge(new_edge)
 
-        # Step 7: Create GraphNodes ONLY for novel consolidated concepts NOT merged into existing nodes
-        for c_data in consolidated_concepts:
-            c_title_lower = c_data["title"].lower()
-            if c_title_lower not in title_to_node_id:
-                concept_id = f"concept_{uuid.uuid4().hex[:6]}"
-                passage_ptrs = c_data.get("passage_ids", [])
-                c_node = GraphNode(
-                    _id=concept_id,
-                    node_type="concept",
-                    title=c_data["title"],
-                    text_body=f"# {c_data['title']}\n{c_data['description']}",
-                    passage_pointers=passage_ptrs,
-                    project_ids=proj_list,
-                    metadata={"status": "PRIMARY_ACTIVE"},
-                )
-                self.db.upsert_node(c_node)
-                created_node_ids.append(concept_id)
-                title_to_node_id[c_title_lower] = concept_id
-
-                node_evt = {
-                    "event": "concept_created",
-                    "persona_id": "orchestrator",
-                    "persona_name": "Ingestion Engine",
-                    "node_id": concept_id,
-                    "node_title": c_data["title"],
-                    "message": f"Novel concept '{c_data['title']}' integrated into knowledge graph.",
-                    "timestamp": time.time(),
-                }
-                self.event_queue.push(project_id, node_evt)
-                yield node_evt
-
-        # Step 8: Process directly extracted relations from multi-passage consolidation
-        for rel in consolidated_relations:
-            src_key = rel.get("source_title", "").lower()
-            tgt_key = rel.get("target_title", "").lower()
-            src_id = title_to_node_id.get(src_key)
-            tgt_id = title_to_node_id.get(tgt_key)
-            if src_id and tgt_id and src_id != tgt_id:
-                edge_id = f"edge_{src_id}_to_{tgt_id}"
-                direct_edge = GraphEdge(
-                    _id=edge_id,
-                    source_id=src_id,
-                    target_id=tgt_id,
-                    is_directional=True,
-                    text_body=rel.get(
-                        "description",
-                        f"Link from {rel.get('source_title')} to {rel.get('target_title')}",
-                    ),
-                    weight=1.0,
-                    project_ids=proj_list,
-                    status="PRIMARY_ACTIVE",
-                )
-                self.db.upsert_edge(direct_edge)
-
-        # Fallback default edges to top hub if no persona edges created
-        if top_hubs and created_node_ids:
-            target_hub = top_hubs[0][0]
-            for c_id in created_node_ids:
-                edge_id = f"edge_{c_id}_to_{target_hub.id}"
-                if not self.db.get_edge(edge_id):
-                    fallback_edge = GraphEdge(
-                        _id=edge_id,
-                        source_id=c_id,
-                        target_id=target_hub.id,
-                        is_directional=True,
-                        text_body=f"Ingested concept linked to concept hub '{target_hub.title}'.",
-                        weight=1.0,
-                        project_ids=proj_list,
-                        status="PRIMARY_ACTIVE",
-                    )
-                    self.db.upsert_edge(fallback_edge)
-
-        comp_evt = {
-            "event": "tool_complete",
-            "tool_name": "ingest_document_tool",
+        summary_evt = {
+            "event": "ingestion_completed",
             "doc_id": doc_id,
-            "created_nodes_count": len(created_node_ids),
-            "passage_pointers": passage_ids,
-            "message": f"Successfully integrated document '{title}' with {len(created_node_ids)} concept nodes and {len(passage_ids)} passage pointers.",
+            "title": doc_title,
+            "concepts_count": len(created_nodes),
+            "message": f"Document '{doc_title}' successfully ingested and merged into knowledge graph.",
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, comp_evt)
-        yield comp_evt
-
-        # Step 9: Delegate final assistant response turn directly to execute_direct_conversation_flow
-        ingest_query = f"I just ingested document '{title}'. Summarize the key additions and integrated graph concepts."
-        async for event in self.execute_direct_conversation_flow(
-            ingest_query, chat_history, project_id=project_id
-        ):
-            yield event
+        self.event_queue.push(project_id, summary_evt)
+        yield summary_evt
 
 
 orchestrator = ExecutiveOrchestrator()

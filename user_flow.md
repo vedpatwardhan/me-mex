@@ -55,7 +55,7 @@ Both **Retrieval** and **Ingestion** operate on a single conversational gateway 
 
 2. **Relevance Debate (Common to Retrieval & Ingestion):**
    - Each Specialist Persona debates the relevance of its accumulated multi-hop sub-graph context against the user prompt and current chat context.
-   - **In Retrieval Mode:** The debate determines how closely the explored multi-hop sub-graph relates to the query topic, emitting glowing `traversing_node_ids` to the WebGL visualizer and providing grounded evidence to the Orchestrator for synthesis.
+   - **In Retrieval Mode:** The debate determines how closely the explored multi-hop sub-graph relates to the query topic, emitting glowing `traversed_node_ids` to the WebGL visualizer and providing grounded evidence to the Orchestrator for synthesis.
 
 3. **Multi-Persona Concept Merging Debate (Ingestion Specific Step):**
    - Ingestion adds an explicit **Concept Merging Debate Step** on top of shared exploration and relevance debate.

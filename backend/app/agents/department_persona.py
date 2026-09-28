@@ -159,7 +159,7 @@ class DepartmentPersonaAgent:
             "department_name": self.department_name,
             "hub_node_id": self.hub_node.id,
             "hub_title": self.hub_node.title,
-            "traversing_node_ids": traversed_node_ids,
+            "traversed_node_ids": traversed_node_ids,
             "subgraph_nodes": subgraph_nodes,
         }
 
@@ -213,7 +213,7 @@ class DepartmentPersonaAgent:
             "department_name": self.department_name,
             "hub_node_id": self.hub_node.id,
             "hub_title": self.hub_node.title,
-            "traversing_node_ids": exploration.get("traversing_node_ids", []),
+            "traversed_node_ids": exploration.get("traversed_node_ids", []),
             "subgraph_nodes": subgraph_nodes,
             "perspective": llm_response,
             "web_search_used": False,
@@ -292,7 +292,7 @@ class DepartmentPersonaAgent:
                 "department_id": self.department_id,
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
-                "traversing_node_ids": exploration.get("traversing_node_ids", []),
+                "traversed_node_ids": exploration.get("traversed_node_ids", []),
                 "commands": commands,
             }
         except Exception as e:
@@ -301,6 +301,6 @@ class DepartmentPersonaAgent:
                 "department_id": self.department_id,
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
-                "traversing_node_ids": exploration.get("traversing_node_ids", []),
+                "traversed_node_ids": exploration.get("traversed_node_ids", []),
                 "commands": [],
             }

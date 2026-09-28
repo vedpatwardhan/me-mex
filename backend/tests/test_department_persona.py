@@ -28,8 +28,8 @@ def test_department_persona_project_scoping():
         "MPC optimization", allow_web_search=False, project_id="proj_scoped"
     )
 
-    assert "traversing_node_ids" in finding_global
-    assert "traversing_node_ids" in finding_scoped
+    assert "traversed_node_ids" in finding_global
+    assert "traversed_node_ids" in finding_scoped
 
 
 def test_department_persona_shared_exploration():
@@ -45,7 +45,7 @@ def test_department_persona_shared_exploration():
 
     assert exploration["department_id"] == "dept_concept_world_models"
     assert exploration["hub_node_id"] == "concept_world_models"
-    assert "concept_world_models" in exploration["traversing_node_ids"]
+    assert "concept_world_models" in exploration["traversed_node_ids"]
     assert "subgraph_nodes" in exploration
 
 
@@ -103,7 +103,7 @@ def test_department_persona_root_media_traversal_blocking():
         max_depth=3,
     )
 
-    # Paper D should be visited (present in traversing_node_ids)
-    assert "paper_d_root" in exploration["traversing_node_ids"]
+    # Paper D should be visited (present in traversed_node_ids)
+    assert "paper_d_root" in exploration["traversed_node_ids"]
     # Concept E must NOT be reached through Paper D
-    assert "concept_e_unreachable" not in exploration["traversing_node_ids"]
+    assert "concept_e_unreachable" not in exploration["traversed_node_ids"]
