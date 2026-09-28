@@ -193,6 +193,18 @@ class GraphMemexDatabase:
                 ]
             return list(self.mem_edges.values())
 
+    def delete_node(self, node_id: str):
+        if self.use_mongo:
+            self.db.nodes.delete_one({"_id": node_id})
+        else:
+            self.mem_nodes.pop(node_id, None)
+
+    def delete_edge(self, edge_id: str):
+        if self.use_mongo:
+            self.db.edges.delete_one({"_id": edge_id})
+        else:
+            self.mem_edges.pop(edge_id, None)
+
     # --- Project Operations ---
     def upsert_project(self, project: ProjectWorkspace):
         if self.use_mongo:

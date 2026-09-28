@@ -29,6 +29,10 @@ from tests.test_orchestrator import (
     test_classify_intent_with_chat_history,
     test_consolidate_extracted_concepts,
 )
+from tests.test_concept_reconciliation import (
+    test_reconciliation_no_conflict,
+    test_reconciliation_conflict_debate,
+)
 from tests.test_department_persona import (
     test_department_persona_project_scoping,
     test_department_persona_shared_exploration,
@@ -90,6 +94,16 @@ def run_all_tests():
         (
             "Orchestrator: Consolidate Extracted Concepts",
             test_consolidate_extracted_concepts,
+            False,
+        ),
+        (
+            "Reconciliation: Path 1 (No Conflict)",
+            test_reconciliation_no_conflict,
+            False,
+        ),
+        (
+            "Reconciliation: Path 2 (Multi-Persona Debate)",
+            test_reconciliation_conflict_debate,
             False,
         ),
         (
