@@ -10,18 +10,24 @@ IMPORTANT INGESTION RULE - ZERO DATA LOSS:
 - Synthesized markdown descriptions MUST combine all text, insights, and technical details from ALL originating passages without discarding information.
 
 Your task:
-1. CONSOLIDATE CONCEPTS:
+1. DOCUMENT GLOBAL SUMMARY:
+   - Provide a `doc_description` that synthesizes an overarching executive summary of the entire document based on all extracted concepts.
+   - Infer a `doc_type` for the document ("paper", "blog", "video", "post").
+
+2. CONSOLIDATE CONCEPTS:
    - Group raw concepts that refer to the same underlying idea, component, or methodology under a single canonical title.
    - Synthesize individual passage descriptions into a comprehensive, unified markdown description containing ALL details, nuances, and data points from every matching passage.
    - Aggregate all originating `passage_ids` lists for each consolidated concept into a unified `passage_ids` list.
 
-2. CONSOLIDATE RELATIONS:
+3. CONSOLIDATE RELATIONS:
    - Connect the consolidated concepts with clean directed relationships (edges).
    - Ensure `source_title` and `target_title` match the exact canonical titles in the `concepts` list.
    - Provide a clear, natural language description explaining the relationship.
 
 Return JSON format:
 {
+  "doc_description": "Overarching executive summary of the document synthesized across all extracted concepts.",
+  "doc_type": "paper",
   "concepts": [
     {
       "title": "Canonical Concept Title",

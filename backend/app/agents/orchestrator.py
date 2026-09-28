@@ -128,12 +128,19 @@ class ExecutiveOrchestrator:
             )
             data = json.loads(res)
             return {
+                "doc_description": data.get(
+                    "doc_description",
+                    f"Consolidated knowledge document for '{doc_title}'.",
+                ),
+                "doc_type": data.get("doc_type", "paper"),
                 "concepts": data.get("concepts", []),
                 "relations": data.get("relations", []),
             }
         except Exception as e:
             print(f"[ExecutiveOrchestrator] Concept consolidation LLM pass error: {e}")
             return {
+                "doc_description": f"Consolidated knowledge document for '{doc_title}'.",
+                "doc_type": "paper",
                 "concepts": raw_extracted_concepts,
                 "relations": extracted_relations,
             }
@@ -447,6 +454,10 @@ class ExecutiveOrchestrator:
         )
         consolidated_concepts = consolidated_result.get("concepts", [])
         consolidated_relations = consolidated_result.get("relations", [])
+        doc_description = consolidated_result.get(
+            "doc_description", f"Consolidated knowledge document for '{title}'."
+        )
+        doc_type = consolidated_result.get("doc_type", "paper")
 
         proj_list = ["global"]
         if project_id and project_id != "global":
@@ -485,11 +496,14 @@ class ExecutiveOrchestrator:
         for evt in self._apply_ingestion_graph_updates(
             doc_id=doc_id,
             doc_title=title,
+            doc_description=doc_description,
+            doc_type=doc_type,
             consolidated_concepts=consolidated_concepts,
             consolidated_relations=consolidated_relations,
             persona_command_results=persona_command_results,
             project_id=project_id,
             proj_list=proj_list,
+            passage_ids=passage_ids,
         ):
             yield evt
 
@@ -516,18 +530,44 @@ class ExecutiveOrchestrator:
         self,
         doc_id: str,
         doc_title: str,
+        doc_description: str,
+        doc_type: str,
         consolidated_concepts: List[Dict[str, Any]],
         consolidated_relations: List[Dict[str, Any]],
         persona_command_results: List[Dict[str, Any]],
         project_id: str,
         proj_list: List[str],
+        passage_ids: List[str],
     ) -> Generator[Dict[str, Any], None, None]:
         """Apply all intra-document graph persistence and global graph merging edits to the DB."""
         created_nodes: List[GraphNode] = []
         candidate_idx_to_node: Dict[int, GraphNode] = {}
         title_to_node_id: Dict[str, str] = {}
 
-        # 1. Intra-document graph addition
+        # 0. Instantiate and save Root Media GraphNode representing the document
+        doc_node = GraphNode(
+            _id=doc_id,
+            node_type=doc_type,
+            title=doc_title,
+            text_body=f"# {doc_title}\n\n## Executive Summary:\n{doc_description}",
+            passage_pointers=passage_ids,
+            project_ids=proj_list,
+            metadata={"status": "PRIMARY_ACTIVE"},
+        )
+        self.db.upsert_node(doc_node)
+        root_evt = {
+            "event": "concept_created",
+            "persona_id": "orchestrator",
+            "persona_name": "Ingestion Engine",
+            "node_id": doc_id,
+            "node_title": doc_title,
+            "message": f"Root media graph node '{doc_title}' ({doc_type}) created.",
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, root_evt)
+        yield root_evt
+
+        # 1. Intra-document graph concept addition
         for idx, c_data in enumerate(consolidated_concepts):
             c_title = c_data["title"]
             c_title_lower = c_title.lower()
@@ -547,8 +587,8 @@ class ExecutiveOrchestrator:
             candidate_idx_to_node[idx] = c_node
             title_to_node_id[c_title_lower] = concept_id
 
-            # Connect Root Media Node -> Concept Node
-            doc_edge_id = f"edge_{doc_id}_to_{concept_id}"
+            # Connect Root Media GraphNode -> Concept Node
+            doc_edge_id = f"edge_{uuid.uuid4().hex[:8]}"
             doc_edge = GraphEdge(
                 _id=doc_edge_id,
                 source_id=doc_id,
@@ -580,7 +620,7 @@ class ExecutiveOrchestrator:
             src_id = title_to_node_id.get(src_key)
             tgt_id = title_to_node_id.get(tgt_key)
             if src_id and tgt_id and src_id != tgt_id:
-                edge_id = f"edge_{src_id}_to_{tgt_id}"
+                edge_id = f"edge_{uuid.uuid4().hex[:8]}"
                 direct_edge = GraphEdge(
                     _id=edge_id,
                     source_id=src_id,
@@ -653,7 +693,7 @@ class ExecutiveOrchestrator:
                                 )
                                 if new_src != new_tgt:
                                     rewired_edge = GraphEdge(
-                                        _id=f"edge_{new_src}_to_{new_tgt}",
+                                        _id=f"edge_{uuid.uuid4().hex[:8]}",
                                         source_id=new_src,
                                         target_id=new_tgt,
                                         is_directional=edge.is_directional,
@@ -679,20 +719,38 @@ class ExecutiveOrchestrator:
                     yield node_evt
 
                 elif cmd_type == "CONSTRUCT_EDGE":
-                    src_key = str(cmd.get("source_title", "")).lower()
-                    tgt_key = str(cmd.get("target_title", "")).lower()
-                    src_id = title_to_node_id.get(src_key) or (
-                        dept.hub_node.id
-                        if dept.hub_node.title.lower() in src_key
-                        else None
-                    )
-                    tgt_id = title_to_node_id.get(tgt_key) or (
-                        dept.hub_node.id
-                        if dept.hub_node.title.lower() in tgt_key
-                        else None
-                    )
+                    # Resolve source node ID
+                    src_ref = cmd.get("source_ref")
+                    src_id = None
+                    if isinstance(src_ref, int) and src_ref in candidate_idx_to_node:
+                        src_id = candidate_idx_to_node[src_ref].id
+                    elif isinstance(src_ref, str) and self.db.get_node(src_ref):
+                        src_id = src_ref
+                    if not src_id:
+                        src_key = str(cmd.get("source_title", "")).lower()
+                        src_id = title_to_node_id.get(src_key) or (
+                            dept.hub_node.id
+                            if dept.hub_node.title.lower() in src_key
+                            else None
+                        )
+
+                    # Resolve target node ID
+                    tgt_ref = cmd.get("target_ref")
+                    tgt_id = None
+                    if isinstance(tgt_ref, int) and tgt_ref in candidate_idx_to_node:
+                        tgt_id = candidate_idx_to_node[tgt_ref].id
+                    elif isinstance(tgt_ref, str) and self.db.get_node(tgt_ref):
+                        tgt_id = tgt_ref
+                    if not tgt_id:
+                        tgt_key = str(cmd.get("target_title", "")).lower()
+                        tgt_id = title_to_node_id.get(tgt_key) or (
+                            dept.hub_node.id
+                            if dept.hub_node.title.lower() in tgt_key
+                            else None
+                        )
+
                     if src_id and tgt_id and src_id != tgt_id:
-                        edge_id = f"edge_{src_id}_to_{tgt_id}"
+                        edge_id = f"edge_{uuid.uuid4().hex[:8]}"
                         new_edge = GraphEdge(
                             _id=edge_id,
                             source_id=src_id,
@@ -700,7 +758,7 @@ class ExecutiveOrchestrator:
                             is_directional=True,
                             text_body=cmd.get(
                                 "description",
-                                f"Link from {cmd.get('source_title')} to {cmd.get('target_title')}",
+                                f"Link from {cmd.get('source_title', src_id)} to {cmd.get('target_title', tgt_id)}",
                             ),
                             weight=1.0,
                             project_ids=proj_list,
