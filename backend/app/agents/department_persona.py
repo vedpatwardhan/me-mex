@@ -1,5 +1,6 @@
 import json
 import time
+from collections import defaultdict
 from typing import List, Dict, Any, Optional
 from app.db import db_engine
 from app.models import (
@@ -27,7 +28,7 @@ class DepartmentPersonaAgent:
         chat_history: Optional[List[Dict[str, str]]] = None,
         allow_web_search: bool = False,
         project_id: str = "global",
-        max_depth: int = 3,
+        max_depth: int = 5,
     ) -> Dict[str, Any]:
         """Multi-hop sub-graph exploration common to retrieval and ingestion.
 
@@ -35,6 +36,10 @@ class DepartmentPersonaAgent:
         neighbors at each hop to build a rich multi-hop domain context. Emits node_touched events as nodes are visited.
         """
         all_edges = db_engine.get_edges(project_id)
+        adj_map: Dict[str, List[GraphEdge]] = defaultdict(list)
+        for e in all_edges:
+            adj_map[e.source_id].append(e)
+            adj_map[e.target_id].append(e)
 
         visited_node_ids = set([self.hub_node.id])
         current_frontier = [self.hub_node.id]
@@ -58,28 +63,21 @@ class DepartmentPersonaAgent:
 
             # Find all unvisited candidate neighbors connected to current frontier nodes
             candidate_neighbors: Dict[str, Dict[str, Any]] = {}
-            for e in all_edges:
-                connected_id = None
-                if (
-                    e.source_id in current_frontier
-                    and e.target_id not in visited_node_ids
-                ):
-                    connected_id = e.target_id
-                elif (
-                    e.target_id in current_frontier
-                    and e.source_id not in visited_node_ids
-                ):
-                    connected_id = e.source_id
-
-                if connected_id and connected_id not in candidate_neighbors:
-                    neighbor_node = db_engine.get_node(connected_id)
-                    if neighbor_node:
-                        candidate_neighbors[connected_id] = {
-                            "id": neighbor_node.id,
-                            "title": neighbor_node.title,
-                            "body": neighbor_node.text_body[:200],
-                            "relation_desc": e.text_body,
-                        }
+            for f_id in current_frontier:
+                for e in adj_map.get(f_id, []):
+                    neighbor_id = e.target_id if e.source_id == f_id else e.source_id
+                    if (
+                        neighbor_id not in visited_node_ids
+                        and neighbor_id not in candidate_neighbors
+                    ):
+                        neighbor_node = db_engine.get_node(neighbor_id)
+                        if neighbor_node:
+                            candidate_neighbors[neighbor_id] = {
+                                "id": neighbor_node.id,
+                                "title": neighbor_node.title,
+                                "body": neighbor_node.text_body[:200],
+                                "relation_desc": e.text_body,
+                            }
 
             if not candidate_neighbors:
                 break
