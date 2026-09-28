@@ -82,51 +82,47 @@ class DepartmentPersonaAgent:
             if not candidate_neighbors:
                 break
 
-            # If small candidate set (<= 3), auto-expand; otherwise ask persona to select relevant neighbors
-            next_frontier = []
-            if len(candidate_neighbors) <= 3:
-                next_frontier = list(candidate_neighbors.keys())
-            else:
-                prompt_payload = f"""
-                Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
-                User Query / Context: "{query}"
-                Current Hop Level: {depth} / {max_depth}
+            # Evaluate candidate neighbors with persona LLM to select relevant nodes to explore deeper
+            prompt_payload = f"""
+            Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
+            User Query / Context: "{query}"
+            Current Hop Level: {depth} / {max_depth}
 
-                Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
-                {json.dumps(list(candidate_neighbors.values()), indent=2)}
+            Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
+            {json.dumps(list(candidate_neighbors.values()), indent=2)}
 
-                Evaluate which neighbor concepts are relevant and worth exploring deeper for this query.
-                """
-                messages = [
-                    {
-                        "role": "system",
-                        "content": load_prompt("persona_subgraph_expansion").format(
-                            hub_title=self.hub_node.title
-                        ),
-                    }
+            Evaluate which neighbor concepts are relevant and worth exploring deeper for this query.
+            """
+            messages = [
+                {
+                    "role": "system",
+                    "content": load_prompt("persona_subgraph_expansion").format(
+                        hub_title=self.hub_node.title
+                    ),
+                }
+            ]
+            if chat_history:
+                messages.extend(chat_history[-4:])
+            messages.append({"role": "user", "content": prompt_payload})
+
+            try:
+                res = llm_gateway.generate_chat_completion(
+                    messages,
+                    temperature=0.2,
+                    max_tokens=512,
+                    response_format={"type": "json_object"},
+                    enable_reasoning=False,
+                )
+                data = json.loads(res)
+                selected_ids = data.get("selected_neighbor_ids", [])
+                next_frontier = [
+                    nid for nid in selected_ids if nid in candidate_neighbors
                 ]
-                if chat_history:
-                    messages.extend(chat_history[-4:])
-                messages.append({"role": "user", "content": prompt_payload})
-
-                try:
-                    res = llm_gateway.generate_chat_completion(
-                        messages,
-                        temperature=0.2,
-                        max_tokens=512,
-                        response_format={"type": "json_object"},
-                        enable_reasoning=False,
-                    )
-                    data = json.loads(res)
-                    selected_ids = data.get("selected_neighbor_ids", [])
-                    next_frontier = [
-                        nid for nid in selected_ids if nid in candidate_neighbors
-                    ]
-                except Exception as e:
-                    print(
-                        f"[{self.department_name}] Hop {depth} expansion error ({e}); selecting top 3 candidates."
-                    )
-                    next_frontier = list(candidate_neighbors.keys())[:3]
+            except Exception as e:
+                print(
+                    f"[{self.department_name}] Hop {depth} expansion error ({e}); selecting top candidates."
+                )
+                next_frontier = list(candidate_neighbors.keys())[:3]
 
             if not next_frontier:
                 break
