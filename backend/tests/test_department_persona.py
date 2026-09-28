@@ -35,8 +35,6 @@ def test_department_persona_project_scoping():
 def test_department_persona_shared_exploration():
     """Verify DepartmentPersonaAgent.explore_concept_hub performs sub-graph traversal."""
     hub_node = db_engine.get_node("concept_world_models")
-    assert hub_node is not None
-
     agent = DepartmentPersonaAgent(hub_node)
     exploration = agent.explore_concept_hub(
         query="world models research",

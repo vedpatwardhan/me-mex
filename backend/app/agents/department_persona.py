@@ -1,4 +1,5 @@
 import json
+import time
 from typing import List, Dict, Any, Optional
 from app.db import db_engine
 from app.models import (
@@ -6,6 +7,7 @@ from app.models import (
     GraphEdge,
 )
 from app.services.llm_gateway import llm_gateway
+from app.services.event_queue import event_queue
 from app.prompts import load_prompt
 from app.tools.search_tools import search_tools
 
@@ -30,13 +32,25 @@ class DepartmentPersonaAgent:
         """Multi-hop sub-graph exploration common to retrieval and ingestion.
 
         Iteratively expands frontier nodes up to max_depth, asking the persona LLM to evaluate candidate
-        neighbors at each hop to build a rich multi-hop domain context.
+        neighbors at each hop to build a rich multi-hop domain context. Emits node_touched events as nodes are visited.
         """
         all_edges = db_engine.get_edges(project_id)
 
         visited_node_ids = set([self.hub_node.id])
         current_frontier = [self.hub_node.id]
         explored_nodes_map: Dict[str, GraphNode] = {self.hub_node.id: self.hub_node}
+
+        # Emit node_touched event for Hop 0 Hub Node
+        hub_evt = {
+            "event": "node_touched",
+            "persona_id": self.department_id,
+            "persona_name": self.department_name,
+            "node_id": self.hub_node.id,
+            "node_title": self.hub_node.title,
+            "message": f"Concept '{self.hub_node.title}' touched by {self.department_name}.",
+            "timestamp": time.time(),
+        }
+        event_queue.push(project_id, hub_evt)
 
         for depth in range(1, max_depth + 1):
             if not current_frontier:
@@ -124,6 +138,16 @@ class DepartmentPersonaAgent:
                 node_obj = db_engine.get_node(nid)
                 if node_obj:
                     explored_nodes_map[nid] = node_obj
+                    node_evt = {
+                        "event": "node_touched",
+                        "persona_id": self.department_id,
+                        "persona_name": self.department_name,
+                        "node_id": node_obj.id,
+                        "node_title": node_obj.title,
+                        "message": f"Concept '{node_obj.title}' touched by {self.department_name}.",
+                        "timestamp": time.time(),
+                    }
+                    event_queue.push(project_id, node_evt)
 
             # Filter next_frontier to ONLY concept nodes (blocking root media nodes from expanding further hops)
             current_frontier = [

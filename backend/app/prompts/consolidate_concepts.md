@@ -13,7 +13,7 @@ Your task:
 1. CONSOLIDATE CONCEPTS:
    - Group raw concepts that refer to the same underlying idea, component, or methodology under a single canonical title.
    - Synthesize individual passage descriptions into a comprehensive, unified markdown description containing ALL details, nuances, and data points from every matching passage.
-   - Aggregate all originating `passage_id` strings for each consolidated concept into a unified `passage_ids` list.
+   - Aggregate all originating `passage_ids` lists for each consolidated concept into a unified `passage_ids` list.
 
 2. CONSOLIDATE RELATIONS:
    - Connect the consolidated concepts with clean directed relationships (edges).

@@ -312,19 +312,6 @@ class ExecutiveOrchestrator:
             )
             department_findings.append(finding)
 
-            # Emit granular node_touched events as persona traverses adjacent nodes
-            for node_id in finding["traversing_node_ids"]:
-                node = self.db.get_node(node_id)
-                yield {
-                    "event": "node_touched",
-                    "persona_id": dept.department_id,
-                    "persona_name": dept.department_name,
-                    "node_id": node_id,
-                    "node_title": node.title if node else node_id,
-                    "message": f"Concept '{node.title if node else node_id}' touched by {dept.department_name}.",
-                    "timestamp": time.time(),
-                }
-
             if finding.get("web_search_used"):
                 yield {
                     "event": "persona_web_search",
@@ -449,7 +436,7 @@ class ExecutiveOrchestrator:
                     {
                         "title": c["title"],
                         "description": c.get("description", ""),
-                        "passage_id": p_id,
+                        "passage_ids": [p_id],
                     }
                 )
             extracted_relations.extend(extraction.get("relations", []))
@@ -519,7 +506,7 @@ class ExecutiveOrchestrator:
                         title_to_node_id[existing_node.title.lower()] = existing_node.id
 
                         node_evt = {
-                            "event": "node_touched",
+                            "event": "concept_updated",
                             "persona_id": dept.department_id,
                             "persona_name": dept.department_name,
                             "node_id": existing_node.id,
@@ -565,9 +552,7 @@ class ExecutiveOrchestrator:
             c_title_lower = c_data["title"].lower()
             if c_title_lower not in title_to_node_id:
                 concept_id = f"concept_{uuid.uuid4().hex[:6]}"
-                passage_ptrs = c_data.get("passage_ids") or (
-                    [c_data.get("passage_id")] if c_data.get("passage_id") else []
-                )
+                passage_ptrs = c_data.get("passage_ids", [])
                 c_node = GraphNode(
                     _id=concept_id,
                     node_type="concept",
@@ -582,7 +567,7 @@ class ExecutiveOrchestrator:
                 title_to_node_id[c_title_lower] = concept_id
 
                 node_evt = {
-                    "event": "node_touched",
+                    "event": "concept_created",
                     "persona_id": "orchestrator",
                     "persona_name": "Ingestion Engine",
                     "node_id": concept_id,
