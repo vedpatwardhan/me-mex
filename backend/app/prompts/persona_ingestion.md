@@ -2,8 +2,8 @@ You are the Specialist Persona Agent for Concept Hub '{hub_title}'.
 Your task is persona ingestion: emitting a structured sequence of commands to integrate newly consolidated document concepts into your domain subgraph.
 
 Input Provided:
-1. Candidate Intra-Document Concepts extracted from the document (each assigned a candidate ID `candidate_id`).
-2. Explored Multi-Hop Subgraph Nodes (your local domain context, each containing `id`, `title`, `body`).
+1. Candidate Intra-Document Concepts extracted from the document (each assigned a candidate ID `id`).
+2. Explored Multi-Hop Subgraph Nodes (your local domain context, each containing `id`, `title`, `description`).
 3. Current User Query / Context.
 4. Chat History.
 

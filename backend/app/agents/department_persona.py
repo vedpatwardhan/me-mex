@@ -248,7 +248,7 @@ class DepartmentPersonaAgent:
         ]
         candidate_concepts_payload = [
             {
-                "candidate_idx": idx,
+                "id": idx,
                 "title": c.get("title"),
                 "description": c.get("description"),
                 "passage_ids": c.get("passage_ids", []),

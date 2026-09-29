@@ -493,6 +493,13 @@ class ExecutiveOrchestrator:
             ingest_res = dept.persona_ingestion(
                 consolidated_concepts, title, query, chat_history, project_id=project_id
             )
+            # ingest_res: [{
+            #     department_id: str,
+            #     department_name: str,
+            #     hub_node_id: str,
+            #     traversed_node_ids: [str],
+            #     commands: List[Dict[str, Any]],
+            # }]
             persona_command_results.append(
                 {
                     "dept": dept,
@@ -607,7 +614,6 @@ class ExecutiveOrchestrator:
     ) -> Generator[Dict[str, Any], None, None]:
         """Apply all intra-document graph persistence and global graph merging edits to the DB via two-path reconciliation."""
         created_nodes: List[GraphNode] = []
-        concept_idx_to_node: Dict[int, GraphNode] = {}
 
         # 0. Instantiate and save Root Media GraphNode representing the document
         doc_node = GraphNode(
@@ -633,7 +639,7 @@ class ExecutiveOrchestrator:
         yield root_evt
 
         # 1. Intra-document graph concept addition
-        candidate_idx_to_node: Dict[int, GraphNode] = dict()
+        concept_idx_to_node: Dict[int, GraphNode] = dict()
         for idx, c_data in enumerate(consolidated_concepts):
             c_data["id"] = c_id = f"concept_{uuid.uuid4().hex[:6]}"
             c_data["idx"] = idx
@@ -650,7 +656,7 @@ class ExecutiveOrchestrator:
             )
             self.db.upsert_node(c_node)
             created_nodes.append(c_node)
-            candidate_idx_to_node[idx] = c_node
+            concept_idx_to_node[idx] = c_node
 
             # Connect Root Media GraphNode -> Concept Node
             doc_edge_id = f"edge_{uuid.uuid4().hex[:8]}"
@@ -680,8 +686,8 @@ class ExecutiveOrchestrator:
 
         # Save intra-document relations using candidate_idx_to_node mapping
         for rel in consolidated_relations:
-            src_id = candidate_idx_to_node[rel["source_idx"]].id
-            tgt_id = candidate_idx_to_node[rel["target_idx"]].id
+            src_id = concept_idx_to_node[rel["source_idx"]].id
+            tgt_id = concept_idx_to_node[rel["target_idx"]].id
             edge_id = f"edge_{uuid.uuid4().hex[:8]}"
 
             direct_edge = GraphEdge(
@@ -743,7 +749,7 @@ class ExecutiveOrchestrator:
                 if not existing_node:
                     continue
 
-                temp_intra_node = candidate_idx_to_node.get(idx)
+                temp_intra_node = concept_idx_to_node.get(idx)
 
                 if cmd.get("additional_text"):
                     existing_node.description += (
@@ -817,7 +823,7 @@ class ExecutiveOrchestrator:
                 )
 
                 resolution_type = debate_res.get("resolution_type", "MERGE_SINGLE")
-                temp_intra_node = candidate_idx_to_node.get(idx)
+                temp_intra_node = concept_idx_to_node.get(idx)
 
                 if resolution_type == "SUBDIVIDE":
                     # Debate outcome: Sub-divide concept into multiple refined sub-concepts
@@ -919,8 +925,8 @@ class ExecutiveOrchestrator:
                 or cmd.get("candidate_idx")
             )
             src_id = None
-            if isinstance(src_ref, int) and src_ref in candidate_idx_to_node:
-                src_id = candidate_idx_to_node[src_ref].id
+            if isinstance(src_ref, int) and src_ref in concept_idx_to_node:
+                src_id = concept_idx_to_node[src_ref].id
             elif isinstance(src_ref, str) and self.db.get_node(src_ref):
                 src_id = src_ref
 
@@ -930,8 +936,8 @@ class ExecutiveOrchestrator:
                 or cmd.get("candidate_idx")
             )
             tgt_id = None
-            if isinstance(tgt_ref, int) and tgt_ref in candidate_idx_to_node:
-                tgt_id = candidate_idx_to_node[tgt_ref].id
+            if isinstance(tgt_ref, int) and tgt_ref in concept_idx_to_node:
+                tgt_id = concept_idx_to_node[tgt_ref].id
             elif isinstance(tgt_ref, str) and self.db.get_node(tgt_ref):
                 tgt_id = tgt_ref
 
