@@ -75,7 +75,7 @@ class DepartmentPersonaAgent:
                             candidate_neighbors[neighbor_id] = {
                                 "id": neighbor_node.id,
                                 "title": neighbor_node.title,
-                                "body": neighbor_node.text_body[:200],
+                                "body": neighbor_node.text_body,
                                 "relation_desc": e.text_body,
                             }
 

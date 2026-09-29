@@ -88,7 +88,7 @@ Graph-Memex operates on a **Single Conversational Gateway (`POST /api/chat`)** c
    - Concept hubs are discovered in real time (<5ms) using `rustworkx` eigenvector/degree centrality filtered to the active `project_id` workspace.
    - A **Specialist Persona** is instantiated dynamically per top concept hub, receiving the user task, hub node text, and adjacent subgraph edges scoped to `project_id`.
    - If internal context is missing, the persona executes `duckduckgo_web_search` tool calls to retrieve live external evidence.
-   - Streams active node highlights (`traversing_node_ids`) to animate the visual WebGL canvas in real time.
+   - Streams active node highlights (`traversed_node_ids`) to animate the visual WebGL canvas in real time.
 
 3. **Phase 2: Orchestrator Tool-Based Ingestion**
    - Ingestion is an agent tool call (`ingest_document_tool`) executed autonomously by the Orchestrator when URLs or documents are pasted.
@@ -351,7 +351,7 @@ This section details all backend REST API endpoints, real-time Server-Sent Event
 - **Stream Event Sequence**:
   1. `orchestrator_start`: Initiates Executive Orchestrator retrieval pass.
   2. `persona_traversal_start`: Emits Department Specialist Persona traversal initiation with clean `department_id` and `department_name`.
-  3. `persona_traversal_active`: Emits active `traversing_node_ids` for live WebGL canvas glowing animation.
+  3. `persona_traversal_active`: Emits active `traversed_node_ids` for live WebGL canvas glowing animation.
   4. `retrieval_complete`: Streams final executive synthesis and persona findings.
 
 #### `GET /api/sse/ingestion`
