@@ -599,8 +599,7 @@ class ExecutiveOrchestrator:
     ) -> Generator[Dict[str, Any], None, None]:
         """Apply all intra-document graph persistence and global graph merging edits to the DB via two-path reconciliation."""
         created_nodes: List[GraphNode] = []
-        candidate_idx_to_node: Dict[int, GraphNode] = {}
-        title_to_node_id: Dict[str, str] = {}
+        concept_idx_to_node: Dict[int, GraphNode] = {}
 
         # 0. Instantiate and save Root Media GraphNode representing the document
         doc_node = GraphNode(
@@ -628,7 +627,6 @@ class ExecutiveOrchestrator:
         # 1. Intra-document graph concept addition
         for idx, c_data in enumerate(consolidated_concepts):
             c_title = c_data["title"]
-            c_title_lower = c_title.lower()
             concept_id = f"concept_{uuid.uuid4().hex[:6]}"
             passage_ptrs = c_data.get("passage_ids", [])
             c_node = GraphNode(
@@ -642,8 +640,7 @@ class ExecutiveOrchestrator:
             )
             self.db.upsert_node(c_node)
             created_nodes.append(c_node)
-            candidate_idx_to_node[idx] = c_node
-            title_to_node_id[c_title_lower] = concept_id
+            concept_idx_to_node[idx] = c_node
 
             # Connect Root Media GraphNode -> Concept Node
             doc_edge_id = f"edge_{uuid.uuid4().hex[:8]}"
@@ -671,12 +668,30 @@ class ExecutiveOrchestrator:
             self.event_queue.push(project_id, node_evt)
             yield node_evt
 
-        # Save intra-document relations directly extracted
+        # Save intra-document relations directly extracted via candidate indices or direct IDs
         for rel in consolidated_relations:
-            src_key = rel.get("source_title", "").lower()
-            tgt_key = rel.get("target_title", "").lower()
-            src_id = title_to_node_id.get(src_key)
-            tgt_id = title_to_node_id.get(tgt_key)
+            src_ref = rel.get("source_idx") or rel.get("source_id")
+            tgt_ref = rel.get("target_idx") or rel.get("target_id")
+
+            src_id = (
+                concept_idx_to_node[src_ref].id
+                if isinstance(src_ref, int) and src_ref in concept_idx_to_node
+                else (
+                    src_ref
+                    if isinstance(src_ref, str) and self.db.get_node(src_ref)
+                    else None
+                )
+            )
+            tgt_id = (
+                concept_idx_to_node[tgt_ref].id
+                if isinstance(tgt_ref, int) and tgt_ref in concept_idx_to_node
+                else (
+                    tgt_ref
+                    if isinstance(tgt_ref, str) and self.db.get_node(tgt_ref)
+                    else None
+                )
+            )
+
             if src_id and tgt_id and src_id != tgt_id:
                 edge_id = f"edge_{uuid.uuid4().hex[:8]}"
                 direct_edge = GraphEdge(
@@ -686,7 +701,7 @@ class ExecutiveOrchestrator:
                     is_directional=True,
                     text_body=rel.get(
                         "description",
-                        f"Link from {rel.get('source_title')} to {rel.get('target_title')}",
+                        f"Link from {src_id} to {tgt_id}",
                     ),
                     weight=1.0,
                     project_ids=proj_list,
@@ -735,7 +750,7 @@ class ExecutiveOrchestrator:
                 if not existing_node:
                     continue
 
-                temp_intra_node = candidate_idx_to_node.get(c_idx)
+                temp_intra_node = concept_idx_to_node.get(c_idx)
 
                 if cmd.get("additional_text"):
                     existing_node.text_body += (
@@ -745,7 +760,6 @@ class ExecutiveOrchestrator:
                     if pid not in existing_node.passage_pointers:
                         existing_node.passage_pointers.append(pid)
                 self.db.upsert_node(existing_node)
-                title_to_node_id[existing_node.title.lower()] = existing_node.id
 
                 if temp_intra_node and temp_intra_node.id != existing_node.id:
                     temp_id = temp_intra_node.id
@@ -810,7 +824,7 @@ class ExecutiveOrchestrator:
                 )
 
                 resolution_type = debate_res.get("resolution_type", "MERGE_SINGLE")
-                temp_intra_node = candidate_idx_to_node.get(c_idx)
+                temp_intra_node = concept_idx_to_node.get(c_idx)
 
                 if resolution_type == "SUBDIVIDE":
                     # Debate outcome: Sub-divide concept into multiple refined sub-concepts
@@ -908,25 +922,17 @@ class ExecutiveOrchestrator:
             cmd = item["cmd"]
             src_ref = cmd.get("source_ref") or cmd.get("source_id")
             src_id = None
-            if isinstance(src_ref, int) and src_ref in candidate_idx_to_node:
-                src_id = candidate_idx_to_node[src_ref].id
-            elif isinstance(src_ref, str):
-                src_id = (
-                    src_ref
-                    if self.db.get_node(src_ref)
-                    else title_to_node_id.get(src_ref.lower())
-                )
+            if isinstance(src_ref, int) and src_ref in concept_idx_to_node:
+                src_id = concept_idx_to_node[src_ref].id
+            elif isinstance(src_ref, str) and self.db.get_node(src_ref):
+                src_id = src_ref
 
             tgt_ref = cmd.get("target_ref") or cmd.get("target_id")
             tgt_id = None
-            if isinstance(tgt_ref, int) and tgt_ref in candidate_idx_to_node:
-                tgt_id = candidate_idx_to_node[tgt_ref].id
-            elif isinstance(tgt_ref, str):
-                tgt_id = (
-                    tgt_ref
-                    if self.db.get_node(tgt_ref)
-                    else title_to_node_id.get(tgt_ref.lower())
-                )
+            if isinstance(tgt_ref, int) and tgt_ref in concept_idx_to_node:
+                tgt_id = concept_idx_to_node[tgt_ref].id
+            elif isinstance(tgt_ref, str) and self.db.get_node(tgt_ref):
+                tgt_id = tgt_ref
 
             if src_id and tgt_id and src_id != tgt_id:
                 edge_id = f"edge_{uuid.uuid4().hex[:8]}"
