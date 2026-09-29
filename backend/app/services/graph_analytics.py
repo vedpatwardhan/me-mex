@@ -34,7 +34,7 @@ class GraphAnalyticsWorker:
                     "weight": e.weight,
                     "status": e.status,
                     "is_directional": getattr(e, "is_directional", True),
-                    "text_body": getattr(e, "text_body", ""),
+                    "description": getattr(e, "description", ""),
                 }
                 graph.add_edge(s_idx, t_idx, edge_data)
                 # If undirected, add reciprocal edge for symmetric PageRank and traversal

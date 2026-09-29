@@ -21,7 +21,7 @@ Your task:
 
 3. CONSOLIDATE RELATIONS:
    - Connect the consolidated concepts with clean directed relationships (edges).
-   - Ensure `source_title` and `target_title` match the exact canonical titles in the `concepts` list.
+   - Specify `source_idx` and `target_idx` matching the `idx` assigned to concepts in the `concepts` list.
    - Provide a clear, natural language description explaining the relationship.
 
 Return JSON format:
@@ -30,6 +30,7 @@ Return JSON format:
   "doc_type": "paper",
   "concepts": [
     {
+      "idx": 0,
       "title": "Canonical Concept Title",
       "description": "Synthesized comprehensive markdown text retaining all details and nuances across matching passages.",
       "passage_ids": ["pass_01", "pass_04"]
@@ -37,8 +38,8 @@ Return JSON format:
   ],
   "relations": [
     {
-      "source_title": "Source Concept Title",
-      "target_title": "Target Concept Title",
+      "source_idx": 0,
+      "target_idx": 1,
       "description": "Qualitative relationship explanation"
     }
   ]

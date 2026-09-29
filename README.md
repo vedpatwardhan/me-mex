@@ -16,7 +16,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 └────────────────────────────────────────────────────────────────────────────────────────┘
  - Staged Sandbox: Uploaded documents/links do NOT immediately populate the active graph.
  - Out-of-Graph Passage Storage: Text chunks are stored as plain text records in `passages`
-   collection, linked only via `passage_pointers` inside atomic `CONCEPT` nodes.
+   collection, linked only via `passage_ids` inside atomic `CONCEPT` nodes.
  - Plain text retrieval: Passages are opened only when clicked to validate concept extraction.
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
@@ -24,8 +24,8 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 └────────────────────────────────────────────────────────────────────────────────────────┘
  - Zero Passage Clutter: Passages are NOT graph nodes. The active network contains only:
      1. ROOT_MEDIA Nodes : Papers, Reports, Blogs, Transcripts, Code Repos.
-     2. CONCEPT Nodes    : Self-evolving atomic notes (`title`, `text_body`, `passage_pointers`).
-     3. CONNECTION_EDGE  : Qualitative relation edges (`source_id`, `target_id`, `text_body`).
+     2. CONCEPT Nodes    : Self-evolving atomic notes (`title`, `description`, `passage_ids`).
+     3. CONNECTION_EDGE  : Qualitative relation edges (`source_id`, `target_id`, `description`).
  - Historical Edge Decay: Superseded relations decay in weight from `1.0` down to `0.3`
    (`HISTORICAL_SUPERSEDED`), preserving history without cluttering path searches.
 

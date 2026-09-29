@@ -10,8 +10,8 @@ class GraphNode(BaseModel):
     id: str = Field(alias="_id")
     node_type: NodeType = "concept"
     title: str
-    text_body: str = ""
-    passage_pointers: List[str] = Field(
+    description: str = ""
+    passage_ids: List[str] = Field(
         default_factory=list
     )  # Out-of-graph passage chunk IDs
     project_ids: List[str] = Field(default_factory=lambda: ["global"])
@@ -26,7 +26,7 @@ class GraphEdge(BaseModel):
     source_id: str
     target_id: str
     is_directional: bool = True  # False for symmetric parallel concepts
-    text_body: str = ""  # Natural language explanation of relationship
+    description: str = ""  # Natural language explanation of relationship
     weight: float = 1.0  # Decays to 0.3 when superseded
     status: str = "PRIMARY_ACTIVE"  # "PRIMARY_ACTIVE" | "HISTORICAL_SUPERSEDED"
     provenance_quote: Optional[str] = None

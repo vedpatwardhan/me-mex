@@ -65,30 +65,30 @@ def reset_test_database():
     n1 = GraphNode(
         _id="concept_world_models",
         title="World Models",
-        text_body="# World Models\nGeneral paradigm of generative world models in robotics.",
+        description="# World Models\nGeneral paradigm of generative world models in robotics.",
         metadata={"domain_tags": ["world_models"]},
         project_ids=["global"],
     )
     n2 = GraphNode(
         _id="concept_pixel_world_models",
         title="Pixel-Space World Models",
-        text_body="# Pixel-Space World Models\nGenerates future raw RGB frames directly.",
+        description="# Pixel-Space World Models\nGenerates future raw RGB frames directly.",
         metadata={"domain_tags": ["pixel_space"], "status": "HISTORICAL_SUPERSEDED"},
-        passage_pointers=["pass_pixel_01"],
+        passage_ids=["pass_pixel_01"],
         project_ids=["global"],
     )
     n3 = GraphNode(
         _id="concept_latent_world_models",
         title="Latent-Space World Models",
-        text_body="# Latent-Space World Models\nGenerates representations in latent space for 100x faster planning.",
+        description="# Latent-Space World Models\nGenerates representations in latent space for 100x faster planning.",
         metadata={"domain_tags": ["latent_space"], "status": "PRIMARY_ACTIVE"},
-        passage_pointers=["pass_latent_01"],
+        passage_ids=["pass_latent_01"],
         project_ids=["global"],
     )
     n4 = GraphNode(
         _id="concept_action_mpc",
         title="Action Planning via MPC",
-        text_body="# Action Planning via MPC\nTrajectory optimization over world model rollouts.",
+        description="# Action Planning via MPC\nTrajectory optimization over world model rollouts.",
         metadata={"domain_tags": ["planning", "mpc"]},
         project_ids=["global"],
     )
@@ -101,7 +101,7 @@ def reset_test_database():
         source_id="concept_pixel_world_models",
         target_id="concept_action_mpc",
         is_directional=True,
-        text_body="Historical MPC rollout over raw pixel predictions.",
+        description="Historical MPC rollout over raw pixel predictions.",
         weight=0.3,
         status="HISTORICAL_SUPERSEDED",
         project_ids=["global"],
@@ -111,7 +111,7 @@ def reset_test_database():
         source_id="concept_latent_world_models",
         target_id="concept_action_mpc",
         is_directional=True,
-        text_body="Primary SOTA 100x speedup for MPC action planning in latent space.",
+        description="Primary SOTA 100x speedup for MPC action planning in latent space.",
         weight=1.0,
         status="PRIMARY_ACTIVE",
         project_ids=["global"],
@@ -121,7 +121,7 @@ def reset_test_database():
         source_id="concept_pixel_world_models",
         target_id="concept_latent_world_models",
         is_directional=False,
-        text_body="Parallel generative world model paradigms operating on raw pixels vs latent embeddings.",
+        description="Parallel generative world model paradigms operating on raw pixels vs latent embeddings.",
         weight=1.0,
         status="PRIMARY_ACTIVE",
         project_ids=["global"],

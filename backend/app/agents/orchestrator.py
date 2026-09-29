@@ -85,10 +85,7 @@ class ExecutiveOrchestrator:
         except Exception:
             return {
                 "concepts": [
-                    {
-                        "title": doc_title,
-                        "description": passage_text[:300],
-                    }
+                    {"idx": 0, "title": doc_title, "description": passage_text}
                 ],
                 "relations": [],
             }
@@ -442,6 +439,7 @@ class ExecutiveOrchestrator:
             for c in extraction.get("concepts", []):
                 raw_extracted_concepts.append(
                     {
+                        "idx": c["idx"],
                         "title": c["title"],
                         "description": c.get("description", ""),
                         "passage_ids": [p_id],
@@ -450,6 +448,8 @@ class ExecutiveOrchestrator:
             extracted_relations.extend(extraction.get("relations", []))
 
         # Step 4: In-Memory Concept Consolidation Across Passages
+        # consolidated_concepts: [{idx: int, title: str, description: str, passage_ids: [str]}]
+        # consolidated_relations: [{source_idx: int, target_idx: int, description: str}]
         consolidated_result = self.consolidate_extracted_concepts(
             raw_extracted_concepts, extracted_relations, title, query, chat_history
         )
@@ -465,6 +465,14 @@ class ExecutiveOrchestrator:
             proj_list.append(project_id)
 
         # Step 5: Discover Top Concept Hubs & Run Active Department Persona Ingestion to collect commands
+        # top_hubs: [{
+        #   id: str,
+        #   node_type: str,
+        #   title: str,
+        #   description: str,
+        #   passage_ids: [str],
+        #   metadata: {str: any}
+        # }]
         top_hubs = self.analytics.get_top_concept_hubs(
             project_id=project_id, max_k=self.max_k_hubs
         )
@@ -512,7 +520,7 @@ class ExecutiveOrchestrator:
             "tool_name": "ingest_document_tool",
             "doc_id": doc_id,
             "created_nodes_count": len(consolidated_concepts),
-            "passage_pointers": passage_ids,
+            "passage_ids": passage_ids,
             "message": f"Successfully integrated document '{title}' with {len(consolidated_concepts)} concept nodes and {len(passage_ids)} passage pointers.",
             "timestamp": time.time(),
         }
@@ -606,8 +614,8 @@ class ExecutiveOrchestrator:
             _id=doc_id,
             node_type=doc_type,
             title=doc_title,
-            text_body=f"# {doc_title}\n\n## Executive Summary:\n{doc_description}",
-            passage_pointers=passage_ids,
+            description=f"# {doc_title}\n\n## Executive Summary:\n{doc_description}",
+            passage_ids=passage_ids,
             project_ids=proj_list,
             metadata={"status": "PRIMARY_ACTIVE"},
         )
@@ -625,31 +633,33 @@ class ExecutiveOrchestrator:
         yield root_evt
 
         # 1. Intra-document graph concept addition
+        candidate_idx_to_node: Dict[int, GraphNode] = dict()
         for idx, c_data in enumerate(consolidated_concepts):
+            c_data["id"] = c_id = f"concept_{uuid.uuid4().hex[:6]}"
+            c_data["idx"] = idx
             c_title = c_data["title"]
-            concept_id = f"concept_{uuid.uuid4().hex[:6]}"
             passage_ptrs = c_data.get("passage_ids", [])
             c_node = GraphNode(
-                _id=concept_id,
+                _id=c_id,
                 node_type="concept",
                 title=c_title,
-                text_body=f"# {c_title}\n{c_data.get('description', '')}",
-                passage_pointers=passage_ptrs,
+                description=f"# {c_title}\n{c_data.get('description', '')}",
+                passage_ids=passage_ptrs,
                 project_ids=proj_list,
                 metadata={"status": "PRIMARY_ACTIVE"},
             )
             self.db.upsert_node(c_node)
             created_nodes.append(c_node)
-            concept_idx_to_node[idx] = c_node
+            candidate_idx_to_node[idx] = c_node
 
             # Connect Root Media GraphNode -> Concept Node
             doc_edge_id = f"edge_{uuid.uuid4().hex[:8]}"
             doc_edge = GraphEdge(
                 _id=doc_edge_id,
                 source_id=doc_id,
-                target_id=concept_id,
+                target_id=c_id,
                 is_directional=True,
-                text_body=f"Document '{doc_title}' presents concept '{c_title}'.",
+                description=f"Document '{doc_title}' presents concept '{c_title}'.",
                 weight=1.0,
                 project_ids=proj_list,
                 status="PRIMARY_ACTIVE",
@@ -660,7 +670,7 @@ class ExecutiveOrchestrator:
                 "event": "concept_created",
                 "persona_id": "orchestrator",
                 "persona_name": "Ingestion Engine",
-                "node_id": concept_id,
+                "node_id": c_id,
                 "node_title": c_title,
                 "message": f"Intra-document concept '{c_title}' added to knowledge graph.",
                 "timestamp": time.time(),
@@ -668,49 +678,29 @@ class ExecutiveOrchestrator:
             self.event_queue.push(project_id, node_evt)
             yield node_evt
 
-        # Save intra-document relations directly extracted via candidate indices or direct IDs
+        # Save intra-document relations using candidate_idx_to_node mapping
         for rel in consolidated_relations:
-            src_ref = rel.get("source_idx") or rel.get("source_id")
-            tgt_ref = rel.get("target_idx") or rel.get("target_id")
+            src_id = candidate_idx_to_node[rel["source_idx"]].id
+            tgt_id = candidate_idx_to_node[rel["target_idx"]].id
+            edge_id = f"edge_{uuid.uuid4().hex[:8]}"
 
-            src_id = (
-                concept_idx_to_node[src_ref].id
-                if isinstance(src_ref, int) and src_ref in concept_idx_to_node
-                else (
-                    src_ref
-                    if isinstance(src_ref, str) and self.db.get_node(src_ref)
-                    else None
-                )
+            direct_edge = GraphEdge(
+                _id=edge_id,
+                source_id=src_id,
+                target_id=tgt_id,
+                is_directional=True,
+                description=rel.get(
+                    "description",
+                    f"Link from {src_id} to {tgt_id}",
+                ),
+                weight=1.0,
+                project_ids=proj_list,
+                status="PRIMARY_ACTIVE",
             )
-            tgt_id = (
-                concept_idx_to_node[tgt_ref].id
-                if isinstance(tgt_ref, int) and tgt_ref in concept_idx_to_node
-                else (
-                    tgt_ref
-                    if isinstance(tgt_ref, str) and self.db.get_node(tgt_ref)
-                    else None
-                )
-            )
+            self.db.upsert_edge(direct_edge)
 
-            if src_id and tgt_id and src_id != tgt_id:
-                edge_id = f"edge_{uuid.uuid4().hex[:8]}"
-                direct_edge = GraphEdge(
-                    _id=edge_id,
-                    source_id=src_id,
-                    target_id=tgt_id,
-                    is_directional=True,
-                    text_body=rel.get(
-                        "description",
-                        f"Link from {src_id} to {tgt_id}",
-                    ),
-                    weight=1.0,
-                    project_ids=proj_list,
-                    status="PRIMARY_ACTIVE",
-                )
-                self.db.upsert_edge(direct_edge)
-
-        # 2. Group commands by candidate_idx to classify No Conflict vs. Conflict
-        edit_proposals_by_idx = defaultdict(list)
+        # 2. Group commands by candidate_id to classify No Conflict vs. Conflict
+        edit_proposals_by_id = defaultdict(list)
         construct_edge_commands = []
 
         for res in persona_command_results:
@@ -720,15 +710,18 @@ class ExecutiveOrchestrator:
             for cmd in commands:
                 cmd_type = cmd.get("command_type")
                 if cmd_type == "EDIT_CONCEPT":
-                    c_idx = cmd.get("candidate_idx")
-                    if c_idx is not None:
-                        edit_proposals_by_idx[c_idx].append({"dept": dept, "cmd": cmd})
+                    c_id = cmd.get("candidate_id") or cmd.get("candidate_idx")
+                    if isinstance(c_id, int) and c_id < len(consolidated_concepts):
+                        c_id = consolidated_concepts[c_id].get("id")
+                    if c_id:
+                        edit_proposals_by_id[c_id].append({"dept": dept, "cmd": cmd})
                 elif cmd_type == "CONSTRUCT_EDGE":
                     construct_edge_commands.append({"dept": dept, "cmd": cmd})
 
-        # 3. Process EDIT_CONCEPT proposals per candidate index via 2-path logic
-        for c_idx, candidate_concept in enumerate(consolidated_concepts):
-            proposals = edit_proposals_by_idx.get(c_idx, [])
+        # 3. Process EDIT_CONCEPT proposals per candidate concept via 2-path logic
+        for idx, candidate_concept in enumerate(consolidated_concepts):
+            c_id = candidate_concept.get("id")
+            proposals = edit_proposals_by_id.get(c_id, [])
             if not proposals:
                 continue
 
@@ -750,15 +743,15 @@ class ExecutiveOrchestrator:
                 if not existing_node:
                     continue
 
-                temp_intra_node = concept_idx_to_node.get(c_idx)
+                temp_intra_node = candidate_idx_to_node.get(idx)
 
                 if cmd.get("additional_text"):
-                    existing_node.text_body += (
+                    existing_node.description += (
                         f"\n\n## Addition from '{doc_title}':\n{cmd['additional_text']}"
                     )
                 for pid in cmd.get("passage_ids", []):
-                    if pid not in existing_node.passage_pointers:
-                        existing_node.passage_pointers.append(pid)
+                    if pid not in existing_node.passage_ids:
+                        existing_node.passage_ids.append(pid)
                 self.db.upsert_node(existing_node)
 
                 if temp_intra_node and temp_intra_node.id != existing_node.id:
@@ -782,7 +775,7 @@ class ExecutiveOrchestrator:
                                     source_id=new_src,
                                     target_id=new_tgt,
                                     is_directional=edge.is_directional,
-                                    text_body=edge.text_body,
+                                    description=edge.description,
                                     weight=edge.weight,
                                     project_ids=edge.project_ids,
                                     status=edge.status,
@@ -824,7 +817,7 @@ class ExecutiveOrchestrator:
                 )
 
                 resolution_type = debate_res.get("resolution_type", "MERGE_SINGLE")
-                temp_intra_node = concept_idx_to_node.get(c_idx)
+                temp_intra_node = candidate_idx_to_node.get(idx)
 
                 if resolution_type == "SUBDIVIDE":
                     # Debate outcome: Sub-divide concept into multiple refined sub-concepts
@@ -838,10 +831,10 @@ class ExecutiveOrchestrator:
                         if sub_target_id and self.db.get_node(sub_target_id):
                             # Merge sub-concept into existing domain node
                             t_node = self.db.get_node(sub_target_id)
-                            t_node.text_body += f"\n\n## Sub-concept from '{doc_title}':\n# {sub_title}\n{sub.get('description', '')}"
+                            t_node.description += f"\n\n## Sub-concept from '{doc_title}':\n# {sub_title}\n{sub.get('description', '')}"
                             for pid in sub.get("passage_ids", passage_ids):
-                                if pid not in t_node.passage_pointers:
-                                    t_node.passage_pointers.append(pid)
+                                if pid not in t_node.passage_ids:
+                                    t_node.passage_ids.append(pid)
                             self.db.upsert_node(t_node)
                         else:
                             # Create new sub-concept node
@@ -850,8 +843,8 @@ class ExecutiveOrchestrator:
                                 _id=sub_id,
                                 node_type="concept",
                                 title=sub_title,
-                                text_body=f"# {sub_title}\n{sub.get('description', '')}",
-                                passage_pointers=sub.get("passage_ids", passage_ids),
+                                description=f"# {sub_title}\n{sub.get('description', '')}",
+                                passage_ids=sub.get("passage_ids", passage_ids),
                                 project_ids=proj_list,
                                 metadata={"status": "PRIMARY_ACTIVE"},
                             )
@@ -862,7 +855,7 @@ class ExecutiveOrchestrator:
                                 source_id=doc_id,
                                 target_id=sub_id,
                                 is_directional=True,
-                                text_body=f"Document '{doc_title}' presents sub-concept '{sub_title}'.",
+                                description=f"Document '{doc_title}' presents sub-concept '{sub_title}'.",
                                 weight=1.0,
                                 project_ids=proj_list,
                                 status="PRIMARY_ACTIVE",
@@ -879,10 +872,10 @@ class ExecutiveOrchestrator:
                     )
                     target_node = self.db.get_node(target_id)
                     if target_node:
-                        target_node.text_body += f"\n\n## Consensus Debate Insight from '{doc_title}':\n{candidate_concept.get('description', '')}"
+                        target_node.description += f"\n\n## Consensus Debate Insight from '{doc_title}':\n{candidate_concept.get('description', '')}"
                         for pid in candidate_concept.get("passage_ids", passage_ids):
-                            if pid not in target_node.passage_pointers:
-                                target_node.passage_pointers.append(pid)
+                            if pid not in target_node.passage_ids:
+                                target_node.passage_ids.append(pid)
                         self.db.upsert_node(target_node)
 
                         if temp_intra_node and temp_intra_node.id != target_node.id:
@@ -898,7 +891,7 @@ class ExecutiveOrchestrator:
                             source_id=s_id,
                             target_id=t_id,
                             is_directional=True,
-                            text_body=add_edge.get(
+                            description=add_edge.get(
                                 "description", "Cross-domain debate bridge edge."
                             ),
                             weight=1.0,
@@ -920,17 +913,25 @@ class ExecutiveOrchestrator:
         # 4. Process collected CONSTRUCT_EDGE commands
         for item in construct_edge_commands:
             cmd = item["cmd"]
-            src_ref = cmd.get("source_ref") or cmd.get("source_id")
+            src_ref = (
+                cmd.get("source_ref")
+                or cmd.get("source_id")
+                or cmd.get("candidate_idx")
+            )
             src_id = None
-            if isinstance(src_ref, int) and src_ref in concept_idx_to_node:
-                src_id = concept_idx_to_node[src_ref].id
+            if isinstance(src_ref, int) and src_ref in candidate_idx_to_node:
+                src_id = candidate_idx_to_node[src_ref].id
             elif isinstance(src_ref, str) and self.db.get_node(src_ref):
                 src_id = src_ref
 
-            tgt_ref = cmd.get("target_ref") or cmd.get("target_id")
+            tgt_ref = (
+                cmd.get("target_ref")
+                or cmd.get("target_id")
+                or cmd.get("candidate_idx")
+            )
             tgt_id = None
-            if isinstance(tgt_ref, int) and tgt_ref in concept_idx_to_node:
-                tgt_id = concept_idx_to_node[tgt_ref].id
+            if isinstance(tgt_ref, int) and tgt_ref in candidate_idx_to_node:
+                tgt_id = candidate_idx_to_node[tgt_ref].id
             elif isinstance(tgt_ref, str) and self.db.get_node(tgt_ref):
                 tgt_id = tgt_ref
 
@@ -941,7 +942,7 @@ class ExecutiveOrchestrator:
                     source_id=src_id,
                     target_id=tgt_id,
                     is_directional=True,
-                    text_body=cmd.get(
+                    description=cmd.get(
                         "description",
                         f"Link from {src_id} to {tgt_id}",
                     ),

@@ -16,7 +16,7 @@ def test_department_persona_project_scoping():
         source_id="concept_action_mpc",
         target_id="concept_world_models",
         is_directional=True,
-        text_body="MPC to World Models link",
+        description="MPC to World Models link",
         project_ids=["global", "proj_scoped"],
     )
     db_engine.upsert_edge(scoped_edge)
@@ -80,7 +80,7 @@ def test_department_persona_root_media_traversal_blocking():
         source_id="concept_hub_a",
         target_id="paper_d_root",
         is_directional=True,
-        text_body="Hub A extracted from Paper D",
+        description="Hub A extracted from Paper D",
         project_ids=["proj_root_blocking_test"],
     )
     # Edge Paper D -> Concept E
@@ -89,7 +89,7 @@ def test_department_persona_root_media_traversal_blocking():
         source_id="paper_d_root",
         target_id="concept_e_unreachable",
         is_directional=True,
-        text_body="Paper D also contains Concept E",
+        description="Paper D also contains Concept E",
         project_ids=["proj_root_blocking_test"],
     )
     db_engine.upsert_edge(e1)

@@ -116,7 +116,7 @@ Users can query, critique, and edit the existing graph visualizer purely through
 1. **Seed Concept Retrieval:** Based on conversational context, the Specialist Personas retrieve seed concept nodes and traverse connected paths.
 2. **Conversational Critique:** The user challenges the retrieved context (*"What about this older paper? Why didn't you include its connection to latent world models?"*).
 3. **Conversational Graph Editing:** The user instructs the LLM: *"Introduce a link between Paper X and Concept Y, given that they both use flow matching for action decoding."*
-4. **On-the-Fly Node Mutation:** The agent immediately creates or updates a `CONNECTION_EDGE` node with the user's rationale (`text_body: "both use flow matching for action decoding"`). The WebGL visualizer updates instantly to render the new link on screen.
+4. **On-the-Fly Node Mutation:** The agent immediately creates or updates a `CONNECTION_EDGE` node with the user's rationale (`description: "both use flow matching for action decoding"`). The WebGL visualizer updates instantly to render the new link on screen.
 
 ---
 
@@ -195,10 +195,10 @@ graph TD
 |  - id: String (snake_case / UUID)                                                 |
 |  - node_class: Enum (ROOT_MEDIA | CONCEPT | CONNECTION_EDGE)                       |
 |  - title: String                                                                  |
-|  - text_body: Markdown (Atomic self-evolving description & synthesis)             |
+|  - description: Markdown (Atomic self-evolving description & synthesis)             |
 |  - metadata: JSON (Source URL, dates, authors, tags, status)                      |
 |  - embedding_vector: Float[1536] (Dense semantic representation)                  |
-|  - passage_pointers: List[PassageID] (Out-of-graph plain text chunk references)   |
+|  - passage_ids: List[PassageID] (Out-of-graph plain text chunk references)   |
 +-----------------------------------------------------------------------------------+
 ```
 

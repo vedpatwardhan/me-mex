@@ -75,8 +75,8 @@ class DepartmentPersonaAgent:
                             candidate_neighbors[neighbor_id] = {
                                 "id": neighbor_node.id,
                                 "title": neighbor_node.title,
-                                "body": neighbor_node.text_body,
-                                "relation_desc": e.text_body,
+                                "body": neighbor_node.description,
+                                "relation_desc": e.description,
                             }
 
             if not candidate_neighbors:
@@ -185,10 +185,10 @@ class DepartmentPersonaAgent:
         You are the Specialist Agent for Concept Hub '{self.hub_node.title}'.
         Your Hub Concept Node Details:
         - Title: {self.hub_node.title}
-        - Description: {self.hub_node.text_body}
+        - Description: {self.hub_node.description}
 
         Explored Multi-Hop Subgraph Concepts ({len(subgraph_nodes)} nodes):
-        {json.dumps([{"id": n.id, "title": n.title, "body": n.text_body[:200]} for n in subgraph_nodes])}
+        {json.dumps([{"id": n.id, "title": n.title, "body": n.description[:200]} for n in subgraph_nodes])}
 
         Task / User Query: "{query}"
 
@@ -235,12 +235,14 @@ class DepartmentPersonaAgent:
             project_id=project_id,
         )
 
+        # subgraph_nodes: [{id: str, node_type: str, title: str, description: str, passage_ids: [str]}]
         subgraph_nodes = exploration.get("subgraph_nodes", [])
         subgraph_nodes_payload = [
             {
                 "id": n.id,
                 "title": n.title,
-                "body": n.text_body[:200],
+                "description": n.description,
+                "passage_ids": n.passage_ids,
             }
             for n in subgraph_nodes
         ]
@@ -258,7 +260,7 @@ class DepartmentPersonaAgent:
             f"Document Title: {doc_title}\n"
             f"User Query Context: {query}\n\n"
             f"Hub Concept: '{self.hub_node.title}' (ID: {self.hub_node.id})\n"
-            f"Hub Description: {self.hub_node.text_body}\n\n"
+            f"Hub Description: {self.hub_node.description}\n\n"
             f"Explored Subgraph Concepts ({len(subgraph_nodes)} nodes):\n"
             f"{json.dumps(subgraph_nodes_payload, indent=2)}\n\n"
             f"Candidate Intra-Document Concepts ({len(consolidated_concepts)} items):\n"

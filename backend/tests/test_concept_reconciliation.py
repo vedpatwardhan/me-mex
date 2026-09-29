@@ -13,8 +13,8 @@ def test_reconciliation_no_conflict():
         _id=existing_id,
         node_type="concept",
         title="Test Concept Node",
-        text_body="# Test Concept Node\nInitial body text.",
-        passage_pointers=["pass_01"],
+        description="# Test Concept Node\nInitial body text.",
+        passage_ids=["pass_01"],
         project_ids=["global"],
         metadata={"status": "PRIMARY_ACTIVE"},
     )
@@ -24,8 +24,8 @@ def test_reconciliation_no_conflict():
         _id="hub_test_1",
         node_type="concept",
         title="Domain Hub 1",
-        text_body="# Domain Hub 1",
-        passage_pointers=[],
+        description="# Domain Hub 1",
+        passage_ids=[],
         project_ids=["global"],
         metadata={"status": "PRIMARY_ACTIVE"},
     )
@@ -72,8 +72,8 @@ def test_reconciliation_no_conflict():
 
     updated_node = db_engine.get_node(existing_id)
     assert updated_node is not None
-    assert "Non-conflicting insight." in updated_node.text_body
-    assert "pass_02" in updated_node.passage_pointers
+    assert "Non-conflicting insight." in updated_node.description
+    assert "pass_02" in updated_node.passage_ids
 
 
 def test_reconciliation_conflict_debate():
@@ -85,16 +85,16 @@ def test_reconciliation_conflict_debate():
         _id=target_a,
         node_type="concept",
         title="Domain A Node",
-        text_body="Body A",
-        passage_pointers=[],
+        description="Body A",
+        passage_ids=[],
         project_ids=["global"],
     )
     node_b = GraphNode(
         _id=target_b,
         node_type="concept",
         title="Domain B Node",
-        text_body="Body B",
-        passage_pointers=[],
+        description="Body B",
+        passage_ids=[],
         project_ids=["global"],
     )
     db_engine.upsert_node(node_a)
@@ -192,5 +192,5 @@ def test_reconciliation_conflict_debate():
     # Check updated node bodies
     updated_a = db_engine.get_node(target_a)
     updated_b = db_engine.get_node(target_b)
-    assert "Sub-concept from 'Test Doc 2'" in updated_a.text_body
-    assert "Sub-concept from 'Test Doc 2'" in updated_b.text_body
+    assert "Sub-concept from 'Test Doc 2'" in updated_a.description
+    assert "Sub-concept from 'Test Doc 2'" in updated_b.description

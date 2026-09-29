@@ -28,7 +28,7 @@ export interface GraphEdge {
   source_node_id?: string;
   target_node_id?: string;
   is_directional?: boolean;
-  text_body?: string;
+  description?: string;
   weight: number;
   provenance_quote?: string;
   project_ids: string[];

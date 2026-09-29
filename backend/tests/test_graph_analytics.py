@@ -25,7 +25,7 @@ def test_project_scoped_concept_hubs():
     p_node = GraphNode(
         _id="concept_custom_p",
         title="Custom Project Hub",
-        text_body="# Custom Hub\nUnique to proj_custom.",
+        description="# Custom Hub\nUnique to proj_custom.",
         project_ids=["global", "proj_custom"],
     )
     db_engine.upsert_node(p_node)
@@ -49,21 +49,21 @@ def test_pure_centrality_dynamic_hub_selection():
         _id="paper_test_root",
         node_type="paper",
         title="Root Paper Node",
-        text_body="Paper node emanates concepts but is not a concept hub.",
+        description="Paper node emanates concepts but is not a concept hub.",
         project_ids=["proj_heuristic_test"],
     )
     c_node_high = GraphNode(
         _id="concept_high_hub",
         node_type="concept",
         title="High Centrality Concept Hub",
-        text_body="Core paradigm hub node.",
+        description="Core paradigm hub node.",
         project_ids=["proj_heuristic_test"],
     )
     c_node_outlier = GraphNode(
         _id="concept_outlier_leaf",
         node_type="concept",
         title="Outlier Isolated Leaf",
-        text_body="Isolated leaf node with near zero centrality.",
+        description="Isolated leaf node with near zero centrality.",
         project_ids=["proj_heuristic_test"],
     )
     db_engine.upsert_node(paper_node)
@@ -76,7 +76,7 @@ def test_pure_centrality_dynamic_hub_selection():
         source_id="paper_test_root",
         target_id="concept_high_hub",
         is_directional=True,
-        text_body="Link to high hub",
+        description="Link to high hub",
         project_ids=["proj_heuristic_test"],
     )
     db_engine.upsert_edge(e1)

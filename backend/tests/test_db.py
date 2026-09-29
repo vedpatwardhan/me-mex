@@ -25,7 +25,7 @@ def test_node_and_edge_project_scoping():
     scoped_node = GraphNode(
         _id="concept_scoped_policy",
         title="Scoped Policy Learning",
-        text_body="Policy learning node.",
+        description="Policy learning node.",
         project_ids=["global", "proj_robotics"],
     )
     db_engine.upsert_node(scoped_node)
@@ -35,7 +35,7 @@ def test_node_and_edge_project_scoping():
         source_id="concept_scoped_policy",
         target_id="concept_action_mpc",
         is_directional=True,
-        text_body="Scoped policy link",
+        description="Scoped policy link",
         project_ids=["global", "proj_robotics"],
     )
     db_engine.upsert_edge(scoped_edge)
