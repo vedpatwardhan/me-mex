@@ -464,8 +464,12 @@ class ExecutiveOrchestrator:
         if project_id and project_id != "global":
             proj_list.append(project_id)
 
-        # Step 5: Save Root Media node and Intra-Document concept nodes & edges into DB prior to persona discovery
-        concept_id_to_node: Dict[str, GraphNode] = {}
+        # Step 5: Pre-populate concept_id_to_node with existing DB graph nodes for project scoping,
+        # then save Root Media node and Intra-Document concept nodes & edges into DB prior to persona discovery
+        concept_id_to_node: dict[str, GraphNode] = dict()
+        for existing_node in self.db.get_nodes(project_id=project_id):
+            concept_id_to_node[existing_node.id] = existing_node
+
         for evt in self._create_intra_document_subgraph(
             doc_id=doc_id,
             doc_title=title,
@@ -613,7 +617,7 @@ class ExecutiveOrchestrator:
             return {
                 "resolution_type": "MERGE_SINGLE",
                 "rationale": "Fallback merge resolution due to debate timeout.",
-                "merged_target_node_id": first_cmd.get("existing_node_id"),
+                "merged_target_node_id": first_cmd.get("id"),
                 "sub_concepts": [],
                 "additional_edges": [],
             }
@@ -751,9 +755,9 @@ class ExecutiveOrchestrator:
                 concept_data = cmd.get("concept", {})
                 edge_data = cmd.get("edge", {})
 
-                c_ref = concept_data.get("id")
-                e_src_ref = edge_data.get("source_id")
-                e_tgt_ref = edge_data.get("target_id")
+                c_id = concept_data.get("id")
+                src_id = edge_data.get("source_id")
+                tgt_id = edge_data.get("target_id")
 
                 if cmd_type == "CREATE_CONCEPT":
                     # Emit new standalone domain concept
@@ -771,30 +775,22 @@ class ExecutiveOrchestrator:
                         metadata={"status": "PRIMARY_ACTIVE"},
                     )
                     self.db.upsert_node(new_node)
+
                 elif cmd_type == "EDIT_CONCEPT":
                     target_id = concept_data.get("id")
                     target_desc = concept_data.get("description", "")
                     target_passages = concept_data.get("passage_ids", [])
+                    target_title = concept_data.get("title", "")
 
-                    # Standardize payload format for debate / reconciliation
+                    # Standardize payload format for debate / reconciliation using ConceptCommandData fields
                     std_cmd = {
                         "command_type": "EDIT_CONCEPT",
-                        "existing_node_id": target_id,
-                        "additional_text": target_desc,
+                        "id": target_id,
+                        "description": target_desc,
+                        "title": target_title,
                         "passage_ids": target_passages,
                     }
-
-                    # Determine candidate node ID: check c_ref in concept_id_to_node or default to candidate 0
-                    c_id = None
-                    if isinstance(c_ref, str) and c_ref in concept_id_to_node:
-                        c_id = c_ref
-                    elif not c_id and consolidated_concepts:
-                        c_id = consolidated_concepts[0].get("id")
-
-                    if c_id:
-                        concept_edit_proposals[c_id].append(
-                            {"dept": dept, "cmd": std_cmd}
-                        )
+                    concept_edit_proposals[c_id].append({"dept": dept, "cmd": std_cmd})
 
                 elif cmd_type == "DELETE_CONCEPT":
                     del_id = concept_data.get("id")
@@ -806,8 +802,8 @@ class ExecutiveOrchestrator:
                         {
                             "dept": dept,
                             "cmd": {
-                                "source_id": e_src_ref,
-                                "target_id": e_tgt_ref,
+                                "source_id": src_id,
+                                "target_id": tgt_id,
                                 "description": edge_data.get("description", ""),
                             },
                         }
@@ -815,8 +811,7 @@ class ExecutiveOrchestrator:
 
                 elif cmd_type == "DELETE_EDGE":
                     del_e_id = edge_data.get("id")
-                    if del_e_id:
-                        edge_delete_commands.append(del_e_id)
+                    edge_delete_commands.append(del_e_id)
 
         # Execute DELETE_CONCEPT commands
         for del_id in node_delete_commands:
@@ -835,9 +830,7 @@ class ExecutiveOrchestrator:
 
             # Determine if proposals are conflicting (different target node IDs)
             unique_targets = set(
-                p["cmd"].get("existing_node_id")
-                for p in proposals
-                if p["cmd"].get("existing_node_id")
+                p["cmd"].get("id") for p in proposals if p["cmd"].get("id")
             )
 
             if len(unique_targets) <= 1:
@@ -846,16 +839,16 @@ class ExecutiveOrchestrator:
                 chosen = proposals[0]
                 dept = chosen["dept"]
                 cmd = chosen["cmd"]
-                existing_id = cmd.get("existing_node_id")
+                existing_id = cmd.get("id")
                 existing_node = self.db.get_node(existing_id) if existing_id else None
                 if not existing_node:
                     continue
 
                 temp_intra_node = concept_id_to_node.get(c_id) or self.db.get_node(c_id)
 
-                if cmd.get("additional_text"):
+                if cmd.get("description"):
                     existing_node.description += (
-                        f"\n\n## Addition from '{doc_title}':\n{cmd['additional_text']}"
+                        f"\n\n## Addition from '{doc_title}':\n{cmd['description']}"
                     )
                 for pid in cmd.get("passage_ids", []):
                     if pid not in existing_node.passage_ids:

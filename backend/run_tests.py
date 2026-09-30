@@ -4,8 +4,11 @@ import sys
 import unittest
 
 backend_dir = os.path.abspath(os.path.dirname(__file__))
-if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
+if "" in sys.path:
+    sys.path.remove("")
+if backend_dir in sys.path:
+    sys.path.remove(backend_dir)
+sys.path.insert(0, backend_dir)
 
 os.environ["TESTING"] = "1"
 os.environ["DB_NAME"] = "test-me-mex"
