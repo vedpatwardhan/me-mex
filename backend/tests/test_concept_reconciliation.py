@@ -57,7 +57,7 @@ def test_reconciliation_no_conflict():
         }
     ]
 
-    concept_idx_to_node = {}
+    concept_id_to_node = {}
     list(
         orchestrator._create_intra_document_subgraph(
             doc_id="doc_test_1",
@@ -69,7 +69,7 @@ def test_reconciliation_no_conflict():
             project_id="global",
             proj_list=["global"],
             passage_ids=["pass_01", "pass_02"],
-            concept_idx_to_node=concept_idx_to_node,
+            concept_id_to_node=concept_id_to_node,
         )
     )
 
@@ -85,7 +85,7 @@ def test_reconciliation_no_conflict():
             project_id="global",
             proj_list=["global"],
             passage_ids=["pass_01", "pass_02"],
-            concept_idx_to_node=concept_idx_to_node,
+            concept_id_to_node=concept_id_to_node,
         )
     )
 
@@ -191,7 +191,7 @@ def test_reconciliation_conflict_debate():
     orchestrator._run_multi_persona_debate = mock_debate
 
     try:
-        concept_idx_to_node = {}
+        concept_id_to_node = {}
         list(
             orchestrator._create_intra_document_subgraph(
                 doc_id="doc_test_2",
@@ -203,7 +203,7 @@ def test_reconciliation_conflict_debate():
                 project_id="global",
                 proj_list=["global"],
                 passage_ids=["pass_03"],
-                concept_idx_to_node=concept_idx_to_node,
+                concept_id_to_node=concept_id_to_node,
             )
         )
         events = list(
@@ -218,7 +218,7 @@ def test_reconciliation_conflict_debate():
                 project_id="global",
                 proj_list=["global"],
                 passage_ids=["pass_03"],
-                concept_idx_to_node=concept_idx_to_node,
+                concept_id_to_node=concept_id_to_node,
             )
         )
     finally:

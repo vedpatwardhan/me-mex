@@ -248,12 +248,12 @@ class DepartmentPersonaAgent:
         ]
         candidate_concepts_payload = [
             {
-                "id": idx,
+                "id": c.get("id"),
                 "title": c.get("title"),
                 "description": c.get("description"),
                 "passage_ids": c.get("passage_ids", []),
             }
-            for idx, c in enumerate(consolidated_concepts)
+            for c in consolidated_concepts
         ]
 
         prompt_payload = (

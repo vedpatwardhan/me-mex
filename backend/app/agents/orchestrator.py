@@ -465,7 +465,7 @@ class ExecutiveOrchestrator:
             proj_list.append(project_id)
 
         # Step 5: Save Root Media node and Intra-Document concept nodes & edges into DB prior to persona discovery
-        concept_idx_to_node: Dict[int, GraphNode] = {}
+        concept_id_to_node: Dict[str, GraphNode] = {}
         for evt in self._create_intra_document_subgraph(
             doc_id=doc_id,
             doc_title=title,
@@ -476,7 +476,7 @@ class ExecutiveOrchestrator:
             project_id=project_id,
             proj_list=proj_list,
             passage_ids=passage_ids,
-            concept_idx_to_node=concept_idx_to_node,
+            concept_id_to_node=concept_id_to_node,
         ):
             yield evt
 
@@ -535,7 +535,7 @@ class ExecutiveOrchestrator:
             project_id=project_id,
             proj_list=proj_list,
             passage_ids=passage_ids,
-            concept_idx_to_node=concept_idx_to_node,
+            concept_id_to_node=concept_id_to_node,
         ):
             yield evt
 
@@ -627,11 +627,11 @@ class ExecutiveOrchestrator:
         project_id: str,
         proj_list: List[str],
         passage_ids: List[str],
-        concept_idx_to_node: Optional[Dict[int, GraphNode]] = None,
+        concept_id_to_node: Optional[Dict[str, GraphNode]] = None,
     ) -> Generator[Dict[str, Any], None, None]:
         """Save root media node, concept nodes, and intra-document relations prior to persona discovery."""
-        if concept_idx_to_node is None:
-            concept_idx_to_node = {}
+        if concept_id_to_node is None:
+            concept_id_to_node = {}
 
         # 0. Instantiate and save Root Media GraphNode representing the document
         doc_node = GraphNode(
@@ -656,6 +656,8 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, root_evt)
         yield root_evt
 
+        # Build index mapping helper for initial relation creation
+        temp_idx_to_id: Dict[int, str] = {}
         for idx, c_data in enumerate(consolidated_concepts):
             c_id = f"concept_{uuid.uuid4().hex[:6]}"
             c_data["id"] = c_id
@@ -672,7 +674,8 @@ class ExecutiveOrchestrator:
                 metadata={"status": "PRIMARY_ACTIVE"},
             )
             self.db.upsert_node(c_node)
-            concept_idx_to_node[idx] = c_node
+            concept_id_to_node[c_id] = c_node
+            temp_idx_to_id[idx] = c_id
 
             # Connect Root Media GraphNode -> Concept Node
             doc_edge_id = f"edge_{uuid.uuid4().hex[:8]}"
@@ -697,29 +700,28 @@ class ExecutiveOrchestrator:
                 "message": f"Intra-document concept '{c_title}' added to knowledge graph.",
                 "timestamp": time.time(),
             }
-            self.event_queue.push(project_id, node_evt)
+            self.event_queue.push(project_id, root_evt)
             yield node_evt
 
-        # Save intra-document relations using concept_idx_to_node mapping
+        # Save intra-document relations using temp_idx_to_id mapping
         for rel in consolidated_relations:
-            src_node = concept_idx_to_node.get(rel["source_idx"])
-            tgt_node = concept_idx_to_node.get(rel["target_idx"])
-            if src_node and tgt_node:
-                edge_id = f"edge_{uuid.uuid4().hex[:8]}"
-                direct_edge = GraphEdge(
-                    _id=edge_id,
-                    source_id=src_node.id,
-                    target_id=tgt_node.id,
-                    is_directional=True,
-                    description=rel.get(
-                        "description",
-                        f"Link from {src_node.id} to {tgt_node.id}",
-                    ),
-                    weight=1.0,
-                    project_ids=proj_list,
-                    status="PRIMARY_ACTIVE",
-                )
-                self.db.upsert_edge(direct_edge)
+            src_id = temp_idx_to_id[rel["source_idx"]]
+            tgt_id = temp_idx_to_id[rel["target_idx"]]
+            edge_id = f"edge_{uuid.uuid4().hex[:8]}"
+            direct_edge = GraphEdge(
+                _id=edge_id,
+                source_id=src_id,
+                target_id=tgt_id,
+                is_directional=True,
+                description=rel.get(
+                    "description",
+                    f"Link from {src_id} to {tgt_id}",
+                ),
+                weight=1.0,
+                project_ids=proj_list,
+                status="PRIMARY_ACTIVE",
+            )
+            self.db.upsert_edge(direct_edge)
 
     def _apply_ingestion_graph_updates(
         self,
@@ -733,13 +735,13 @@ class ExecutiveOrchestrator:
         project_id: str,
         proj_list: List[str],
         passage_ids: List[str],
-        concept_idx_to_node: Optional[Dict[int, GraphNode]] = None,
+        concept_id_to_node: Optional[Dict[str, GraphNode]] = None,
     ) -> Generator[Dict[str, Any], None, None]:
-        """Apply all global graph persona reconciliation and merging edits to the DB."""
-        if concept_idx_to_node is None:
-            concept_idx_to_node = {
-                idx: self.db.get_node(c.get("id"))
-                for idx, c in enumerate(consolidated_concepts)
+        """Apply all global graph persona reconciliation and merging edits to the DB using explicit node IDs."""
+        if concept_id_to_node is None:
+            concept_id_to_node = {
+                c.get("id"): self.db.get_node(c.get("id"))
+                for c in consolidated_concepts
                 if c.get("id") and self.db.get_node(c.get("id"))
             }
 
@@ -806,28 +808,20 @@ class ExecutiveOrchestrator:
                         "passage_ids": target_passages,
                     }
 
-                    # Determine candidate ID: check candidate_idx, candidate_id, or default to candidate 0
-                    cand_ref = (
-                        cmd.get("candidate_idx")
-                        or cmd.get("candidate_id")
-                        or concept_data.get("candidate_idx")
-                    )
+                    # Determine candidate node ID: check c_ref in concept_id_to_node, or match by candidate index/fallback
                     c_id = None
-
-                    if cand_ref is not None:
-                        if isinstance(cand_ref, int) and cand_ref < len(
-                            consolidated_concepts
-                        ):
-                            c_id = consolidated_concepts[cand_ref].get("id")
-                        elif isinstance(cand_ref, str):
+                    if isinstance(c_ref, str):
+                        if c_ref in concept_id_to_node:
+                            c_id = c_ref
+                        else:
                             try:
-                                c_idx = int(cand_ref)
+                                c_idx = int(c_ref)
                                 if c_idx < len(consolidated_concepts):
                                     c_id = consolidated_concepts[c_idx].get("id")
-                                else:
-                                    c_id = cand_ref
                             except ValueError:
-                                c_id = cand_ref
+                                pass
+                    elif isinstance(c_ref, int) and c_ref < len(consolidated_concepts):
+                        c_id = consolidated_concepts[c_ref].get("id")
 
                     if not c_id and consolidated_concepts:
                         c_id = consolidated_concepts[0].get("id")
@@ -869,7 +863,7 @@ class ExecutiveOrchestrator:
             self.db.delete_edge(del_e_id)
 
         # 3. Process EDIT_CONCEPT proposals per candidate concept via 2-path logic
-        for idx, candidate_concept in enumerate(consolidated_concepts):
+        for candidate_concept in consolidated_concepts:
             c_id = candidate_concept.get("id")
             proposals = concept_edit_proposals.get(c_id, [])
             if not proposals:
@@ -893,7 +887,7 @@ class ExecutiveOrchestrator:
                 if not existing_node:
                     continue
 
-                temp_intra_node = concept_idx_to_node.get(idx)
+                temp_intra_node = concept_id_to_node.get(c_id) or self.db.get_node(c_id)
 
                 if cmd.get("additional_text"):
                     existing_node.description += (
@@ -967,7 +961,7 @@ class ExecutiveOrchestrator:
                 )
 
                 resolution_type = debate_res.get("resolution_type", "MERGE_SINGLE")
-                temp_intra_node = concept_idx_to_node.get(idx)
+                temp_intra_node = concept_id_to_node.get(c_id) or self.db.get_node(c_id)
 
                 if resolution_type == "SUBDIVIDE":
                     # Debate outcome: Sub-divide concept into multiple refined sub-concepts
@@ -1065,33 +1059,45 @@ class ExecutiveOrchestrator:
             cmd = item["cmd"]
             src_ref = cmd.get("source_idx")
             src_id = None
-            if isinstance(src_ref, int) and src_ref in concept_idx_to_node:
-                src_id = concept_idx_to_node[src_ref].id
-            elif isinstance(src_ref, str):
-                try:
-                    s_idx = int(src_ref)
-                    if s_idx in concept_idx_to_node:
-                        src_id = concept_idx_to_node[s_idx].id
-                    elif self.db.get_node(src_ref):
-                        src_id = src_ref
-                except ValueError:
-                    if self.db.get_node(src_ref):
-                        src_id = src_ref
+            if isinstance(src_ref, str):
+                if src_ref in concept_id_to_node:
+                    src_id = concept_id_to_node[src_ref].id
+                elif self.db.get_node(src_ref):
+                    src_id = src_ref
+                else:
+                    try:
+                        s_idx = int(src_ref)
+                        if s_idx < len(consolidated_concepts):
+                            c_cand_id = consolidated_concepts[s_idx].get("id")
+                            if c_cand_id and c_cand_id in concept_id_to_node:
+                                src_id = concept_id_to_node[c_cand_id].id
+                    except ValueError:
+                        pass
+            elif isinstance(src_ref, int) and src_ref < len(consolidated_concepts):
+                c_cand_id = consolidated_concepts[src_ref].get("id")
+                if c_cand_id and c_cand_id in concept_id_to_node:
+                    src_id = concept_id_to_node[c_cand_id].id
 
             tgt_ref = cmd.get("target_idx")
             tgt_id = None
-            if isinstance(tgt_ref, int) and tgt_ref in concept_idx_to_node:
-                tgt_id = concept_idx_to_node[tgt_ref].id
-            elif isinstance(tgt_ref, str):
-                try:
-                    t_idx = int(tgt_ref)
-                    if t_idx in concept_idx_to_node:
-                        tgt_id = concept_idx_to_node[t_idx].id
-                    elif self.db.get_node(tgt_ref):
-                        tgt_id = tgt_ref
-                except ValueError:
-                    if self.db.get_node(tgt_ref):
-                        tgt_id = tgt_ref
+            if isinstance(tgt_ref, str):
+                if tgt_ref in concept_id_to_node:
+                    tgt_id = concept_id_to_node[tgt_ref].id
+                elif self.db.get_node(tgt_ref):
+                    tgt_id = tgt_ref
+                else:
+                    try:
+                        t_idx = int(tgt_ref)
+                        if t_idx < len(consolidated_concepts):
+                            c_cand_id = consolidated_concepts[t_idx].get("id")
+                            if c_cand_id and c_cand_id in concept_id_to_node:
+                                tgt_id = concept_id_to_node[c_cand_id].id
+                    except ValueError:
+                        pass
+            elif isinstance(tgt_ref, int) and tgt_ref < len(consolidated_concepts):
+                c_cand_id = consolidated_concepts[tgt_ref].get("id")
+                if c_cand_id and c_cand_id in concept_id_to_node:
+                    tgt_id = concept_id_to_node[c_cand_id].id
 
             if src_id and tgt_id and src_id != tgt_id:
                 edge_id = f"edge_{uuid.uuid4().hex[:8]}"
