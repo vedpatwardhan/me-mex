@@ -568,15 +568,11 @@ class ExecutiveOrchestrator:
 
     def _run_multi_persona_debate(
         self,
-        candidate_concept: Dict[str, Any],
         doc_title: str,
         proposals: List[Dict[str, Any]],
         persona_objections: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """Runs a multi-persona debate turn when conflicting persona proposals exist for a candidate concept."""
-        candidate_title = candidate_concept.get("title", "Untitled Concept")
-        candidate_desc = candidate_concept.get("description", "")
-
+        """Runs a multi-persona debate turn when conflicting persona proposals exist."""
         persona_proposals_payload = []
         for p in proposals:
             persona_proposals_payload.append(
@@ -590,8 +586,6 @@ class ExecutiveOrchestrator:
 
         prompt_str = load_prompt("persona_ingestion_debate").format(
             doc_title=doc_title,
-            candidate_title=candidate_title,
-            candidate_description=candidate_desc,
             persona_proposals_json=json.dumps(persona_proposals_payload, indent=2),
             persona_objections_json=json.dumps(persona_objections or [], indent=2),
         )
@@ -934,9 +928,9 @@ class ExecutiveOrchestrator:
         """Executes a single non-conflicting command against the DB."""
         dept: DepartmentPersonaAgent = item["dept"]
         cmd: Dict[str, Any] = item["command"]
-        cmd_type = cmd["command_type"]
-        concept_data = cmd["concept"]
-        edge_data = cmd["edge"]
+        cmd_type = cmd.get("command_type") or cmd.get("action")
+        concept_data = cmd.get("concept") or {}
+        edge_data = cmd.get("edge") or {}
 
         if cmd_type == "CREATE_CONCEPT":
             c_title = concept_data["title"]
@@ -1076,20 +1070,17 @@ class ExecutiveOrchestrator:
                 {"dept": item["dept"], "cmd": item["command"]}
                 for item in conflicting_commands
             ]
-            candidate_concept = (
-                consolidated_concepts[0]
-                if consolidated_concepts
-                else {"title": doc_title, "description": ""}
-            )
 
             debate_res = self._run_multi_persona_debate(
-                candidate_concept=candidate_concept,
                 doc_title=doc_title,
                 proposals=proposals_payload,
                 persona_objections=all_objections,
             )
 
             resolution_type = debate_res.get("resolution_type", "MERGE_SINGLE")
+            rationale = debate_res.get(
+                "rationale", f"Consensus debate insight from '{doc_title}'"
+            )
 
             if resolution_type == "SUBDIVIDE":
                 sub_concepts = debate_res.get("sub_concepts", [])
@@ -1132,8 +1123,8 @@ class ExecutiveOrchestrator:
                 target_id = debate_res.get("merged_target_node_id")
                 if target_id and self.db.get_node(target_id):
                     target_node = self.db.get_node(target_id)
-                    target_node.description += f"\n\n## Consensus Debate Insight from '{doc_title}':\n{candidate_concept.get('description', '')}"
-                    for pid in candidate_concept.get("passage_ids", passage_ids):
+                    target_node.description += f"\n\n## Consensus Debate Insight from '{doc_title}':\n{rationale}"
+                    for pid in passage_ids:
                         if pid not in target_node.passage_ids:
                             target_node.passage_ids.append(pid)
                     self.db.upsert_node(target_node)
@@ -1166,9 +1157,9 @@ class ExecutiveOrchestrator:
 
             res_evt = {
                 "event": "persona_debate_complete",
-                "candidate_title": candidate_concept.get("title"),
+                "candidate_title": doc_title,
                 "resolution_type": resolution_type,
-                "message": f"Multi-Persona Debate for '{candidate_concept.get('title')}' completed with resolution: {resolution_type}.",
+                "message": f"Multi-Persona Debate for document '{doc_title}' completed with resolution: {resolution_type}.",
                 "timestamp": time.time(),
             }
             self.event_queue.push(project_id, res_evt)

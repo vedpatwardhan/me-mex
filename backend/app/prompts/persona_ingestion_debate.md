@@ -1,11 +1,7 @@
-You are conducting a Multi-Persona Debate between domain specialists regarding how to integrate candidate concept '{candidate_title}' into the knowledge graph.
+You are conducting a Multi-Persona Debate between domain specialists regarding how to integrate conflicting proposed graph edits into the knowledge graph.
 
 Document Context:
 Title: {doc_title}
-
-Candidate Concept Details:
-- Title: {candidate_title}
-- Description: {candidate_description}
 
 Conflicting Persona Proposals:
 {persona_proposals_json}
@@ -15,9 +11,9 @@ Persona Objections & Arguments Raised:
 
 Task:
 Debate and negotiate between the conflicting persona perspectives. Determine the optimal graph resolution:
-1. Should this concept be merged into one specific existing domain node?
-2. Or should this candidate concept be SUB-DIVIDED into two or more distinct sub-concepts (e.g., one for Domain A and one for Domain B), with optional bridge edges created between the domain hubs?
-3. Or should it be kept as a separate stand-alone node linked via relationship edges to both hubs?
+1. Should concepts be merged into one specific existing domain node?
+2. Or should concepts be SUB-DIVIDED into two or more distinct sub-concepts (e.g., one for Domain A and one for Domain B), with optional bridge edges created between domain hubs?
+3. Or should they be kept as separate stand-alone nodes linked via relationship edges to both hubs?
 
 Return JSON format strictly:
 {
