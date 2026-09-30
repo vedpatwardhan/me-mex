@@ -299,3 +299,70 @@ class DepartmentPersonaAgent:
                 "traversed_node_ids": exploration.get("traversed_node_ids", []),
                 "commands": [],
             }
+
+    def evaluate_command_objections(
+        self,
+        all_persona_commands: List[Dict[str, Any]],
+        doc_title: str,
+        candidate_nodes: List[GraphNode],
+        explored_nodes: Optional[List[GraphNode]] = None,
+    ) -> List[Dict[str, Any]]:
+        """LLM Step: Review all proposed commands across all personas and report specific objections."""
+        my_commands = []
+        other_commands = []
+
+        for item in all_persona_commands:
+            if item.get("department_id") == self.department_id:
+                my_commands.extend(item.get("commands", []))
+            else:
+                for cmd in item.get("commands", []):
+                    cmd_copy = dict(cmd)
+                    cmd_copy["proposing_persona"] = item.get(
+                        "department_name", "Unknown Persona"
+                    )
+                    other_commands.append(cmd_copy)
+
+        def _format_nodes(nodes: List[GraphNode]) -> List[Dict[str, Any]]:
+            return [
+                {
+                    "id": n.id,
+                    "title": n.title,
+                    "description": n.description,
+                    "passage_ids": n.passage_ids,
+                }
+                for n in nodes
+            ]
+
+        explored_payload = _format_nodes(explored_nodes or [self.hub_node])
+        candidate_payload = _format_nodes(candidate_nodes)
+
+        prompt_str = load_prompt("persona_command_objections").format(
+            hub_title=self.hub_node.title,
+            doc_title=doc_title,
+            explored_subgraph_json=json.dumps(explored_payload, indent=2),
+            candidate_concepts_json=json.dumps(candidate_payload, indent=2),
+            my_commands_json=json.dumps(my_commands, indent=2),
+            other_commands_json=json.dumps(other_commands, indent=2),
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": f"You are {self.department_name}. Evaluate proposed commands from other personas for conflicts.",
+            },
+            {"role": "user", "content": prompt_str},
+        ]
+
+        try:
+            res = llm_gateway.generate_chat_completion(
+                messages,
+                temperature=0.2,
+                max_tokens=1024,
+                response_format={"type": "json_object"},
+                enable_reasoning=False,
+            )
+            data = json.loads(res)
+            return data.get("objections", [])
+        except Exception as e:
+            print(f"[{self.department_name}] Command objection evaluation error: {e}")
+            return []

@@ -57,15 +57,12 @@ Both **Retrieval** and **Ingestion** operate on a single conversational gateway 
    - Each Specialist Persona debates the relevance of its accumulated multi-hop sub-graph context against the user prompt and current chat context.
    - **In Retrieval Mode:** The debate determines how closely the explored multi-hop sub-graph relates to the query topic, emitting glowing `traversed_node_ids` to the WebGL visualizer and providing grounded evidence to the Orchestrator for synthesis.
 
-3. **Multi-Persona Concept Merging Debate (Ingestion Specific Step):**
-   - Ingestion adds an explicit **Concept Merging Debate Step** on top of shared exploration and relevance debate.
+3. **Multi-Persona Zero-Mutation Consensus & Concept Merging Debate (Ingestion Specific Step):**
+   - Ingestion adds an explicit **Zero-Mutation Consensus & Concept Merging Debate Step** on top of shared exploration and relevance debate.
+   - **Zero Upfront DB Mutations**: No database writes (`CREATE_CONCEPT`, `DELETE_CONCEPT`, `DELETE_EDGE`) occur prior to command reconciliation.
    - **Document-Level Consolidation**: Passage-level concepts extracted from the incoming document are first consolidated into a set of document-specific canonical concepts (`consolidate_extracted_concepts`).
-   - **Persona Knowledge Base**: Each persona treats its hub and adjacent neighborhood as its specialized knowledge base (*"Everything I know about this domain in the database"*).
-   - **Ingestion Merging Evaluation**: All consolidated concepts from the document are passed to every relevant concept hub persona to merge them into the global graph topology.
-   - **Per-Persona Graph Integration:** Each persona independently evaluates the document's concepts against its domain knowledge:
-     - **Inclusion & Merging:** Decides whether a concept should be merged into an existing node, updated with new text, or instantiated as a new concept.
-     - **Multi-Hub Connection (Multiple Edges):** If a single concept from the document is relevant to multiple concept hub personas, each persona creates its own connection edges (`GraphEdge`), naturally attaching the concept to multiple hubs across the graph.
-     - **Decomposition:** Personas break down high-level or compound concepts into lower-level atomic components if necessary for clean domain alignment.
+   - **Persona Command Pool & Consensus Review**: All commands from all personas (`CREATE`, `EDIT`, `DELETE`, `CONSTRUCT_EDGE`, `EDIT_EDGE`, `DELETE_EDGE`) are pooled. Personas evaluate each other's proposals ("What do you object to, and why?") to classify commands into non-conflicting (agreed) vs. conflicting (disputed) sets.
+   - **Dispute Resolution & Multi-Hub Integration**: Conflicting command sets undergo Multi-Persona Debate to determine optimal graph updates (`SUBDIVIDE`, `MERGE_SINGLE`, `KEEP_SEPARATE`), and all finalized graph updates are executed in a single atomic batch pass against the database.
 
 ---
 

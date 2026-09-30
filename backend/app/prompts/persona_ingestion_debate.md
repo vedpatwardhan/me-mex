@@ -10,6 +10,9 @@ Candidate Concept Details:
 Conflicting Persona Proposals:
 {persona_proposals_json}
 
+Persona Objections & Arguments Raised:
+{persona_objections_json}
+
 Task:
 Debate and negotiate between the conflicting persona perspectives. Determine the optimal graph resolution:
 1. Should this concept be merged into one specific existing domain node?

@@ -295,3 +295,52 @@ def test_create_and_delete_commands():
 
     assert db_engine.get_node("concept_obsolete_del") is None
     assert not any(e.id == "edge_obsolete_del" for e in db_engine.get_edges())
+
+
+def test_evaluate_command_objections():
+    """Verify DepartmentPersonaAgent.evaluate_command_objections method."""
+    hub_node = GraphNode(
+        _id="hub_test_obj",
+        node_type="concept",
+        title="Hub Test Objections",
+        description="Test description",
+    )
+    persona = DepartmentPersonaAgent(hub_node)
+
+    all_commands = [
+        {
+            "department_id": "dept_hub_test_obj",
+            "department_name": "Persona Specialist: Hub Test Objections",
+            "commands": [
+                {
+                    "command_type": "EDIT_CONCEPT",
+                    "concept": {
+                        "id": "concept_1",
+                        "title": "C1",
+                        "description": "Edit 1",
+                    },
+                }
+            ],
+        },
+        {
+            "department_id": "dept_other",
+            "department_name": "Persona Specialist: Other Domain",
+            "commands": [
+                {
+                    "command_type": "CREATE_CONCEPT",
+                    "concept": {
+                        "title": "C1 Standalone",
+                        "description": "Create standalone",
+                    },
+                }
+            ],
+        },
+    ]
+
+    # Without active LLM (vLLM offline), fallback returns empty list []
+    objections = persona.evaluate_command_objections(
+        all_persona_commands=all_commands,
+        doc_title="Test Document",
+        candidate_nodes=[hub_node],
+    )
+    assert isinstance(objections, list)

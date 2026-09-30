@@ -265,10 +265,12 @@ Both Retrieval and Ingestion operate on a single unified multi-agent pattern str
    - **Root Media Traversal Blocking**: Traversal visits Root Media nodes (`paper`, `blog`, `video`, `post`) for provenance context, but strictly **blocks Root Media nodes from expanding further hops** (preventing artificial shortcutting across unrelated concepts contained in the same paper).
 2. **Relevance Debate:**
    - Personas debate the relevance of their accumulated multi-hop sub-graph context against the user prompt, full conversation history (`chat_history`), and system execution events.
-3. **Ingestion-Specific Concept Merging Debate:**
-   - Ingestion executes an additional **Multi-Persona Merging Debate**. Each persona treats its accumulated multi-hop sub-graph as its authoritative domain knowledge base.
-   - All consolidated concepts from an ingested document are presented to every relevant persona.
-   - Personas independently evaluate how the document's concepts map to their domain knowledge—merging into existing concepts, breaking down compound ideas, or connecting new nodes. If a concept is relevant to multiple personas, each persona creates its own connection edges (`GraphEdge`), attaching the concept to multiple hubs in the graph network.
+3. **Ingestion-Specific Zero-Mutation Consensus & Merging Debate:**
+   - Ingestion executes an additional **Zero-Mutation Consensus & Merging Debate** pass.
+   - **Zero Upfront DB Mutations**: No database writes (`CREATE_CONCEPT`, `DELETE_CONCEPT`, `DELETE_EDGE`) occur prior to persona command reconciliation.
+   - **Command Pool & Cross-Persona Consensus Review**: All commands generated across personas (`CREATE`, `EDIT`, `DELETE`, `CONSTRUCT_EDGE`, `EDIT_EDGE`, `DELETE_EDGE`) are gathered into a single command pool. Personas conduct a consensus review ("What do you object to, and why?") to classify commands into non-conflicting (agreed) vs. conflicting (disputed) sets.
+   - **Multi-Persona Debate**: Conflicting command groups (e.g. `CREATE` vs `EDIT`, `DELETE` vs `KEEP`, target node collisions) trigger a Multi-Persona Debate to determine optimal graph resolutions (`SUBDIVIDE`, `MERGE_SINGLE`, `KEEP_SEPARATE`).
+   - **Atomic Batch DB Execution**: Only after all non-conflicting and debate-resolved commands are finalized does the engine execute graph mutations against the database.
 
 ---
 

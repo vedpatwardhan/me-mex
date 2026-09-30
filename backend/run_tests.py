@@ -36,6 +36,7 @@ from tests.test_concept_reconciliation import (
     test_reconciliation_no_conflict,
     test_reconciliation_conflict_debate,
     test_create_and_delete_commands,
+    test_evaluate_command_objections,
 )
 from tests.test_department_persona import (
     test_department_persona_project_scoping,
@@ -113,6 +114,11 @@ def run_all_tests():
         (
             "Reconciliation: Command Mutations (CREATE/DELETE)",
             test_create_and_delete_commands,
+            False,
+        ),
+        (
+            "Reconciliation: Persona Command Objection Review Pass",
+            test_evaluate_command_objections,
             False,
         ),
         (
