@@ -1,5 +1,6 @@
 import time
 from app.agents.orchestrator import orchestrator
+from app.services.graph_ingestion_engine import graph_ingestion_engine
 from app.agents.department_persona import DepartmentPersonaAgent
 from app.models import GraphNode, GraphEdge
 from app.db import db_engine
@@ -208,6 +209,7 @@ def test_reconciliation_conflict_debate():
         }
 
     orchestrator._run_multi_persona_debate = mock_debate
+    graph_ingestion_engine.run_multi_persona_debate = mock_debate
 
     try:
         concept_id_to_node = {}
