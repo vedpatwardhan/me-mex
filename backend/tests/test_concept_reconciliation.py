@@ -181,35 +181,43 @@ def test_reconciliation_conflict_debate():
     persona_a.evaluate_command_objections = mock_objections_a
     persona_b.evaluate_command_objections = mock_objections_b
 
-    def mock_debate(*args, **kwargs):
+    # Mock respond_to_debate_turn on both personas to simulate a successful bilateral debate consensus
+    def mock_debate_turn_a(*args, **kwargs):
         return {
-            "resolution_type": "SUBDIVIDE",
-            "rationale": "Concept spans both domains; sub-dividing.",
-            "sub_concepts": [
+            "consensus_reached": False,
+            "turn_rationale": "Persona A proposes refining edit for Domain A node.",
+            "resolved_commands": [
                 {
-                    "sub_title": "Cross Domain Concept (Domain A)",
-                    "description": "Part A",
-                    "target_node_id": target_a,
-                    "passage_ids": ["pass_03"],
-                },
-                {
-                    "sub_title": "Cross Domain Concept (Domain B)",
-                    "description": "Part B",
-                    "target_node_id": target_b,
-                    "passage_ids": ["pass_03"],
-                },
-            ],
-            "additional_edges": [
-                {
-                    "source_id": target_a,
-                    "target_id": target_b,
-                    "description": "Bridge between domain A and domain B",
+                    "action": "EDIT_CONCEPT",
+                    "concept": {
+                        "id": target_a,
+                        "title": "Domain A Node",
+                        "description": "Sub-concept from 'Test Doc 2'\n# Part A",
+                        "passage_ids": ["pass_03"],
+                    },
                 }
             ],
         }
 
-    orchestrator._run_multi_persona_debate = mock_debate
-    graph_ingestion_engine.run_multi_persona_debate = mock_debate
+    def mock_debate_turn_b(*args, **kwargs):
+        return {
+            "consensus_reached": True,
+            "turn_rationale": "Persona B accepts consensus and adds edit for Domain B node.",
+            "resolved_commands": [
+                {
+                    "action": "EDIT_CONCEPT",
+                    "concept": {
+                        "id": target_b,
+                        "title": "Domain B Node",
+                        "description": "Sub-concept from 'Test Doc 2'\n# Part B",
+                        "passage_ids": ["pass_03"],
+                    },
+                }
+            ],
+        }
+
+    persona_a.respond_to_debate_turn = mock_debate_turn_a
+    persona_b.respond_to_debate_turn = mock_debate_turn_b
 
     try:
         concept_id_to_node = {}
@@ -244,6 +252,7 @@ def test_reconciliation_conflict_debate():
 
     event_types = [e.get("event") for e in events]
     assert "persona_debate_start" in event_types
+    assert "persona_debate_turn" in event_types
     assert "persona_debate_complete" in event_types
 
     # Check updated node bodies

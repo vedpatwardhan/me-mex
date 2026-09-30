@@ -128,20 +128,24 @@ Standard vector embeddings rely on surface-level cosine distance in static 1536-
 ### The Persona-Driven Retrieval Solution
 
 ```
-[User Query / New Paper Preview]
+[User Query / New Document Intake]
                 │
                 ▼
-[Stage 1: Global Registry Persona Scan]
-(Scans 3-4 Compressed Global Registry Documents -> Identifies Target Domains)
+[Stage 1: Global Registry Persona Scan & Subgraph Traversal]
+(Scans Concept Hubs -> Traverses multi-hop domain sub-graph context)
                 │
                 ▼
-[Stage 2: Specialist Persona Subgraph Traversal & Debate]
-(Domain Personas traverse structural edges [BUILDS_UPON, CONTRASTS] & debate relevance)
-(Visual Graph Canvas animates/glows explored nodes in real-time)
+[Stage 2: Zero-Mutation Command Collection & Objection Review Pass]
+(Collects commands across personas -> Evaluates cross-persona objections with explored evidence)
                 │
                 ▼
-[Stage 3: Grounded Retrieval Consensus]
-(Returns top subgraphs + plain text passage pointers for chat & merge preparation)
+[Stage 3: Multi-Turn Bilateral Persona Debate Loop]
+(Clusters conflict pairs (P_A <-> P_B) -> Runs turn-by-turn dialogue loops up to max_turns)
+(Visual Graph Canvas streams persona_debate_turn events in real-time)
+                │
+                ▼
+[Stage 4: Atomic Batch Execution]
+(Executes agreed consensus commands directly against DB)
 ```
 
 ---

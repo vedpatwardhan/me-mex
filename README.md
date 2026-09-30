@@ -38,10 +38,9 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
    exploration (`explore_concept_hub`), iteratively expanding neighbor nodes up to `max_depth` (guided by LLM persona selection).
  - Relevance Debate: Personas debate the relevance of their accumulated multi-hop domain knowledge against the user prompt,
    full conversation history (`chat_history`), and system execution events.
- - Multi-Persona Zero-Mutation Consensus & Merging Debate (Ingestion Specific): Evaluates proposed commands across
-   all personas without upfront DB writes, classifying commands into non-conflicting (agreed) vs. conflicting (disputed) sets via consensus review ("What do you object to and why?"), resolving disputes through debate, and applying atomic batch graph updates to DB.
- - Real-Time SSE Telemetry: Streams persona traversal events (`traversed_node_ids`) to animate the
-   WebGL canvas (`react-force-graph-2d`).
+ - Multi-Persona Zero-Mutation Consensus & Bilateral Merging Debate (Ingestion Specific): Evaluates proposed commands across
+   all personas without upfront DB writes, classifying commands into non-conflicting (agreed) vs. conflicting (disputed) sets via consensus review (`evaluate_command_objections`). Conflicting commands are clustered into `(Proposing Persona, Objecting Persona)` pairs that engage in interactive turn-by-turn dialogue loops (`run_bilateral_persona_debate`) exchanging sub-graph evidence until mutual consensus is reached.
+ - Real-Time SSE Telemetry: Streams persona traversal events (`traversed_node_ids`) and live bilateral debate turns (`persona_debate_turn`) to animate the WebGL canvas (`react-force-graph-2d`).
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                      4. Agentic Tool Ingestion & Multi-Hub Integration                 │

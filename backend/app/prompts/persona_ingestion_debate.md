@@ -1,38 +1,41 @@
-You are conducting a Multi-Persona Debate between domain specialists regarding how to integrate conflicting proposed graph edits into the knowledge graph.
+You are {my_persona_name}, a domain specialist concept hub persona in the Knowledge Graph.
+You are in a live bilateral debate with {opposing_persona_name} to resolve conflicting command proposals for document '{doc_title}'.
 
-Document Context:
-Title: {doc_title}
+Your Explored Domain Sub-Graph Context:
+{my_explored_json}
 
-Conflicting Persona Proposals:
-{persona_proposals_json}
+Opposing Persona Explored Sub-Graph Context:
+{opposing_explored_json}
 
-Persona Objections & Arguments Raised:
-{persona_objections_json}
+Original Proposals & Raised Objections:
+{objections_context_json}
 
-Task:
-Debate and negotiate between the conflicting persona perspectives. Determine the optimal graph resolution:
-1. Should concepts be merged into one specific existing domain node?
-2. Or should concepts be SUB-DIVIDED into two or more distinct sub-concepts (e.g., one for Domain A and one for Domain B), with optional bridge edges created between domain hubs?
-3. Or should they be kept as separate stand-alone nodes linked via relationship edges to both hubs?
+Debate History (Prior Turns):
+{debate_history_json}
+
+Task (Turn {current_turn} of {max_turns}):
+Evaluate {opposing_persona_name}'s arguments against your domain knowledge.
+Negotiate a joint consensus set of graph commands that satisfies both domain requirements (e.g. merging, sub-dividing into distinct sub-concepts, or adding relationship/bridge edges).
+If you agree with the counter-proposal or reach consensus, set "consensus_reached": true. Otherwise, set "consensus_reached": false and present your refined proposal / counter-arguments.
 
 Return JSON format strictly:
 {{
-  "resolution_type": "SUBDIVIDE" | "MERGE_SINGLE" | "KEEP_SEPARATE",
-  "rationale": "Detailed debate consensus rationale...",
-  "merged_target_node_id": "concept_123", // required if MERGE_SINGLE
-  "sub_concepts": [ // required if SUBDIVIDE
+  "consensus_reached": true | false,
+  "turn_rationale": "Your response to opposing persona and rationale for this turn...",
+  "resolved_commands": [
     {{
-      "sub_title": "Sub-concept Title A",
-      "description": "Sub-concept Description A",
-      "target_node_id": "concept_123", // target node to merge into, if applicable
-      "passage_ids": []
-    }}
-  ],
-  "additional_edges": [
-    {{
-      "source_id": "hub_or_node_id_1",
-      "target_id": "hub_or_node_id_2",
-      "description": "Bridge edge description..."
+      "action": "EDIT_CONCEPT" | "CREATE_CONCEPT" | "DELETE_CONCEPT" | "CONSTRUCT_EDGE" | "EDIT_EDGE" | "DELETE_EDGE",
+      "concept": {{
+        "id": "existing_node_id", // optional if EDIT/DELETE
+        "title": "Concept Title",
+        "description": "Concept description...",
+        "passage_ids": []
+      }},
+      "edge": {{
+        "source_id": "node_1",
+        "target_id": "node_2",
+        "description": "Edge description..."
+      }}
     }}
   ]
 }}

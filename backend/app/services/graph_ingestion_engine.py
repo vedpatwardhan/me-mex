@@ -1,7 +1,8 @@
 import json
 import uuid
 import time
-from typing import List, Dict, Any, Generator, Optional
+from collections import defaultdict
+from typing import List, Dict, Any, Generator, Optional, Tuple
 from app.db import db_engine
 from app.models import (
     GraphNode,
@@ -23,30 +24,114 @@ class GraphIngestionEngine:
         self.llm = llm_gateway
         self.event_queue = event_queue
 
+    def run_bilateral_persona_debate(
+        self,
+        persona_a: DepartmentPersonaAgent,
+        persona_b: DepartmentPersonaAgent,
+        persona_a_commands: List[Dict[str, Any]],
+        persona_b_objections: List[Dict[str, Any]],
+        doc_title: str,
+        project_id: str = "global",
+        max_turns: int = 3,
+    ) -> Generator[Dict[str, Any], None, List[Dict[str, Any]]]:
+        """Runs a dynamic multi-turn bilateral debate loop between conflicting personas until consensus or max turns."""
+        debate_history: List[Dict[str, Any]] = []
+        objections_context = [
+            {
+                "proposing_persona": persona_a.department_name,
+                "proposed_commands": [c.get("command") for c in persona_a_commands],
+                "objecting_persona": persona_b.department_name,
+                "objections": persona_b_objections,
+            }
+        ]
+
+        current_speaker = persona_a
+        other_speaker = persona_b
+        resolved_commands: List[Dict[str, Any]] = []
+
+        for turn in range(1, max_turns + 1):
+            turn_res = current_speaker.respond_to_debate_turn(
+                opposing_persona_name=other_speaker.department_name,
+                opposing_explored_nodes=other_speaker.last_explored_nodes
+                or [other_speaker.hub_node],
+                objections_context=objections_context,
+                debate_history=debate_history,
+                doc_title=doc_title,
+                current_turn=turn,
+                max_turns=max_turns,
+            )
+
+            turn_evt = {
+                "event": "persona_debate_turn",
+                "doc_title": doc_title,
+                "turn": turn,
+                "max_turns": max_turns,
+                "speaker_persona_id": current_speaker.department_id,
+                "speaker_persona_name": current_speaker.department_name,
+                "opposing_persona_name": other_speaker.department_name,
+                "turn_rationale": turn_res.get("turn_rationale", ""),
+                "consensus_reached": turn_res.get("consensus_reached", False),
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, turn_evt)
+            yield turn_evt
+
+            turn_entry = {
+                "turn": turn,
+                "speaker": current_speaker.department_name,
+                "rationale": turn_res.get("turn_rationale", ""),
+                "consensus_reached": turn_res.get("consensus_reached", False),
+                "proposed_resolved_commands": turn_res.get("resolved_commands", []),
+            }
+            debate_history.append(turn_entry)
+
+            if turn_res.get("resolved_commands"):
+                resolved_commands.extend(turn_res["resolved_commands"])
+
+            if turn_res.get("consensus_reached", False):
+                break
+
+            current_speaker, other_speaker = other_speaker, current_speaker
+
+        # Format resolved commands into flat execution format
+        final_cmd_items = []
+        for idx, r_cmd in enumerate(resolved_commands):
+            # Parse command structure to standard flat item
+            final_cmd_items.append(
+                {
+                    "command_id": f"debate_resolved_cmd_{idx}",
+                    "department_id": persona_a.department_id,
+                    "department_name": persona_a.department_name,
+                    "dept": persona_a,
+                    "command": {
+                        "command_type": r_cmd.get("action")
+                        or r_cmd.get("command_type", "EDIT_CONCEPT"),
+                        "concept": r_cmd.get("concept", {}),
+                        "edge": r_cmd.get("edge", {}),
+                    },
+                }
+            )
+
+        return final_cmd_items
+
     def run_multi_persona_debate(
         self,
         doc_title: str,
         proposals: List[Dict[str, Any]],
         persona_objections: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """Runs a multi-persona debate turn when conflicting persona proposals exist."""
-        persona_proposals_payload = []
-        for p in proposals:
-            persona_proposals_payload.append(
-                {
-                    "persona_id": p["dept"].department_id,
-                    "persona_name": p["dept"].department_name,
-                    "hub_title": p["dept"].hub_node.title,
-                    "command": p["cmd"],
-                }
-            )
-
+        """Backward compatibility multi-persona debate pass."""
         prompt_str = load_prompt("persona_ingestion_debate").format(
+            my_persona_name="Executive Moderator",
+            opposing_persona_name="Conflicting Personas",
             doc_title=doc_title,
-            persona_proposals_json=json.dumps(persona_proposals_payload, indent=2),
-            persona_objections_json=json.dumps(persona_objections or [], indent=2),
+            my_explored_json="[]",
+            opposing_explored_json="[]",
+            objections_context_json=json.dumps(persona_objections or [], indent=2),
+            debate_history_json="[]",
+            current_turn=1,
+            max_turns=1,
         )
-
         messages = [
             {
                 "role": "system",
@@ -67,8 +152,7 @@ class GraphIngestionEngine:
             return data
         except Exception as e:
             print(f"[Multi-Persona Debate] Error during debate resolution: {e}")
-            # Fallback to keeping candidate as a standalone merged edit if debate fails
-            first_cmd = proposals[0]["cmd"]
+            first_cmd = proposals[0]["cmd"] if proposals else {}
             return {
                 "resolution_type": "MERGE_SINGLE",
                 "rationale": "Fallback merge resolution due to debate timeout.",
@@ -364,7 +448,7 @@ class GraphIngestionEngine:
             if evt:
                 yield evt
 
-        # 4. Process Conflicting Commands via Multi-Persona Debate Engine
+        # 4. Process Conflicting Commands via Bilateral Multi-Persona Debate Engine
         if conflicting_commands:
             conflicting_personas = list(
                 set(item["department_name"] for item in conflicting_commands)
@@ -373,110 +457,97 @@ class GraphIngestionEngine:
                 "event": "persona_debate_start",
                 "candidate_title": doc_title,
                 "conflicting_personas": conflicting_personas,
-                "message": f"Conflicting persona proposals detected for document '{doc_title}'. Initiating Multi-Persona Debate...",
+                "message": f"Conflicting persona proposals detected for document '{doc_title}'. Initiating Bilateral Multi-Persona Debates...",
                 "timestamp": time.time(),
             }
             self.event_queue.push(project_id, debate_evt)
             yield debate_evt
 
-            proposals_payload = [
-                {"dept": item["dept"], "cmd": item["command"]}
-                for item in conflicting_commands
-            ]
+            # Build objection lookup by command_id
+            cmd_to_objections: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            for o in all_objections:
+                cid = o.get("command_id")
+                if cid:
+                    cmd_to_objections[cid].append(o)
 
-            debate_res = self.run_multi_persona_debate(
-                doc_title=doc_title,
-                proposals=proposals_payload,
-                persona_objections=all_objections,
-            )
+            # Group conflicting commands into persona pair clusters (Proposer, Objector)
+            pair_clusters: Dict[Tuple[str, str], Dict[str, Any]] = {}
+            for item in conflicting_commands:
+                cid = item["command_id"]
+                dept_a: DepartmentPersonaAgent = item["dept"]
+                objs = cmd_to_objections.get(cid, [])
 
-            resolution_type = debate_res.get("resolution_type", "MERGE_SINGLE")
-            rationale = debate_res.get(
-                "rationale", f"Consensus debate insight from '{doc_title}'"
-            )
-
-            if resolution_type == "SUBDIVIDE":
-                sub_concepts = debate_res.get("sub_concepts", [])
-                for sub in sub_concepts:
-                    sub_title = sub.get("sub_title", f"{doc_title} (Sub)")
-                    sub_target_id = sub.get("target_node_id")
-
-                    if sub_target_id and self.db.get_node(sub_target_id):
-                        t_node = self.db.get_node(sub_target_id)
-                        t_node.description += f"\n\n## Sub-concept from '{doc_title}':\n# {sub_title}\n{sub.get('description', '')}"
-                        for pid in sub.get("passage_ids", passage_ids):
-                            if pid not in t_node.passage_ids:
-                                t_node.passage_ids.append(pid)
-                        self.db.upsert_node(t_node)
-                    else:
-                        sub_id = f"concept_{uuid.uuid4().hex[:6]}"
-                        sub_node = GraphNode(
-                            _id=sub_id,
-                            node_type="concept",
-                            title=sub_title,
-                            description=f"# {sub_title}\n{sub.get('description', '')}",
-                            passage_ids=sub.get("passage_ids", passage_ids),
-                            project_ids=proj_list,
-                            metadata={"status": "PRIMARY_ACTIVE"},
-                        )
-                        self.db.upsert_node(sub_node)
-                        sub_edge = GraphEdge(
-                            _id=f"edge_{uuid.uuid4().hex[:8]}",
-                            source_id=doc_id,
-                            target_id=sub_id,
-                            is_directional=True,
-                            description=f"Document '{doc_title}' presents sub-concept '{sub_title}'.",
-                            weight=1.0,
-                            project_ids=proj_list,
-                            status="PRIMARY_ACTIVE",
-                        )
-                        self.db.upsert_edge(sub_edge)
-
-            elif resolution_type == "MERGE_SINGLE":
-                target_id = debate_res.get("merged_target_node_id")
-                if target_id and self.db.get_node(target_id):
-                    target_node = self.db.get_node(target_id)
-                    target_node.description += f"\n\n## Consensus Debate Insight from '{doc_title}':\n{rationale}"
-                    for pid in passage_ids:
-                        if pid not in target_node.passage_ids:
-                            target_node.passage_ids.append(pid)
-                    self.db.upsert_node(target_node)
-
-            for add_edge in debate_res.get("additional_edges", []):
-                s_id = (
-                    add_edge.get("source_id")
-                    or add_edge.get("source_ref")
-                    or add_edge.get("source_idx")
-                )
-                t_id = (
-                    add_edge.get("target_id")
-                    or add_edge.get("target_ref")
-                    or add_edge.get("target_idx")
-                )
-                if s_id and t_id and s_id != t_id:
-                    bridge_edge = GraphEdge(
-                        _id=f"edge_{uuid.uuid4().hex[:8]}",
-                        source_id=s_id,
-                        target_id=t_id,
-                        is_directional=True,
-                        description=add_edge.get(
-                            "description", "Cross-domain debate bridge edge."
+                for obj in objs:
+                    obj_persona_name = obj.get("objecting_persona")
+                    # Find objecting persona instance from persona_command_results
+                    dept_b = next(
+                        (
+                            r["dept"]
+                            for r in persona_command_results
+                            if r["dept"].department_name == obj_persona_name
                         ),
-                        weight=1.0,
-                        project_ids=proj_list,
-                        status="PRIMARY_ACTIVE",
+                        None,
                     )
-                    self.db.upsert_edge(bridge_edge)
+                    if dept_b and dept_a.department_id != dept_b.department_id:
+                        # Canonical symmetric pair key (sorted ID tuple) to merge bidirectional objections into the same room
+                        p1, p2 = sorted([dept_a, dept_b], key=lambda d: d.department_id)
+                        pair_key = (p1.department_id, p2.department_id)
+                        if pair_key not in pair_clusters:
+                            pair_clusters[pair_key] = {
+                                "persona_a": p1,
+                                "persona_b": p2,
+                                "commands_a": [],
+                                "objections_b": [],
+                            }
+                        pair_clusters[pair_key]["commands_a"].append(item)
+                        pair_clusters[pair_key]["objections_b"].append(obj)
+
+            resolved_debate_commands: List[Dict[str, Any]] = []
+
+            for pair_key, cluster in pair_clusters.items():
+                p_a = cluster["persona_a"]
+                p_b = cluster["persona_b"]
+                cmds_a = cluster["commands_a"]
+                objs_b = cluster["objections_b"]
+
+                # Execute bilateral debate turn generator
+                debate_gen = self.run_bilateral_persona_debate(
+                    persona_a=p_a,
+                    persona_b=p_b,
+                    persona_a_commands=cmds_a,
+                    persona_b_objections=objs_b,
+                    doc_title=doc_title,
+                    project_id=project_id,
+                    max_turns=3,
+                )
+
+                pair_resolved_cmds = []
+                try:
+                    while True:
+                        turn_evt = next(debate_gen)
+                        yield turn_evt
+                except StopIteration as stop:
+                    pair_resolved_cmds = stop.value or []
+
+                resolved_debate_commands.extend(pair_resolved_cmds)
 
             res_evt = {
                 "event": "persona_debate_complete",
                 "candidate_title": doc_title,
-                "resolution_type": resolution_type,
-                "message": f"Multi-Persona Debate for document '{doc_title}' completed with resolution: {resolution_type}.",
+                "resolution_type": "BILATERAL_CONSENSUS",
+                "message": f"Bilateral Multi-Persona Debates for document '{doc_title}' completed.",
                 "timestamp": time.time(),
             }
             self.event_queue.push(project_id, res_evt)
             yield res_evt
+
+            # Execute all resolved consensus commands against DB
+            for item in resolved_debate_commands:
+                evt = self.execute_single_command(
+                    item=item, doc_title=doc_title, proj_list=proj_list
+                )
+                if evt:
+                    yield evt
 
         summary_evt = {
             "event": "ingestion_completed",

@@ -377,3 +377,67 @@ class DepartmentPersonaAgent:
         except Exception as e:
             print(f"[{self.department_name}] Command objection evaluation error: {e}")
             return []
+
+    def respond_to_debate_turn(
+        self,
+        opposing_persona_name: str,
+        opposing_explored_nodes: List[GraphNode],
+        objections_context: List[Dict[str, Any]],
+        debate_history: List[Dict[str, Any]],
+        doc_title: str,
+        current_turn: int,
+        max_turns: int = 3,
+    ) -> Dict[str, Any]:
+        """LLM Turn: Generate argument/counter-proposal or declare consensus in a bilateral debate session."""
+
+        def _format_nodes(nodes: List[GraphNode]) -> List[Dict[str, Any]]:
+            return [
+                {
+                    "id": n.id,
+                    "title": n.title,
+                    "description": n.description,
+                    "passage_ids": n.passage_ids,
+                }
+                for n in (nodes or [])
+            ]
+
+        my_explored = _format_nodes(self.last_explored_nodes or [self.hub_node])
+        opposing_explored = _format_nodes(opposing_explored_nodes)
+
+        prompt_str = load_prompt("persona_ingestion_debate").format(
+            my_persona_name=self.department_name,
+            opposing_persona_name=opposing_persona_name,
+            doc_title=doc_title,
+            my_explored_json=json.dumps(my_explored, indent=2),
+            opposing_explored_json=json.dumps(opposing_explored, indent=2),
+            objections_context_json=json.dumps(objections_context, indent=2),
+            debate_history_json=json.dumps(debate_history, indent=2),
+            current_turn=current_turn,
+            max_turns=max_turns,
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": f"You are {self.department_name}, engaging in a bilateral graph reconciliation debate with {opposing_persona_name}.",
+            },
+            {"role": "user", "content": prompt_str},
+        ]
+
+        try:
+            res = llm_gateway.generate_chat_completion(
+                messages,
+                temperature=0.2,
+                max_tokens=1024,
+                response_format={"type": "json_object"},
+                enable_reasoning=False,
+            )
+            data = json.loads(res)
+            return data
+        except Exception as e:
+            print(f"[{self.department_name}] Debate turn error: {e}")
+            return {
+                "consensus_reached": True,
+                "turn_rationale": "Fallback consensus due to LLM error.",
+                "resolved_commands": [],
+            }
