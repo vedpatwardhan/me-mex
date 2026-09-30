@@ -288,6 +288,7 @@ class DepartmentPersonaAgent:
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
                 "traversed_node_ids": exploration.get("traversed_node_ids", []),
+                "subgraph_nodes": subgraph_nodes,
                 "commands": commands,
             }
         except Exception as e:
@@ -297,6 +298,7 @@ class DepartmentPersonaAgent:
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
                 "traversed_node_ids": exploration.get("traversed_node_ids", []),
+                "subgraph_nodes": [],
                 "commands": [],
             }
 
@@ -305,22 +307,27 @@ class DepartmentPersonaAgent:
         all_persona_commands: List[Dict[str, Any]],
         doc_title: str,
         candidate_nodes: List[GraphNode],
-        explored_nodes: Optional[List[GraphNode]] = None,
+        explored_nodes: List[GraphNode],
     ) -> List[Dict[str, Any]]:
         """LLM Step: Review all proposed commands across all personas and report specific objections."""
         my_commands = []
         other_commands = []
 
         for item in all_persona_commands:
-            if item.get("department_id") == self.department_id:
-                my_commands.extend(item.get("commands", []))
+            dept_id = item.get("department_id")
+            dept_name = item.get("department_name", "Unknown Persona")
+            command = item.get("command", {})
+            cmd_item = {
+                "command_id": item.get("command_id"),
+                "command_type": command.get("command_type"),
+                "concept": command.get("concept"),
+                "edge": command.get("edge"),
+                "proposing_persona": dept_name,
+            }
+            if dept_id == self.department_id:
+                my_commands.append(cmd_item)
             else:
-                for cmd in item.get("commands", []):
-                    cmd_copy = dict(cmd)
-                    cmd_copy["proposing_persona"] = item.get(
-                        "department_name", "Unknown Persona"
-                    )
-                    other_commands.append(cmd_copy)
+                other_commands.append(cmd_item)
 
         def _format_nodes(nodes: List[GraphNode]) -> List[Dict[str, Any]]:
             return [
@@ -333,7 +340,7 @@ class DepartmentPersonaAgent:
                 for n in nodes
             ]
 
-        explored_payload = _format_nodes(explored_nodes or [self.hub_node])
+        explored_payload = _format_nodes(explored_nodes)
         candidate_payload = _format_nodes(candidate_nodes)
 
         prompt_str = load_prompt("persona_command_objections").format(

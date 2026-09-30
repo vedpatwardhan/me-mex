@@ -530,6 +530,7 @@ class ExecutiveOrchestrator:
                 {
                     "dept": dept,
                     "commands": ingest_res.get("commands", []),
+                    "subgraph_nodes": ingest_res.get("subgraph_nodes", []),
                 }
             )
 
@@ -733,94 +734,33 @@ class ExecutiveOrchestrator:
     def _collect_persona_commands(
         self,
         persona_command_results: List[Dict[str, Any]],
-        consolidated_concepts: List[Dict[str, Any]],
-        concept_id_to_node: Dict[str, GraphNode],
-    ) -> Tuple[
-        List[Dict[str, Any]],
-        Dict[str, List[Dict[str, Any]]],
-        List[str],
-        List[Dict[str, Any]],
-        List[str],
-    ]:
-        """Parse & collect all raw commands across personas without DB writes."""
-        create_commands = []
-        concept_edit_proposals = defaultdict(list)
-        node_delete_commands = []
-        edge_commands = []
-        edge_delete_commands = []
+    ) -> List[Dict[str, Any]]:
+        """Parse & collect all raw commands across personas indexed with command_id without DB writes."""
+        all_commands_flat = []
+        cmd_counter = 0
 
         for res in persona_command_results:
             dept: DepartmentPersonaAgent = res["dept"]
-            commands: List[Dict[str, Any]] = res["commands"]
+            commands: List[Dict[str, Any]] = res.get("commands", [])
 
             for cmd in commands:
-                cmd_type = cmd.get("command_type")
-                concept_data = cmd.get("concept", {})
-                edge_data = cmd.get("edge", {})
-
-                c_id = concept_data.get("id")
-                src_id = edge_data.get("source_id")
-                tgt_id = edge_data.get("target_id")
-
-                if cmd_type == "CREATE_CONCEPT":
-                    create_commands.append({"dept": dept, "concept": concept_data})
-
-                elif cmd_type == "EDIT_CONCEPT":
-                    target_id = concept_data.get("id")
-                    target_desc = concept_data.get("description", "")
-                    target_passages = concept_data.get("passage_ids", [])
-                    target_title = concept_data.get("title", "")
-
-                    std_cmd = {
-                        "command_type": "EDIT_CONCEPT",
-                        "id": target_id,
-                        "description": target_desc,
-                        "title": target_title,
-                        "passage_ids": target_passages,
+                cmd_id = f"cmd_{cmd_counter}"
+                cmd_counter += 1
+                all_commands_flat.append(
+                    {
+                        "command_id": cmd_id,
+                        "department_id": dept.department_id,
+                        "department_name": dept.department_name,
+                        "dept": dept,
+                        "command": cmd,
                     }
-                    cand_id = None
-                    if isinstance(c_id, str) and c_id in concept_id_to_node:
-                        cand_id = c_id
-                    elif consolidated_concepts:
-                        cand_id = consolidated_concepts[0].get("id")
+                )
 
-                    if cand_id:
-                        concept_edit_proposals[cand_id].append(
-                            {"dept": dept, "cmd": std_cmd}
-                        )
-
-                elif cmd_type == "DELETE_CONCEPT":
-                    del_id = concept_data.get("id")
-                    if del_id:
-                        node_delete_commands.append(del_id)
-
-                elif cmd_type in ("CONSTRUCT_EDGE", "EDIT_EDGE"):
-                    edge_commands.append(
-                        {
-                            "dept": dept,
-                            "cmd": {
-                                "source_id": src_id,
-                                "target_id": tgt_id,
-                                "description": edge_data.get("description", ""),
-                            },
-                        }
-                    )
-
-                elif cmd_type == "DELETE_EDGE":
-                    del_e_id = edge_data.get("id")
-                    if del_e_id:
-                        edge_delete_commands.append(del_e_id)
-
-        return (
-            create_commands,
-            concept_edit_proposals,
-            node_delete_commands,
-            edge_commands,
-            edge_delete_commands,
-        )
+        return all_commands_flat
 
     def _collect_persona_objections(
         self,
+        all_commands_flat: List[Dict[str, Any]],
         persona_command_results: List[Dict[str, Any]],
         doc_title: str,
         concept_id_to_node: Dict[str, GraphNode],
@@ -831,10 +771,12 @@ class ExecutiveOrchestrator:
 
         for res in persona_command_results:
             dept: DepartmentPersonaAgent = res["dept"]
+            explored_subgraph_nodes = res.get("subgraph_nodes", [])
             objs = dept.evaluate_command_objections(
-                all_persona_commands=persona_command_results,
+                all_persona_commands=all_commands_flat,
                 doc_title=doc_title,
                 candidate_nodes=candidate_nodes_list,
+                explored_nodes=explored_subgraph_nodes,
             )
             if objs:
                 for o in objs:
@@ -999,174 +941,324 @@ class ExecutiveOrchestrator:
     ) -> Generator[Dict[str, Any], None, None]:
         """Apply all global graph persona reconciliation and merging edits to the DB using explicit node IDs without upfront mutations."""
 
-        # 1. Zero-Mutation Collection Phase
-        (
-            create_commands,
-            concept_edit_proposals,
-            node_delete_commands,
-            edge_commands,
-            edge_delete_commands,
-        ) = self._collect_persona_commands(
-            persona_command_results, consolidated_concepts, concept_id_to_node
-        )
+    def _execute_single_command(
+        self,
+        item: Dict[str, Any],
+        doc_id: str,
+        doc_title: str,
+        project_id: str,
+        proj_list: List[str],
+        passage_ids: List[str],
+        concept_id_to_node: Dict[str, GraphNode],
+    ) -> Optional[Dict[str, Any]]:
+        """Executes a single non-conflicting command against the DB."""
+        dept: DepartmentPersonaAgent = item["dept"]
+        cmd: Dict[str, Any] = item["command"]
+        cmd_type = cmd.get("command_type")
+        concept_data = cmd.get("concept", {})
+        edge_data = cmd.get("edge", {})
+
+        if cmd_type == "CREATE_CONCEPT":
+            c_title = concept_data.get("title", "New Domain Concept")
+            c_desc = concept_data.get("description", "")
+            c_passages = concept_data.get("passage_ids", passage_ids)
+            new_id = f"concept_{uuid.uuid4().hex[:6]}"
+            new_node = GraphNode(
+                _id=new_id,
+                node_type="concept",
+                title=c_title,
+                description=f"# {c_title}\n{c_desc}",
+                passage_ids=c_passages,
+                project_ids=proj_list,
+                metadata={"status": "PRIMARY_ACTIVE"},
+            )
+            self.db.upsert_node(new_node)
+            return {
+                "event": "concept_created",
+                "persona_id": dept.department_id,
+                "persona_name": dept.department_name,
+                "node_id": new_id,
+                "node_title": c_title,
+                "message": f"New domain concept '{c_title}' created by {dept.department_name}.",
+                "timestamp": time.time(),
+            }
+
+        elif cmd_type == "EDIT_CONCEPT":
+            target_id = concept_data.get("id")
+            existing_node = self.db.get_node(target_id) if target_id else None
+            if existing_node:
+                if concept_data.get("description"):
+                    existing_node.description += f"\n\n## Addition from '{doc_title}':\n{concept_data['description']}"
+                for pid in concept_data.get("passage_ids", []):
+                    if pid not in existing_node.passage_ids:
+                        existing_node.passage_ids.append(pid)
+                self.db.upsert_node(existing_node)
+                return {
+                    "event": "concept_updated",
+                    "persona_id": dept.department_id,
+                    "persona_name": dept.department_name,
+                    "node_id": existing_node.id,
+                    "node_title": existing_node.title,
+                    "message": f"Concept '{existing_node.title}' updated directly by {dept.department_name}.",
+                    "timestamp": time.time(),
+                }
+
+        elif cmd_type == "DELETE_CONCEPT":
+            del_id = concept_data.get("id")
+            if del_id:
+                self.db.delete_node(del_id)
+
+        elif cmd_type in ("CONSTRUCT_EDGE", "EDIT_EDGE"):
+            src_ref = edge_data.get("source_id")
+            tgt_ref = edge_data.get("target_id")
+            src_id = (
+                concept_id_to_node[src_ref].id
+                if isinstance(src_ref, str) and src_ref in concept_id_to_node
+                else (
+                    src_ref
+                    if isinstance(src_ref, str) and self.db.get_node(src_ref)
+                    else None
+                )
+            )
+            tgt_id = (
+                concept_id_to_node[tgt_ref].id
+                if isinstance(tgt_ref, str) and tgt_ref in concept_id_to_node
+                else (
+                    tgt_ref
+                    if isinstance(tgt_ref, str) and self.db.get_node(tgt_ref)
+                    else None
+                )
+            )
+            if src_id and tgt_id and src_id != tgt_id:
+                edge_id = f"edge_{uuid.uuid4().hex[:8]}"
+                new_edge = GraphEdge(
+                    _id=edge_id,
+                    source_id=src_id,
+                    target_id=tgt_id,
+                    is_directional=True,
+                    description=edge_data.get(
+                        "description", f"Link from {src_id} to {tgt_id}"
+                    ),
+                    weight=1.0,
+                    project_ids=proj_list,
+                    status="PRIMARY_ACTIVE",
+                )
+                self.db.upsert_edge(new_edge)
+
+        elif cmd_type == "DELETE_EDGE":
+            del_e_id = edge_data.get("id")
+            if del_e_id:
+                self.db.delete_edge(del_e_id)
+
+        return None
+
+    def _apply_ingestion_graph_updates(
+        self,
+        doc_id: str,
+        doc_title: str,
+        consolidated_concepts: List[Dict[str, Any]],
+        persona_command_results: List[Dict[str, Any]],
+        project_id: str,
+        proj_list: List[str],
+        passage_ids: List[str],
+        concept_id_to_node: Dict[str, GraphNode],
+    ) -> Generator[Dict[str, Any], None, None]:
+        """Apply all global graph persona reconciliation and merging edits to the DB using explicit node IDs without upfront mutations."""
+
+        # 1. Zero-Mutation Collection Phase: Parse & index all raw commands across personas
+        all_commands_flat = self._collect_persona_commands(persona_command_results)
 
         # 2. LLM Step: Persona Command Objection Review Pass
         all_objections = self._collect_persona_objections(
-            persona_command_results, doc_title, concept_id_to_node
+            all_commands_flat, persona_command_results, doc_title, concept_id_to_node
         )
 
-        # 3. Process EDIT_CONCEPT proposals per candidate concept via 2-path logic
-        for candidate_concept in consolidated_concepts:
-            c_id = candidate_concept.get("id")
-            proposals = concept_edit_proposals.get(c_id, [])
-            if not proposals:
-                continue
+        # Identify objected command IDs vs non-conflicting (unobjected) commands
+        objected_cmd_ids = set(
+            o.get("command_id") for o in all_objections if o.get("command_id")
+        )
 
-            unique_targets = set(
-                p["cmd"].get("id") for p in proposals if p["cmd"].get("id")
+        # Check for multi-persona target collisions (e.g. EDIT_CONCEPT targeting different node IDs across personas)
+        edit_targets_by_candidate: dict[str, set[str]] = defaultdict(set)
+        for item in all_commands_flat:
+            cmd = item["command"]
+            if cmd.get("command_type") == "EDIT_CONCEPT":
+                c_data = cmd.get("concept", {})
+                c_id = c_data.get("id")
+                cand_id = (
+                    c_id
+                    if isinstance(c_id, str) and c_id in concept_id_to_node
+                    else (
+                        consolidated_concepts[0].get("id")
+                        if consolidated_concepts
+                        else "candidate_0"
+                    )
+                )
+                target_id = c_data.get("id")
+                if target_id:
+                    edit_targets_by_candidate[cand_id].add(target_id)
+
+        colliding_candidate_ids = set(
+            cand_id
+            for cand_id, targets in edit_targets_by_candidate.items()
+            if len(targets) > 1
+        )
+        for item in all_commands_flat:
+            cmd = item["command"]
+            if cmd.get("command_type") == "EDIT_CONCEPT":
+                c_data = cmd.get("concept", {})
+                c_id = c_data.get("id")
+                cand_id = (
+                    c_id
+                    if isinstance(c_id, str) and c_id in concept_id_to_node
+                    else (
+                        consolidated_concepts[0].get("id")
+                        if consolidated_concepts
+                        else "candidate_0"
+                    )
+                )
+                if cand_id in colliding_candidate_ids:
+                    objected_cmd_ids.add(item["command_id"])
+
+        non_conflicting_commands = [
+            item
+            for item in all_commands_flat
+            if item["command_id"] not in objected_cmd_ids
+        ]
+        conflicting_commands = [
+            item for item in all_commands_flat if item["command_id"] in objected_cmd_ids
+        ]
+
+        # 3. Execute Non-Conflicting (Unobjected) Commands Immediately
+        for item in non_conflicting_commands:
+            evt = self._execute_single_command(
+                item=item,
+                doc_id=doc_id,
+                doc_title=doc_title,
+                project_id=project_id,
+                proj_list=proj_list,
+                passage_ids=passage_ids,
+                concept_id_to_node=concept_id_to_node,
             )
-            has_objections = len(all_objections) > 0
+            if evt:
+                yield evt
 
-            if len(unique_targets) <= 1 and not has_objections:
-                # === PATH 1: NO CONFLICT ===
-                evt = self._apply_direct_concept_update(
-                    chosen=proposals[0],
-                    c_id=c_id,
-                    doc_title=doc_title,
-                    project_id=project_id,
-                    concept_id_to_node=concept_id_to_node,
-                )
-                if evt:
-                    yield evt
+        # 4. Process Conflicting Commands via Multi-Persona Debate Engine
+        if conflicting_commands:
+            conflicting_personas = list(
+                set(item["department_name"] for item in conflicting_commands)
+            )
+            debate_evt = {
+                "event": "persona_debate_start",
+                "candidate_title": doc_title,
+                "conflicting_personas": conflicting_personas,
+                "message": f"Conflicting persona proposals detected for document '{doc_title}'. Initiating Multi-Persona Debate...",
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, debate_evt)
+            yield debate_evt
 
-            else:
-                # === PATH 2: CONFLICT DETECTED -> MULTI-PERSONA DEBATE TURN ===
-                debate_evt = {
-                    "event": "persona_debate_start",
-                    "candidate_title": candidate_concept.get("title"),
-                    "conflicting_personas": [
-                        p["dept"].department_name for p in proposals
-                    ],
-                    "message": f"Conflicting merge proposals detected for concept '{candidate_concept.get('title')}'. Initiating Multi-Persona Debate...",
-                    "timestamp": time.time(),
-                }
-                self.event_queue.push(project_id, debate_evt)
-                yield debate_evt
+            proposals_payload = [
+                {"dept": item["dept"], "cmd": item["command"]}
+                for item in conflicting_commands
+            ]
+            candidate_concept = (
+                consolidated_concepts[0]
+                if consolidated_concepts
+                else {"title": doc_title, "description": ""}
+            )
 
-                debate_res = self._run_multi_persona_debate(
-                    candidate_concept=candidate_concept,
-                    doc_title=doc_title,
-                    proposals=proposals,
-                    persona_objections=all_objections,
-                )
+            debate_res = self._run_multi_persona_debate(
+                candidate_concept=candidate_concept,
+                doc_title=doc_title,
+                proposals=proposals_payload,
+                persona_objections=all_objections,
+            )
 
-                resolution_type = debate_res.get("resolution_type", "MERGE_SINGLE")
-                temp_intra_node = concept_id_to_node.get(c_id) or self.db.get_node(c_id)
+            resolution_type = debate_res.get("resolution_type", "MERGE_SINGLE")
 
-                if resolution_type == "SUBDIVIDE":
-                    sub_concepts = debate_res.get("sub_concepts", [])
-                    for sub in sub_concepts:
-                        sub_title = sub.get(
-                            "sub_title", f"{candidate_concept['title']} (Sub)"
+            if resolution_type == "SUBDIVIDE":
+                sub_concepts = debate_res.get("sub_concepts", [])
+                for sub in sub_concepts:
+                    sub_title = sub.get("sub_title", f"{doc_title} (Sub)")
+                    sub_target_id = sub.get("target_node_id")
+
+                    if sub_target_id and self.db.get_node(sub_target_id):
+                        t_node = self.db.get_node(sub_target_id)
+                        t_node.description += f"\n\n## Sub-concept from '{doc_title}':\n# {sub_title}\n{sub.get('description', '')}"
+                        for pid in sub.get("passage_ids", passage_ids):
+                            if pid not in t_node.passage_ids:
+                                t_node.passage_ids.append(pid)
+                        self.db.upsert_node(t_node)
+                    else:
+                        sub_id = f"concept_{uuid.uuid4().hex[:6]}"
+                        sub_node = GraphNode(
+                            _id=sub_id,
+                            node_type="concept",
+                            title=sub_title,
+                            description=f"# {sub_title}\n{sub.get('description', '')}",
+                            passage_ids=sub.get("passage_ids", passage_ids),
+                            project_ids=proj_list,
+                            metadata={"status": "PRIMARY_ACTIVE"},
                         )
-                        sub_target_id = sub.get("target_node_id")
-
-                        if sub_target_id and self.db.get_node(sub_target_id):
-                            t_node = self.db.get_node(sub_target_id)
-                            t_node.description += f"\n\n## Sub-concept from '{doc_title}':\n# {sub_title}\n{sub.get('description', '')}"
-                            for pid in sub.get("passage_ids", passage_ids):
-                                if pid not in t_node.passage_ids:
-                                    t_node.passage_ids.append(pid)
-                            self.db.upsert_node(t_node)
-                        else:
-                            sub_id = f"concept_{uuid.uuid4().hex[:6]}"
-                            sub_node = GraphNode(
-                                _id=sub_id,
-                                node_type="concept",
-                                title=sub_title,
-                                description=f"# {sub_title}\n{sub.get('description', '')}",
-                                passage_ids=sub.get("passage_ids", passage_ids),
-                                project_ids=proj_list,
-                                metadata={"status": "PRIMARY_ACTIVE"},
-                            )
-                            self.db.upsert_node(sub_node)
-                            sub_edge = GraphEdge(
-                                _id=f"edge_{uuid.uuid4().hex[:8]}",
-                                source_id=doc_id,
-                                target_id=sub_id,
-                                is_directional=True,
-                                description=f"Document '{doc_title}' presents sub-concept '{sub_title}'.",
-                                weight=1.0,
-                                project_ids=proj_list,
-                                status="PRIMARY_ACTIVE",
-                            )
-                            self.db.upsert_edge(sub_edge)
-
-                    if temp_intra_node:
-                        self.db.delete_node(temp_intra_node.id)
-
-                elif resolution_type == "MERGE_SINGLE":
-                    target_id = (
-                        debate_res.get("merged_target_node_id")
-                        or list(unique_targets)[0]
-                    )
-                    target_node = self.db.get_node(target_id)
-                    if target_node:
-                        target_node.description += f"\n\n## Consensus Debate Insight from '{doc_title}':\n{candidate_concept.get('description', '')}"
-                        for pid in candidate_concept.get("passage_ids", passage_ids):
-                            if pid not in target_node.passage_ids:
-                                target_node.passage_ids.append(pid)
-                        self.db.upsert_node(target_node)
-
-                        if temp_intra_node and temp_intra_node.id != target_node.id:
-                            self.db.delete_node(temp_intra_node.id)
-
-                for add_edge in debate_res.get("additional_edges", []):
-                    s_id = (
-                        add_edge.get("source_id")
-                        or add_edge.get("source_ref")
-                        or add_edge.get("source_idx")
-                    )
-                    t_id = (
-                        add_edge.get("target_id")
-                        or add_edge.get("target_ref")
-                        or add_edge.get("target_idx")
-                    )
-                    if s_id and t_id and s_id != t_id:
-                        bridge_edge = GraphEdge(
+                        self.db.upsert_node(sub_node)
+                        sub_edge = GraphEdge(
                             _id=f"edge_{uuid.uuid4().hex[:8]}",
-                            source_id=s_id,
-                            target_id=t_id,
+                            source_id=doc_id,
+                            target_id=sub_id,
                             is_directional=True,
-                            description=add_edge.get(
-                                "description", "Cross-domain debate bridge edge."
-                            ),
+                            description=f"Document '{doc_title}' presents sub-concept '{sub_title}'.",
                             weight=1.0,
                             project_ids=proj_list,
                             status="PRIMARY_ACTIVE",
                         )
-                        self.db.upsert_edge(bridge_edge)
+                        self.db.upsert_edge(sub_edge)
 
-                res_evt = {
-                    "event": "persona_debate_complete",
-                    "candidate_title": candidate_concept.get("title"),
-                    "resolution_type": resolution_type,
-                    "message": f"Multi-Persona Debate for '{candidate_concept.get('title')}' completed with resolution: {resolution_type}.",
-                    "timestamp": time.time(),
-                }
-                self.event_queue.push(project_id, res_evt)
-                yield res_evt
+            elif resolution_type == "MERGE_SINGLE":
+                target_id = debate_res.get("merged_target_node_id")
+                if target_id and self.db.get_node(target_id):
+                    target_node = self.db.get_node(target_id)
+                    target_node.description += f"\n\n## Consensus Debate Insight from '{doc_title}':\n{candidate_concept.get('description', '')}"
+                    for pid in candidate_concept.get("passage_ids", passage_ids):
+                        if pid not in target_node.passage_ids:
+                            target_node.passage_ids.append(pid)
+                    self.db.upsert_node(target_node)
 
-        # 4. Process CREATE_CONCEPT, DELETE, and EDGE commands
-        self._apply_create_delete_edge_commands(
-            create_commands,
-            node_delete_commands,
-            edge_delete_commands,
-            edge_commands,
-            proj_list,
-            passage_ids,
-            concept_id_to_node,
-        )
+            for add_edge in debate_res.get("additional_edges", []):
+                s_id = (
+                    add_edge.get("source_id")
+                    or add_edge.get("source_ref")
+                    or add_edge.get("source_idx")
+                )
+                t_id = (
+                    add_edge.get("target_id")
+                    or add_edge.get("target_ref")
+                    or add_edge.get("target_idx")
+                )
+                if s_id and t_id and s_id != t_id:
+                    bridge_edge = GraphEdge(
+                        _id=f"edge_{uuid.uuid4().hex[:8]}",
+                        source_id=s_id,
+                        target_id=t_id,
+                        is_directional=True,
+                        description=add_edge.get(
+                            "description", "Cross-domain debate bridge edge."
+                        ),
+                        weight=1.0,
+                        project_ids=proj_list,
+                        status="PRIMARY_ACTIVE",
+                    )
+                    self.db.upsert_edge(bridge_edge)
+
+            res_evt = {
+                "event": "persona_debate_complete",
+                "candidate_title": candidate_concept.get("title"),
+                "resolution_type": resolution_type,
+                "message": f"Multi-Persona Debate for '{candidate_concept.get('title')}' completed with resolution: {resolution_type}.",
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, res_evt)
+            yield res_evt
 
         summary_evt = {
             "event": "ingestion_completed",
