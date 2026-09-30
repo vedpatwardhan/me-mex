@@ -928,40 +928,20 @@ class ExecutiveOrchestrator:
                 )
                 self.db.upsert_edge(new_edge)
 
-    def _apply_ingestion_graph_updates(
-        self,
-        doc_id: str,
-        doc_title: str,
-        consolidated_concepts: List[Dict[str, Any]],
-        persona_command_results: List[Dict[str, Any]],
-        project_id: str,
-        proj_list: List[str],
-        passage_ids: List[str],
-        concept_id_to_node: Dict[str, GraphNode],
-    ) -> Generator[Dict[str, Any], None, None]:
-        """Apply all global graph persona reconciliation and merging edits to the DB using explicit node IDs without upfront mutations."""
-
     def _execute_single_command(
-        self,
-        item: Dict[str, Any],
-        doc_id: str,
-        doc_title: str,
-        project_id: str,
-        proj_list: List[str],
-        passage_ids: List[str],
-        concept_id_to_node: Dict[str, GraphNode],
+        self, item: Dict[str, Any], doc_title: str, proj_list: List[str]
     ) -> Optional[Dict[str, Any]]:
         """Executes a single non-conflicting command against the DB."""
         dept: DepartmentPersonaAgent = item["dept"]
         cmd: Dict[str, Any] = item["command"]
-        cmd_type = cmd.get("command_type")
-        concept_data = cmd.get("concept", {})
-        edge_data = cmd.get("edge", {})
+        cmd_type = cmd["command_type"]
+        concept_data = cmd["concept"]
+        edge_data = cmd["edge"]
 
         if cmd_type == "CREATE_CONCEPT":
-            c_title = concept_data.get("title", "New Domain Concept")
-            c_desc = concept_data.get("description", "")
-            c_passages = concept_data.get("passage_ids", passage_ids)
+            c_title = concept_data["title"]
+            c_desc = concept_data["description"]
+            c_passages = concept_data["passage_ids"]
             new_id = f"concept_{uuid.uuid4().hex[:6]}"
             new_node = GraphNode(
                 _id=new_id,
@@ -984,51 +964,33 @@ class ExecutiveOrchestrator:
             }
 
         elif cmd_type == "EDIT_CONCEPT":
-            target_id = concept_data.get("id")
-            existing_node = self.db.get_node(target_id) if target_id else None
-            if existing_node:
-                if concept_data.get("description"):
-                    existing_node.description += f"\n\n## Addition from '{doc_title}':\n{concept_data['description']}"
-                for pid in concept_data.get("passage_ids", []):
-                    if pid not in existing_node.passage_ids:
-                        existing_node.passage_ids.append(pid)
-                self.db.upsert_node(existing_node)
-                return {
-                    "event": "concept_updated",
-                    "persona_id": dept.department_id,
-                    "persona_name": dept.department_name,
-                    "node_id": existing_node.id,
-                    "node_title": existing_node.title,
-                    "message": f"Concept '{existing_node.title}' updated directly by {dept.department_name}.",
-                    "timestamp": time.time(),
-                }
+            target_id = concept_data["id"]
+            existing_node = self.db.get_node(target_id)
+            existing_node.title = concept_data["title"]
+            existing_node.description += (
+                f"\n\n## Addition from '{doc_title}':\n{concept_data['description']}"
+            )
+            for pid in concept_data["passage_ids"]:
+                if pid not in existing_node.passage_ids:
+                    existing_node.passage_ids.append(pid)
+            self.db.upsert_node(existing_node)
+            return {
+                "event": "concept_updated",
+                "persona_id": dept.department_id,
+                "persona_name": dept.department_name,
+                "node_id": existing_node.id,
+                "node_title": existing_node.title,
+                "message": f"Concept '{existing_node.title}' updated directly by {dept.department_name}.",
+                "timestamp": time.time(),
+            }
 
         elif cmd_type == "DELETE_CONCEPT":
-            del_id = concept_data.get("id")
-            if del_id:
-                self.db.delete_node(del_id)
+            del_id = concept_data["id"]
+            self.db.delete_node(del_id)
 
         elif cmd_type in ("CONSTRUCT_EDGE", "EDIT_EDGE"):
-            src_ref = edge_data.get("source_id")
-            tgt_ref = edge_data.get("target_id")
-            src_id = (
-                concept_id_to_node[src_ref].id
-                if isinstance(src_ref, str) and src_ref in concept_id_to_node
-                else (
-                    src_ref
-                    if isinstance(src_ref, str) and self.db.get_node(src_ref)
-                    else None
-                )
-            )
-            tgt_id = (
-                concept_id_to_node[tgt_ref].id
-                if isinstance(tgt_ref, str) and tgt_ref in concept_id_to_node
-                else (
-                    tgt_ref
-                    if isinstance(tgt_ref, str) and self.db.get_node(tgt_ref)
-                    else None
-                )
-            )
+            src_id = edge_data["source_id"]
+            tgt_id = edge_data["target_id"]
             if src_id and tgt_id and src_id != tgt_id:
                 edge_id = f"edge_{uuid.uuid4().hex[:8]}"
                 new_edge = GraphEdge(
@@ -1090,13 +1052,7 @@ class ExecutiveOrchestrator:
         # 3. Execute Non-Conflicting (Unobjected) Commands Immediately
         for item in non_conflicting_commands:
             evt = self._execute_single_command(
-                item=item,
-                doc_id=doc_id,
-                doc_title=doc_title,
-                project_id=project_id,
-                proj_list=proj_list,
-                passage_ids=passage_ids,
-                concept_id_to_node=concept_id_to_node,
+                item=item, doc_title=doc_title, proj_list=proj_list
             )
             if evt:
                 yield evt
