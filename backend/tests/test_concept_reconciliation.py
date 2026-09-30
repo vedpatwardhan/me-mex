@@ -46,10 +46,12 @@ def test_reconciliation_no_conflict():
             "commands": [
                 {
                     "command_type": "EDIT_CONCEPT",
-                    "candidate_idx": 0,
-                    "existing_node_id": existing_id,
-                    "additional_text": "Non-conflicting insight.",
-                    "passage_ids": ["pass_02"],
+                    "concept": {
+                        "id": existing_id,
+                        "title": "Test Concept Node",
+                        "description": "Non-conflicting insight.",
+                        "passage_ids": ["pass_02"],
+                    },
                 }
             ],
         }
@@ -117,9 +119,11 @@ def test_reconciliation_conflict_debate():
             "commands": [
                 {
                     "command_type": "EDIT_CONCEPT",
-                    "candidate_idx": 0,
-                    "existing_node_id": target_a,
-                    "additional_text": "Merge to A",
+                    "concept": {
+                        "id": target_a,
+                        "title": "Domain A Node",
+                        "description": "Merge to A",
+                    },
                 }
             ],
         },
@@ -128,9 +132,11 @@ def test_reconciliation_conflict_debate():
             "commands": [
                 {
                     "command_type": "EDIT_CONCEPT",
-                    "candidate_idx": 0,
-                    "existing_node_id": target_b,
-                    "additional_text": "Merge to B",
+                    "concept": {
+                        "id": target_b,
+                        "title": "Domain B Node",
+                        "description": "Merge to B",
+                    },
                 }
             ],
         },
@@ -194,3 +200,73 @@ def test_reconciliation_conflict_debate():
     updated_b = db_engine.get_node(target_b)
     assert "Sub-concept from 'Test Doc 2'" in updated_a.description
     assert "Sub-concept from 'Test Doc 2'" in updated_b.description
+
+
+def test_create_and_delete_commands():
+    """Verify CREATE_CONCEPT, DELETE_CONCEPT, and DELETE_EDGE commands."""
+    node_to_delete = GraphNode(
+        _id="concept_obsolete_del",
+        node_type="concept",
+        title="Obsolete Concept",
+        description="To be deleted",
+    )
+    edge_to_delete = GraphEdge(
+        _id="edge_obsolete_del",
+        source_id="concept_obsolete_del",
+        target_id="hub_test_1",
+        description="Obsolete link",
+    )
+    db_engine.upsert_node(node_to_delete)
+    db_engine.upsert_edge(edge_to_delete)
+
+    hub_node = db_engine.get_node("hub_test_1") or GraphNode(
+        _id="hub_test_1", node_type="concept", title="Hub Test", description=""
+    )
+    persona = DepartmentPersonaAgent(hub_node)
+
+    persona_command_results = [
+        {
+            "dept": persona,
+            "commands": [
+                {
+                    "command_type": "CREATE_CONCEPT",
+                    "concept": {
+                        "title": "Brand New Persona Concept",
+                        "description": "Created directly by specialist persona.",
+                        "passage_ids": ["pass_99"],
+                    },
+                },
+                {
+                    "command_type": "DELETE_CONCEPT",
+                    "concept": {
+                        "id": "concept_obsolete_del",
+                        "title": "Obsolete Concept",
+                    },
+                },
+                {
+                    "command_type": "DELETE_EDGE",
+                    "edge": {
+                        "id": "edge_obsolete_del",
+                    },
+                },
+            ],
+        }
+    ]
+
+    list(
+        orchestrator._apply_ingestion_graph_updates(
+            doc_id="doc_test_cmd",
+            doc_title="Test Doc Cmd",
+            doc_description="Doc Desc",
+            doc_type="paper",
+            consolidated_concepts=[],
+            consolidated_relations=[],
+            persona_command_results=persona_command_results,
+            project_id="global",
+            proj_list=["global"],
+            passage_ids=["pass_99"],
+        )
+    )
+
+    assert db_engine.get_node("concept_obsolete_del") is None
+    assert not any(e.id == "edge_obsolete_del" for e in db_engine.get_edges())

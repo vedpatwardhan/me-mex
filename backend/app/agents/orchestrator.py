@@ -638,10 +638,10 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, root_evt)
         yield root_evt
 
-        # 1. Intra-document graph concept addition
         concept_idx_to_node: Dict[int, GraphNode] = dict()
         for idx, c_data in enumerate(consolidated_concepts):
-            c_data["id"] = c_id = f"concept_{uuid.uuid4().hex[:6]}"
+            c_id = f"concept_{uuid.uuid4().hex[:6]}"
+            c_data["id"] = c_id
             c_data["idx"] = idx
             c_title = c_data["title"]
             passage_ptrs = c_data.get("passage_ids", [])
@@ -705,9 +705,11 @@ class ExecutiveOrchestrator:
             )
             self.db.upsert_edge(direct_edge)
 
-        # 2. Group commands by candidate_id to classify No Conflict vs. Conflict
-        edit_proposals_by_id = defaultdict(list)
-        construct_edge_commands = []
+        # 2. Parse and group persona commands by type and target node ID
+        concept_edit_proposals = defaultdict(list)
+        edge_commands = []
+        node_delete_commands = []
+        edge_delete_commands = []
 
         for res in persona_command_results:
             dept: DepartmentPersonaAgent = res["dept"]
@@ -715,19 +717,123 @@ class ExecutiveOrchestrator:
 
             for cmd in commands:
                 cmd_type = cmd.get("command_type")
-                if cmd_type == "EDIT_CONCEPT":
-                    c_id = cmd.get("candidate_id") or cmd.get("candidate_idx")
-                    if isinstance(c_id, int) and c_id < len(consolidated_concepts):
-                        c_id = consolidated_concepts[c_id].get("id")
+                concept_data = cmd.get("concept", {})
+                edge_data = cmd.get("edge", {})
+
+                # Extract candidate or node reference
+                c_ref = (
+                    concept_data.get("id")
+                    or cmd.get("candidate_id")
+                    or cmd.get("candidate_idx")
+                )
+                e_src_ref = (
+                    edge_data.get("source_idx")
+                    or cmd.get("source_ref")
+                    or cmd.get("source_id")
+                )
+                e_tgt_ref = (
+                    edge_data.get("target_idx")
+                    or cmd.get("target_ref")
+                    or cmd.get("target_id")
+                )
+
+                if cmd_type == "CREATE_CONCEPT":
+                    # Emit new standalone domain concept
+                    c_title = concept_data.get("title", "New Domain Concept")
+                    c_desc = concept_data.get("description", "")
+                    c_passages = concept_data.get("passage_ids", passage_ids)
+                    new_id = f"concept_{uuid.uuid4().hex[:6]}"
+                    new_node = GraphNode(
+                        _id=new_id,
+                        node_type="concept",
+                        title=c_title,
+                        description=f"# {c_title}\n{c_desc}",
+                        passage_ids=c_passages,
+                        project_ids=proj_list,
+                        metadata={"status": "PRIMARY_ACTIVE"},
+                    )
+                    self.db.upsert_node(new_node)
+                elif cmd_type == "EDIT_CONCEPT":
+                    target_id = concept_data.get("id") or cmd.get("existing_node_id")
+                    target_desc = concept_data.get("description") or cmd.get(
+                        "additional_text", ""
+                    )
+                    target_passages = concept_data.get("passage_ids", [])
+
+                    # Standardize payload format for debate / reconciliation
+                    std_cmd = {
+                        "command_type": "EDIT_CONCEPT",
+                        "existing_node_id": target_id,
+                        "additional_text": target_desc,
+                        "passage_ids": target_passages,
+                    }
+
+                    # Determine candidate ID: check candidate_idx, candidate_id, or default to candidate 0
+                    cand_ref = (
+                        cmd.get("candidate_idx")
+                        or cmd.get("candidate_id")
+                        or concept_data.get("candidate_idx")
+                    )
+                    c_id = None
+
+                    if cand_ref is not None:
+                        if isinstance(cand_ref, int) and cand_ref < len(
+                            consolidated_concepts
+                        ):
+                            c_id = consolidated_concepts[cand_ref].get("id")
+                        elif isinstance(cand_ref, str):
+                            try:
+                                c_idx = int(cand_ref)
+                                if c_idx < len(consolidated_concepts):
+                                    c_id = consolidated_concepts[c_idx].get("id")
+                                else:
+                                    c_id = cand_ref
+                            except ValueError:
+                                c_id = cand_ref
+
+                    if not c_id and consolidated_concepts:
+                        c_id = consolidated_concepts[0].get("id")
+
                     if c_id:
-                        edit_proposals_by_id[c_id].append({"dept": dept, "cmd": cmd})
-                elif cmd_type == "CONSTRUCT_EDGE":
-                    construct_edge_commands.append({"dept": dept, "cmd": cmd})
+                        concept_edit_proposals[c_id].append(
+                            {"dept": dept, "cmd": std_cmd}
+                        )
+
+                elif cmd_type == "DELETE_CONCEPT":
+                    del_id = concept_data.get("id") or cmd.get("node_id")
+                    if del_id:
+                        node_delete_commands.append(del_id)
+
+                elif cmd_type in ("CONSTRUCT_EDGE", "EDIT_EDGE"):
+                    edge_commands.append(
+                        {
+                            "dept": dept,
+                            "cmd": {
+                                "source_idx": e_src_ref,
+                                "target_idx": e_tgt_ref,
+                                "description": edge_data.get("description")
+                                or cmd.get("description", ""),
+                            },
+                        }
+                    )
+
+                elif cmd_type == "DELETE_EDGE":
+                    del_e_id = edge_data.get("id") or cmd.get("edge_id")
+                    if del_e_id:
+                        edge_delete_commands.append(del_e_id)
+
+        # Execute DELETE_CONCEPT commands
+        for del_id in node_delete_commands:
+            self.db.delete_node(del_id)
+
+        # Execute DELETE_EDGE commands
+        for del_e_id in edge_delete_commands:
+            self.db.delete_edge(del_e_id)
 
         # 3. Process EDIT_CONCEPT proposals per candidate concept via 2-path logic
         for idx, candidate_concept in enumerate(consolidated_concepts):
             c_id = candidate_concept.get("id")
-            proposals = edit_proposals_by_id.get(c_id, [])
+            proposals = concept_edit_proposals.get(c_id, [])
             if not proposals:
                 continue
 
@@ -889,8 +995,8 @@ class ExecutiveOrchestrator:
 
                 # Process any additional bridge edges decided by the debate
                 for add_edge in debate_res.get("additional_edges", []):
-                    s_id = add_edge.get("source_ref")
-                    t_id = add_edge.get("target_ref")
+                    s_id = add_edge.get("source_idx") or add_edge.get("source_ref")
+                    t_id = add_edge.get("target_idx") or add_edge.get("target_ref")
                     if s_id and t_id and s_id != t_id:
                         bridge_edge = GraphEdge(
                             _id=f"edge_{uuid.uuid4().hex[:8]}",
@@ -916,30 +1022,38 @@ class ExecutiveOrchestrator:
                 self.event_queue.push(project_id, res_evt)
                 yield res_evt
 
-        # 4. Process collected CONSTRUCT_EDGE commands
-        for item in construct_edge_commands:
+        # 4. Process collected CONSTRUCT_EDGE / EDIT_EDGE commands
+        for item in edge_commands:
             cmd = item["cmd"]
-            src_ref = (
-                cmd.get("source_ref")
-                or cmd.get("source_id")
-                or cmd.get("candidate_idx")
-            )
+            src_ref = cmd.get("source_idx")
             src_id = None
             if isinstance(src_ref, int) and src_ref in concept_idx_to_node:
                 src_id = concept_idx_to_node[src_ref].id
-            elif isinstance(src_ref, str) and self.db.get_node(src_ref):
-                src_id = src_ref
+            elif isinstance(src_ref, str):
+                try:
+                    s_idx = int(src_ref)
+                    if s_idx in concept_idx_to_node:
+                        src_id = concept_idx_to_node[s_idx].id
+                    elif self.db.get_node(src_ref):
+                        src_id = src_ref
+                except ValueError:
+                    if self.db.get_node(src_ref):
+                        src_id = src_ref
 
-            tgt_ref = (
-                cmd.get("target_ref")
-                or cmd.get("target_id")
-                or cmd.get("candidate_idx")
-            )
+            tgt_ref = cmd.get("target_idx")
             tgt_id = None
             if isinstance(tgt_ref, int) and tgt_ref in concept_idx_to_node:
                 tgt_id = concept_idx_to_node[tgt_ref].id
-            elif isinstance(tgt_ref, str) and self.db.get_node(tgt_ref):
-                tgt_id = tgt_ref
+            elif isinstance(tgt_ref, str):
+                try:
+                    t_idx = int(tgt_ref)
+                    if t_idx in concept_idx_to_node:
+                        tgt_id = concept_idx_to_node[t_idx].id
+                    elif self.db.get_node(tgt_ref):
+                        tgt_id = tgt_ref
+                except ValueError:
+                    if self.db.get_node(tgt_ref):
+                        tgt_id = tgt_ref
 
             if src_id and tgt_id and src_id != tgt_id:
                 edge_id = f"edge_{uuid.uuid4().hex[:8]}"

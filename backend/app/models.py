@@ -145,3 +145,48 @@ class ProjectEventRecord(BaseModel):
     event_type: str
     data: Dict[str, Any] = Field(default_factory=dict)
     timestamp: float = Field(default_factory=time.time)
+
+
+# 10. Persona Ingestion Command Models
+class ConceptCommandData(BaseModel):
+    id: Optional[str] = Field(
+        default=None,
+        description="ID of existing graph node for EDIT/DELETE or candidate ID for CREATE/EDIT.",
+    )
+    title: str = Field(..., description="Title of the concept.")
+    description: str = Field(
+        default="", description="Description or insight body of the concept."
+    )
+    passage_ids: List[str] = Field(
+        default_factory=list, description="Associated passage IDs."
+    )
+
+
+class EdgeCommandData(BaseModel):
+    id: Optional[str] = Field(
+        default=None, description="ID of existing edge for EDIT_EDGE or DELETE_EDGE."
+    )
+    source_idx: Optional[str] = Field(
+        default=None,
+        description="Candidate idx, candidate ID, or existing node ID for source concept.",
+    )
+    target_idx: Optional[str] = Field(
+        default=None,
+        description="Candidate idx, candidate ID, or existing node ID for target concept.",
+    )
+    description: str = Field(
+        default="", description="Qualitative relationship description."
+    )
+
+
+class PersonaIngestionCommand(BaseModel):
+    command_type: Literal[
+        "CREATE_CONCEPT",
+        "EDIT_CONCEPT",
+        "DELETE_CONCEPT",
+        "CONSTRUCT_EDGE",
+        "EDIT_EDGE",
+        "DELETE_EDGE",
+    ]
+    concept: Optional[ConceptCommandData] = None
+    edge: Optional[EdgeCommandData] = None
