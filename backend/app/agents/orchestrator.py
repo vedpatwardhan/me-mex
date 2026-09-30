@@ -506,15 +506,20 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
+            candidate_nodes = list(concept_id_to_node.values())
             ingest_res = dept.persona_ingestion(
-                consolidated_concepts, title, query, chat_history, project_id=project_id
+                candidate_nodes, title, query, chat_history, project_id=project_id
             )
             # ingest_res: [{
             #     department_id: str,
             #     department_name: str,
             #     hub_node_id: str,
             #     traversed_node_ids: [str],
-            #     commands: List[Dict[str, Any]],
+            #     commands: [{
+            #       command_type: str,
+            #       concept: {id: str, title: str, description: str, passage_ids: [str]},
+            #       edge: {id: str, source_idx: str, target_idx: str, description: str}
+            #     }],
             # }]
             persona_command_results.append(
                 {

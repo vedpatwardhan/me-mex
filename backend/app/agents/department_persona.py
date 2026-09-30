@@ -221,7 +221,7 @@ class DepartmentPersonaAgent:
 
     def persona_ingestion(
         self,
-        consolidated_concepts: List[Dict[str, Any]],
+        candidate_nodes: List[GraphNode],
         doc_title: str,
         query: str,
         chat_history: List[Dict[str, str]],
@@ -235,26 +235,20 @@ class DepartmentPersonaAgent:
             project_id=project_id,
         )
 
-        # subgraph_nodes: [{id: str, node_type: str, title: str, description: str, passage_ids: [str]}]
+        def _format_nodes(nodes: List[GraphNode]) -> List[Dict[str, Any]]:
+            return [
+                {
+                    "id": n.id,
+                    "title": n.title,
+                    "description": n.description,
+                    "passage_ids": n.passage_ids,
+                }
+                for n in nodes
+            ]
+
         subgraph_nodes = exploration.get("subgraph_nodes", [])
-        subgraph_nodes_payload = [
-            {
-                "id": n.id,
-                "title": n.title,
-                "description": n.description,
-                "passage_ids": n.passage_ids,
-            }
-            for n in subgraph_nodes
-        ]
-        candidate_concepts_payload = [
-            {
-                "id": c.get("id"),
-                "title": c.get("title"),
-                "description": c.get("description"),
-                "passage_ids": c.get("passage_ids", []),
-            }
-            for c in consolidated_concepts
-        ]
+        subgraph_nodes_payload = _format_nodes(subgraph_nodes)
+        candidate_concepts_payload = _format_nodes(candidate_nodes)
 
         prompt_payload = (
             f"Document Title: {doc_title}\n"
@@ -263,7 +257,7 @@ class DepartmentPersonaAgent:
             f"Hub Description: {self.hub_node.description}\n\n"
             f"Explored Subgraph Concepts ({len(subgraph_nodes)} nodes):\n"
             f"{json.dumps(subgraph_nodes_payload, indent=2)}\n\n"
-            f"Candidate Intra-Document Concepts ({len(consolidated_concepts)} items):\n"
+            f"Candidate Intra-Document Concepts ({len(candidate_nodes)} items):\n"
             f"{json.dumps(candidate_concepts_payload, indent=2)}"
         )
 
