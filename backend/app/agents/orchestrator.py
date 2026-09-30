@@ -464,7 +464,23 @@ class ExecutiveOrchestrator:
         if project_id and project_id != "global":
             proj_list.append(project_id)
 
-        # Step 5: Discover Top Concept Hubs & Run Active Department Persona Ingestion to collect commands
+        # Step 5: Save Root Media node and Intra-Document concept nodes & edges into DB prior to persona discovery
+        concept_idx_to_node: Dict[int, GraphNode] = {}
+        for evt in self._create_intra_document_subgraph(
+            doc_id=doc_id,
+            doc_title=title,
+            doc_description=doc_description,
+            doc_type=doc_type,
+            consolidated_concepts=consolidated_concepts,
+            consolidated_relations=consolidated_relations,
+            project_id=project_id,
+            proj_list=proj_list,
+            passage_ids=passage_ids,
+            concept_idx_to_node=concept_idx_to_node,
+        ):
+            yield evt
+
+        # Step 6: Discover Top Concept Hubs & Run Active Department Persona Ingestion to collect commands
         # top_hubs: [{
         #   id: str,
         #   node_type: str,
@@ -507,7 +523,7 @@ class ExecutiveOrchestrator:
                 }
             )
 
-        # Step 6: Apply all graph updates to DB in dedicated helper method
+        # Step 7: Apply persona commands & global graph merging edits to DB in helper method
         for evt in self._apply_ingestion_graph_updates(
             doc_id=doc_id,
             doc_title=title,
@@ -519,6 +535,7 @@ class ExecutiveOrchestrator:
             project_id=project_id,
             proj_list=proj_list,
             passage_ids=passage_ids,
+            concept_idx_to_node=concept_idx_to_node,
         ):
             yield evt
 
@@ -599,7 +616,7 @@ class ExecutiveOrchestrator:
                 "additional_edges": [],
             }
 
-    def _apply_ingestion_graph_updates(
+    def _create_intra_document_subgraph(
         self,
         doc_id: str,
         doc_title: str,
@@ -607,13 +624,14 @@ class ExecutiveOrchestrator:
         doc_type: str,
         consolidated_concepts: List[Dict[str, Any]],
         consolidated_relations: List[Dict[str, Any]],
-        persona_command_results: List[Dict[str, Any]],
         project_id: str,
         proj_list: List[str],
         passage_ids: List[str],
+        concept_idx_to_node: Optional[Dict[int, GraphNode]] = None,
     ) -> Generator[Dict[str, Any], None, None]:
-        """Apply all intra-document graph persistence and global graph merging edits to the DB via two-path reconciliation."""
-        created_nodes: List[GraphNode] = []
+        """Save root media node, concept nodes, and intra-document relations prior to persona discovery."""
+        if concept_idx_to_node is None:
+            concept_idx_to_node = {}
 
         # 0. Instantiate and save Root Media GraphNode representing the document
         doc_node = GraphNode(
@@ -638,7 +656,6 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, root_evt)
         yield root_evt
 
-        concept_idx_to_node: Dict[int, GraphNode] = dict()
         for idx, c_data in enumerate(consolidated_concepts):
             c_id = f"concept_{uuid.uuid4().hex[:6]}"
             c_data["id"] = c_id
@@ -655,7 +672,6 @@ class ExecutiveOrchestrator:
                 metadata={"status": "PRIMARY_ACTIVE"},
             )
             self.db.upsert_node(c_node)
-            created_nodes.append(c_node)
             concept_idx_to_node[idx] = c_node
 
             # Connect Root Media GraphNode -> Concept Node
@@ -684,26 +700,48 @@ class ExecutiveOrchestrator:
             self.event_queue.push(project_id, node_evt)
             yield node_evt
 
-        # Save intra-document relations using candidate_idx_to_node mapping
+        # Save intra-document relations using concept_idx_to_node mapping
         for rel in consolidated_relations:
-            src_id = concept_idx_to_node[rel["source_idx"]].id
-            tgt_id = concept_idx_to_node[rel["target_idx"]].id
-            edge_id = f"edge_{uuid.uuid4().hex[:8]}"
+            src_node = concept_idx_to_node.get(rel["source_idx"])
+            tgt_node = concept_idx_to_node.get(rel["target_idx"])
+            if src_node and tgt_node:
+                edge_id = f"edge_{uuid.uuid4().hex[:8]}"
+                direct_edge = GraphEdge(
+                    _id=edge_id,
+                    source_id=src_node.id,
+                    target_id=tgt_node.id,
+                    is_directional=True,
+                    description=rel.get(
+                        "description",
+                        f"Link from {src_node.id} to {tgt_node.id}",
+                    ),
+                    weight=1.0,
+                    project_ids=proj_list,
+                    status="PRIMARY_ACTIVE",
+                )
+                self.db.upsert_edge(direct_edge)
 
-            direct_edge = GraphEdge(
-                _id=edge_id,
-                source_id=src_id,
-                target_id=tgt_id,
-                is_directional=True,
-                description=rel.get(
-                    "description",
-                    f"Link from {src_id} to {tgt_id}",
-                ),
-                weight=1.0,
-                project_ids=proj_list,
-                status="PRIMARY_ACTIVE",
-            )
-            self.db.upsert_edge(direct_edge)
+    def _apply_ingestion_graph_updates(
+        self,
+        doc_id: str,
+        doc_title: str,
+        doc_description: str,
+        doc_type: str,
+        consolidated_concepts: List[Dict[str, Any]],
+        consolidated_relations: List[Dict[str, Any]],
+        persona_command_results: List[Dict[str, Any]],
+        project_id: str,
+        proj_list: List[str],
+        passage_ids: List[str],
+        concept_idx_to_node: Optional[Dict[int, GraphNode]] = None,
+    ) -> Generator[Dict[str, Any], None, None]:
+        """Apply all global graph persona reconciliation and merging edits to the DB."""
+        if concept_idx_to_node is None:
+            concept_idx_to_node = {
+                idx: self.db.get_node(c.get("id"))
+                for idx, c in enumerate(consolidated_concepts)
+                if c.get("id") and self.db.get_node(c.get("id"))
+            }
 
         # 2. Parse and group persona commands by type and target node ID
         concept_edit_proposals = defaultdict(list)
@@ -1076,7 +1114,7 @@ class ExecutiveOrchestrator:
             "event": "ingestion_completed",
             "doc_id": doc_id,
             "title": doc_title,
-            "concepts_count": len(created_nodes),
+            "concepts_count": len(consolidated_concepts),
             "message": f"Document '{doc_title}' successfully ingested and merged into knowledge graph.",
             "timestamp": time.time(),
         }

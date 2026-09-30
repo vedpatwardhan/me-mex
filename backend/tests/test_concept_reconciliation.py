@@ -57,6 +57,22 @@ def test_reconciliation_no_conflict():
         }
     ]
 
+    concept_idx_to_node = {}
+    list(
+        orchestrator._create_intra_document_subgraph(
+            doc_id="doc_test_1",
+            doc_title="Test Doc 1",
+            doc_description="Doc Description 1",
+            doc_type="paper",
+            consolidated_concepts=consolidated_concepts,
+            consolidated_relations=[],
+            project_id="global",
+            proj_list=["global"],
+            passage_ids=["pass_01", "pass_02"],
+            concept_idx_to_node=concept_idx_to_node,
+        )
+    )
+
     events = list(
         orchestrator._apply_ingestion_graph_updates(
             doc_id="doc_test_1",
@@ -69,6 +85,7 @@ def test_reconciliation_no_conflict():
             project_id="global",
             proj_list=["global"],
             passage_ids=["pass_01", "pass_02"],
+            concept_idx_to_node=concept_idx_to_node,
         )
     )
 
@@ -174,6 +191,21 @@ def test_reconciliation_conflict_debate():
     orchestrator._run_multi_persona_debate = mock_debate
 
     try:
+        concept_idx_to_node = {}
+        list(
+            orchestrator._create_intra_document_subgraph(
+                doc_id="doc_test_2",
+                doc_title="Test Doc 2",
+                doc_description="Doc Description 2",
+                doc_type="paper",
+                consolidated_concepts=consolidated_concepts,
+                consolidated_relations=[],
+                project_id="global",
+                proj_list=["global"],
+                passage_ids=["pass_03"],
+                concept_idx_to_node=concept_idx_to_node,
+            )
+        )
         events = list(
             orchestrator._apply_ingestion_graph_updates(
                 doc_id="doc_test_2",
@@ -186,6 +218,7 @@ def test_reconciliation_conflict_debate():
                 project_id="global",
                 proj_list=["global"],
                 passage_ids=["pass_03"],
+                concept_idx_to_node=concept_idx_to_node,
             )
         )
     finally:
