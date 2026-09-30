@@ -77,10 +77,7 @@ def test_reconciliation_no_conflict():
         orchestrator._apply_ingestion_graph_updates(
             doc_id="doc_test_1",
             doc_title="Test Doc 1",
-            doc_description="Doc Description 1",
-            doc_type="paper",
             consolidated_concepts=consolidated_concepts,
-            consolidated_relations=[],
             persona_command_results=persona_command_results,
             project_id="global",
             proj_list=["global"],
@@ -181,8 +178,8 @@ def test_reconciliation_conflict_debate():
             ],
             "additional_edges": [
                 {
-                    "source_ref": target_a,
-                    "target_ref": target_b,
+                    "source_id": target_a,
+                    "target_id": target_b,
                     "description": "Bridge between domain A and domain B",
                 }
             ],
@@ -210,10 +207,7 @@ def test_reconciliation_conflict_debate():
             orchestrator._apply_ingestion_graph_updates(
                 doc_id="doc_test_2",
                 doc_title="Test Doc 2",
-                doc_description="Doc Description 2",
-                doc_type="paper",
                 consolidated_concepts=consolidated_concepts,
-                consolidated_relations=[],
                 persona_command_results=persona_command_results,
                 project_id="global",
                 proj_list=["global"],
@@ -290,14 +284,12 @@ def test_create_and_delete_commands():
         orchestrator._apply_ingestion_graph_updates(
             doc_id="doc_test_cmd",
             doc_title="Test Doc Cmd",
-            doc_description="Doc Desc",
-            doc_type="paper",
             consolidated_concepts=[],
-            consolidated_relations=[],
             persona_command_results=persona_command_results,
             project_id="global",
             proj_list=["global"],
             passage_ids=["pass_99"],
+            concept_id_to_node={},
         )
     )
 

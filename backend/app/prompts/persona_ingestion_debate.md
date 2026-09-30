@@ -31,8 +31,8 @@ Return JSON format strictly:
   ],
   "additional_edges": [
     {
-      "source_idx": "hub_or_node_id_1",
-      "target_idx": "hub_or_node_id_2",
+      "source_id": "hub_or_node_id_1",
+      "target_id": "hub_or_node_id_2",
       "description": "Bridge edge description..."
     }
   ]

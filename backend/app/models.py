@@ -166,13 +166,13 @@ class EdgeCommandData(BaseModel):
     id: Optional[str] = Field(
         default=None, description="ID of existing edge for EDIT_EDGE or DELETE_EDGE."
     )
-    source_idx: Optional[str] = Field(
+    source_id: Optional[str] = Field(
         default=None,
-        description="Candidate idx, candidate ID, or existing node ID for source concept.",
+        description="Candidate node ID or existing node ID for source concept.",
     )
-    target_idx: Optional[str] = Field(
+    target_id: Optional[str] = Field(
         default=None,
-        description="Candidate idx, candidate ID, or existing node ID for target concept.",
+        description="Candidate node ID or existing node ID for target concept.",
     )
     description: str = Field(
         default="", description="Qualitative relationship description."

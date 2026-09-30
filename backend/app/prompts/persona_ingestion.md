@@ -23,8 +23,8 @@ Command Types Allowed:
    - `command_type`: One of `"CONSTRUCT_EDGE"`, `"EDIT_EDGE"`, `"DELETE_EDGE"`.
    - `edge`: Object containing:
      - `id`: Optional edge ID (for `EDIT_EDGE` or `DELETE_EDGE`).
-     - `source_idx`: Canonical node ID of the source concept (e.g. "concept_abc123" or "concept_123").
-     - `target_idx`: Canonical node ID of the target concept (e.g. "concept_xyz789" or "concept_456").
+     - `source_id`: Canonical node ID of the source concept (e.g. "concept_abc123" or "concept_123").
+     - `target_id`: Canonical node ID of the target concept (e.g. "concept_xyz789" or "concept_456").
      - `description`: Qualitative explanation of the relationship edge.
 
 Return JSON format strictly:
@@ -50,8 +50,8 @@ Return JSON format strictly:
     {
       "command_type": "CONSTRUCT_EDGE",
       "edge": {
-        "source_idx": "concept_abc123",
-        "target_idx": "concept_123",
+        "source_id": "concept_abc123",
+        "target_id": "concept_123",
         "description": "Qualitative link explanation..."
       }
     },
@@ -66,8 +66,8 @@ Return JSON format strictly:
       "command_type": "DELETE_EDGE",
       "edge": {
         "id": "edge_789",
-        "source_idx": "concept_123",
-        "target_idx": "concept_456",
+        "source_id": "concept_123",
+        "target_id": "concept_456",
         "description": "Outdated connection"
       }
     }
