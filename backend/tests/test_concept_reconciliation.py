@@ -158,6 +158,28 @@ def test_reconciliation_conflict_debate():
 
     original_debate = orchestrator._run_multi_persona_debate
 
+    # Mock evaluate_command_objections to simulate LLM objections in offline testing mode
+    def mock_objections_a(*args, **kwargs):
+        return [
+            {
+                "command_id": "cmd_1",
+                "objecting_persona": persona_a.department_name,
+                "objection_reason": "Domain A objects to Domain B edit proposal.",
+            }
+        ]
+
+    def mock_objections_b(*args, **kwargs):
+        return [
+            {
+                "command_id": "cmd_0",
+                "objecting_persona": persona_b.department_name,
+                "objection_reason": "Domain B objects to Domain A edit proposal.",
+            }
+        ]
+
+    persona_a.evaluate_command_objections = mock_objections_a
+    persona_b.evaluate_command_objections = mock_objections_b
+
     def mock_debate(*args, **kwargs):
         return {
             "resolution_type": "SUBDIVIDE",

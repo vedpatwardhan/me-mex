@@ -1078,48 +1078,6 @@ class ExecutiveOrchestrator:
             o.get("command_id") for o in all_objections if o.get("command_id")
         )
 
-        # Check for multi-persona target collisions (e.g. EDIT_CONCEPT targeting different node IDs across personas)
-        edit_targets_by_candidate: dict[str, set[str]] = defaultdict(set)
-        for item in all_commands_flat:
-            cmd = item["command"]
-            if cmd.get("command_type") == "EDIT_CONCEPT":
-                c_data = cmd.get("concept", {})
-                c_id = c_data.get("id")
-                cand_id = (
-                    c_id
-                    if isinstance(c_id, str) and c_id in concept_id_to_node
-                    else (
-                        consolidated_concepts[0].get("id")
-                        if consolidated_concepts
-                        else "candidate_0"
-                    )
-                )
-                target_id = c_data.get("id")
-                if target_id:
-                    edit_targets_by_candidate[cand_id].add(target_id)
-
-        colliding_candidate_ids = set(
-            cand_id
-            for cand_id, targets in edit_targets_by_candidate.items()
-            if len(targets) > 1
-        )
-        for item in all_commands_flat:
-            cmd = item["command"]
-            if cmd.get("command_type") == "EDIT_CONCEPT":
-                c_data = cmd.get("concept", {})
-                c_id = c_data.get("id")
-                cand_id = (
-                    c_id
-                    if isinstance(c_id, str) and c_id in concept_id_to_node
-                    else (
-                        consolidated_concepts[0].get("id")
-                        if consolidated_concepts
-                        else "candidate_0"
-                    )
-                )
-                if cand_id in colliding_candidate_ids:
-                    objected_cmd_ids.add(item["command_id"])
-
         non_conflicting_commands = [
             item
             for item in all_commands_flat

@@ -21,6 +21,7 @@ class DepartmentPersonaAgent:
         self.score = score
         self.department_id = f"dept_{hub_node.id}"
         self.department_name = f"Persona Specialist: {hub_node.title}"
+        self.last_explored_nodes: List[GraphNode] = [hub_node]
 
     def explore_concept_hub(
         self,
@@ -153,6 +154,7 @@ class DepartmentPersonaAgent:
 
         traversed_node_ids = list(visited_node_ids)
         subgraph_nodes = list(explored_nodes_map.values())
+        self.last_explored_nodes = subgraph_nodes
 
         return {
             "department_id": self.department_id,
@@ -307,9 +309,11 @@ class DepartmentPersonaAgent:
         all_persona_commands: List[Dict[str, Any]],
         doc_title: str,
         candidate_nodes: List[GraphNode],
-        explored_nodes: List[GraphNode],
+        explored_nodes: Optional[List[GraphNode]] = None,
     ) -> List[Dict[str, Any]]:
         """LLM Step: Review all proposed commands across all personas and report specific objections."""
+        if explored_nodes is None:
+            explored_nodes = self.last_explored_nodes or [self.hub_node]
         my_commands = []
         other_commands = []
 
