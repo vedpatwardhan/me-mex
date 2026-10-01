@@ -450,9 +450,9 @@ class GraphIngestionEngine:
 
         # 4. Process Conflicting Commands via Bilateral Multi-Persona Debate Engine
         if conflicting_commands:
-            conflicting_personas = list(
-                set(item["department_name"] for item in conflicting_commands)
-            )
+            proposing_personas = set(o["proposing_persona"] for o in all_objections)
+            objecting_personas = set(o["objecting_persona"] for o in all_objections)
+            conflicting_personas = list(proposing_personas | objecting_personas)
             debate_evt = {
                 "event": "persona_debate_start",
                 "candidate_title": doc_title,
