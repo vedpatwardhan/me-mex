@@ -457,50 +457,51 @@ class GraphIngestionEngine:
                 "event": "persona_debate_start",
                 "candidate_title": doc_title,
                 "conflicting_personas": conflicting_personas,
-                "message": f"Conflicting persona proposals detected for document '{doc_title}'. Initiating Bilateral Multi-Persona Debates...",
+                "message": (
+                    f"Conflicting persona proposals detected for document '{doc_title}'"
+                    f". Initiating Bilateral Multi-Persona Debates..."
+                ),
                 "timestamp": time.time(),
             }
             self.event_queue.push(project_id, debate_evt)
             yield debate_evt
 
-            # Build objection lookup by command_id
-            cmd_to_objections: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-            for o in all_objections:
-                cid = o.get("command_id")
-                if cid:
-                    cmd_to_objections[cid].append(o)
+            # Quick lookup maps
+            name_to_dept = {
+                r["dept"].department_name: r["dept"] for r in persona_command_results
+            }
+            cmd_id_to_item = {item["command_id"]: item for item in conflicting_commands}
 
-            # Group conflicting commands into persona pair clusters (Proposer, Objector)
+            # Group conflicting commands into persona pair clusters directly from all_objections
             pair_clusters: Dict[Tuple[str, str], Dict[str, Any]] = {}
-            for item in conflicting_commands:
-                cid = item["command_id"]
-                dept_a: DepartmentPersonaAgent = item["dept"]
-                objs = cmd_to_objections.get(cid, [])
+            for obj in all_objections:
+                cmd_item = cmd_id_to_item[obj["command_id"]]
+                proposer_dept = name_to_dept[obj["proposing_persona"]]
+                objector_dept = name_to_dept[obj["objecting_persona"]]
 
-                for obj in objs:
-                    obj_persona_name = obj.get("objecting_persona")
-                    # Find objecting persona instance from persona_command_results
-                    dept_b = next(
-                        (
-                            r["dept"]
-                            for r in persona_command_results
-                            if r["dept"].department_name == obj_persona_name
-                        ),
-                        None,
+                if (
+                    proposer_dept
+                    and objector_dept
+                    and proposer_dept.department_id != objector_dept.department_id
+                ):
+                    # Canonical symmetric pair key (sorted ID tuple) to merge bidirectional objections into the same room
+                    p1, p2 = sorted(
+                        [proposer_dept, objector_dept], key=lambda d: d.department_id
                     )
-                    if dept_b and dept_a.department_id != dept_b.department_id:
-                        # Canonical symmetric pair key (sorted ID tuple) to merge bidirectional objections into the same room
-                        p1, p2 = sorted([dept_a, dept_b], key=lambda d: d.department_id)
-                        pair_key = (p1.department_id, p2.department_id)
-                        if pair_key not in pair_clusters:
-                            pair_clusters[pair_key] = {
-                                "persona_a": p1,
-                                "persona_b": p2,
-                                "commands_a": [],
-                                "objections_b": [],
-                            }
-                        pair_clusters[pair_key]["commands_a"].append(item)
-                        pair_clusters[pair_key]["objections_b"].append(obj)
+                    pair_key = (p1.department_id, p2.department_id)
+                    if pair_key not in pair_clusters:
+                        pair_clusters[pair_key] = {
+                            "persona_a": p1,
+                            "persona_b": p2,
+                            "commands_a": [],
+                            "objections_b": [],
+                        }
+                    if (
+                        cmd_item
+                        and cmd_item not in pair_clusters[pair_key]["commands_a"]
+                    ):
+                        pair_clusters[pair_key]["commands_a"].append(cmd_item)
+                    pair_clusters[pair_key]["objections_b"].append(obj)
 
             resolved_debate_commands: List[Dict[str, Any]] = []
 
