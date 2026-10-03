@@ -142,13 +142,13 @@ Every entity in the graph network adheres to a single universal node schema (`Gr
   "node_class": "CONCEPT",
   "node_type": "concept",
   "title": "Latent-Space World Models",
-  "text_body": "Atomic self-evolving Markdown description & synthesis across papers...",
+  "description": "Atomic self-evolving Markdown description & synthesis across papers...",
   "metadata": {
     "theme_id": "vla_research",
     "domain_tags": ["world_models", "latent_dynamics"],
     "status": "PRIMARY_ACTIVE"
   },
-  "passage_pointers": ["pass_chunk_101", "pass_chunk_102"]
+  "passage_ids": ["pass_chunk_101", "pass_chunk_102"]
 }
 ```
 
@@ -161,7 +161,7 @@ Edges connect `ROOT_MEDIA` and `CONCEPT` nodes. The architecture explicitly supp
   "source_id": "concept_pixel_world_models",
   "target_id": "concept_latent_world_models",
   "is_directional": false,
-  "text_body": "Parallel generative world model paradigms operating on raw pixels vs latent embeddings.",
+  "description": "Parallel generative world model paradigms operating on raw pixels vs latent embeddings.",
   "weight": 1.0,
   "status": "PRIMARY_ACTIVE"
 }
@@ -265,12 +265,10 @@ Both Retrieval and Ingestion operate on a single unified multi-agent pattern str
    - **Root Media Traversal Blocking**: Traversal visits Root Media nodes (`paper`, `blog`, `video`, `post`) for provenance context, but strictly **blocks Root Media nodes from expanding further hops** (preventing artificial shortcutting across unrelated concepts contained in the same paper).
 2. **Relevance Debate:**
    - Personas debate the relevance of their accumulated multi-hop sub-graph context against the user prompt, full conversation history (`chat_history`), and system execution events.
-3. **Ingestion-Specific Zero-Mutation Consensus & Bilateral Merging Debate:**
-   - Ingestion executes a **Zero-Mutation Consensus & Bilateral Merging Debate** pass.
-   - **Zero Upfront DB Mutations**: No database writes (`CREATE_CONCEPT`, `DELETE_CONCEPT`, `DELETE_EDGE`) occur prior to persona command reconciliation.
-   - **Command Pool & Cross-Persona Consensus Review**: All commands generated across personas (`CREATE`, `EDIT`, `DELETE`, `CONSTRUCT_EDGE`, `EDIT_EDGE`, `DELETE_EDGE`) are gathered into a single command pool. Personas conduct a consensus review (`evaluate_command_objections`) passing their explored domain sub-graph context (`subgraph_nodes`) to classify commands into non-conflicting (agreed) vs. conflicting (objected) sets.
-   - **Bilateral Multi-Turn Persona Dialogue Loop**: Objected commands are clustered into `(Proposing Persona, Objecting Persona)` conflict pairs. For each pair, a dynamic multi-turn debate session (`run_bilateral_persona_debate`) executes iteratively across up to 3 turns (`persona_debate_turn`), with both personas exchanging counter-proposals and domain sub-graph evidence until mutual consensus (`consensus_reached: true`) is achieved.
-   - **Atomic Batch DB Execution**: Non-conflicting commands and debate-resolved consensus commands are executed atomically against the database.
+3. **Ingestion-Specific Concept Merging Debate:**
+   - Ingestion executes an additional **Multi-Persona Merging Debate**. Each persona treats its accumulated multi-hop sub-graph as its authoritative domain knowledge base.
+   - All consolidated concepts from an ingested document are presented to every relevant persona.
+   - Personas independently evaluate how the document's concepts map to their domain knowledge—merging into existing concepts, breaking down compound ideas, or connecting new nodes. If a concept is relevant to multiple personas, each persona creates its own connection edges (`GraphEdge`), attaching the concept to multiple hubs in the graph network.
 
 ---
 
@@ -328,7 +326,7 @@ This section details all backend REST API endpoints, real-time Server-Sent Event
 ### B. Out-of-Graph Passage & Document Storage Endpoints
 
 #### `GET /api/passages`
-- **Purpose**: Retrieve plain text passage records linked to atomic `CONCEPT` nodes via `passage_pointers`.
+- **Purpose**: Retrieve plain text passage records linked to atomic `CONCEPT` nodes via `passage_ids`.
 
 #### `POST /api/documents`
 - **Purpose**: Register original source document metadata (arXiv papers, blogs, video transcripts) and save source file record.
