@@ -59,10 +59,11 @@ Both **Retrieval** and **Ingestion** operate on a single conversational gateway 
 
 3. **Multi-Persona Zero-Mutation Consensus & Concept Merging Debate (Ingestion Specific Step):**
    - Ingestion adds an explicit **Zero-Mutation Consensus & Concept Merging Debate Step** on top of shared exploration and relevance debate.
-   - **Zero Upfront DB Mutations**: No database writes (`CREATE_CONCEPT`, `DELETE_CONCEPT`, `DELETE_EDGE`) occur prior to command reconciliation.
-   - **Document-Level Consolidation**: Passage-level concepts extracted from the incoming document are first consolidated into a set of document-specific canonical concepts (`consolidate_extracted_concepts`).
-   - **Persona Command Pool & Consensus Review**: All commands from all personas (`CREATE`, `EDIT`, `DELETE`, `CONSTRUCT_EDGE`, `EDIT_EDGE`, `DELETE_EDGE`) are pooled. Personas evaluate each other's proposals ("What do you object to, and why?") to classify commands into non-conflicting (agreed) vs. conflicting (disputed) sets.
-   - **Dispute Resolution & Multi-Hub Integration**: Conflicting command sets undergo Multi-Persona Debate to determine optimal graph updates (`SUBDIVIDE`, `MERGE_SINGLE`, `KEEP_SEPARATE`), and all finalized graph updates are executed in a single atomic batch pass against the database.
+   - **Node Mutability Hierarchy**: Root Media and Intra-Document concept nodes are **Immutable** (preserving ground truth). Domain hub concepts and persona-created intermediate nodes are **Mutable**.
+   - **Zero Upfront DB Mutations**: No database writes occur prior to command reconciliation.
+   - **Document-Level Consolidation**: Passage-level concepts extracted from the incoming document are consolidated into immutable intra-document concepts.
+   - **Persona Command Pool & Consensus Review**: Personas evaluate how intra-document concepts map to their domain using non-destructive linking (`CONNECT_DIRECT`), intermediate node creation (`CREATE_INTERMEDIATE`), mutable concept generalization (`EDIT_CONCEPT` on domain/intermediate nodes only), or domain node restructuring (`SPLIT_CONCEPT`). Direct mutations against immutable nodes are strictly blocked.
+   - **Dispute Resolution & Multi-Hub Integration**: Conflicting command sets undergo bilateral multi-turn debate (`run_bilateral_persona_debate`) between conflicting persona pairs until mutual consensus is reached, executing finalized graph updates in a single atomic batch pass.
 
 ---
 

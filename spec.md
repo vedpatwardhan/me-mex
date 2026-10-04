@@ -132,9 +132,21 @@ graph TD
     ConceptLatent -.->|ID Pointers in Metadata| Passage2
 ```
 
-### Universal Node & Edge Schema
+### Node Mutability Hierarchy & Ingestion Constraints
 
-Every entity in the graph network adheres to a single universal node schema (`GraphNode`) and a dual-mode edge schema (`GraphEdge`). Passages exist purely as plain text database records referenced via ID pointers inside atomic concept notes:
+The graph network enforces a strict **Hierarchy of Mutability** during ingestion and multi-persona debates:
+
+1. **Root Media Nodes (`ROOT_MEDIA`) — IMMUTABLE**
+   - Represents the original source document, paper, blog, or video file.
+   - Cannot be modified, edited, or deleted by any persona agent.
+2. **Intra-Document Concepts (`node_type="concept"`, Extracted) — IMMUTABLE**
+   - Ground-truth concepts extracted directly from the document during intake.
+   - Preserves the exact factual evidence of the ingested document.
+   - Personas **cannot** issue `EDIT_CONCEPT` or `DELETE_CONCEPT` targeting intra-document concepts.
+   - Personas can **only link** to these nodes via direct edges (`CONNECT_DIRECT`) or intermediate bridge nodes (`CREATE_INTERMEDIATE`).
+3. **Domain Hub & Intermediate Concepts — MUTABLE**
+   - Persona domain hub concepts and persona-created intermediate/bridge concepts.
+   - Personas **can** create, edit/generalize (`EDIT_CONCEPT`), or split/restructure (`SPLIT_CONCEPT`) these nodes as new documents arrive to accommodate broader cross-document context.
 
 ```json
 {
@@ -146,7 +158,8 @@ Every entity in the graph network adheres to a single universal node schema (`Gr
   "metadata": {
     "theme_id": "vla_research",
     "domain_tags": ["world_models", "latent_dynamics"],
-    "status": "PRIMARY_ACTIVE"
+    "status": "PRIMARY_ACTIVE",
+    "immutable": false
   },
   "passage_ids": ["pass_chunk_101", "pass_chunk_102"]
 }
@@ -267,8 +280,13 @@ Both Retrieval and Ingestion operate on a single unified multi-agent pattern str
    - Personas debate the relevance of their accumulated multi-hop sub-graph context against the user prompt, full conversation history (`chat_history`), and system execution events.
 3. **Ingestion-Specific Concept Merging Debate:**
    - Ingestion executes an additional **Multi-Persona Merging Debate**. Each persona treats its accumulated multi-hop sub-graph as its authoritative domain knowledge base.
-   - All consolidated concepts from an ingested document are presented to every relevant persona.
-   - Personas independently evaluate how the document's concepts map to their domain knowledge—merging into existing concepts, breaking down compound ideas, or connecting new nodes. If a concept is relevant to multiple personas, each persona creates its own connection edges (`GraphEdge`), attaching the concept to multiple hubs in the graph network.
+   - All consolidated concepts from an ingested document are presented to every relevant persona as **Immutable Intra-Document Concepts**.
+   - Personas evaluate how the document's concepts map to their domain knowledge using non-destructive actions:
+     - **`CONNECT_DIRECT`**: Directly connect an immutable intra-document concept to an existing domain concept.
+     - **`CREATE_INTERMEDIATE`**: Create a new domain bridge concept node and link the intra-document concept through it.
+     - **`EDIT_CONCEPT`**: Edit or generalize **existing domain or intermediate concepts** (mutations targeting immutable root/intra-document nodes are strictly blocked).
+     - **`SPLIT_CONCEPT`**: Restructure/split a domain node if its connection degree/sub-concepts grow too large.
+   - If a concept is relevant to multiple personas, each persona attaches its own connection edges or intermediate nodes, linking the immutable concept across multiple domain hubs in the graph network.
 
 ---
 
