@@ -60,8 +60,8 @@ Rather than building backend schemas first and guessing interaction patterns, **
 
   [ Milestone 3: High-Speed Intake & Topological Associative Retrieval ] — COMPLETED
    ├── Zero-mutation ingestion pipeline with out-of-graph PassageRecord storage
-   ├── Shared multi-hop concept hub exploration via rustworkx eigenvector centrality
-   └── Multi-Persona Bilateral Debate Engine (run_bilateral_persona_debate) for conflict resolution
+   ├── Mutually exclusive concept hub exploration via rustworkx eigenvector centrality
+   └── Independent persona sub-graph reorganization & passage-grounded concept splitting
 
   [ Milestone 4: Autonomous Ideation, Dynamic Evolution & Spaced Repetition ] — IN PROGRESS
    ├── Tournament loops: Generation, Reflection (falsification), Ranking (Elo)

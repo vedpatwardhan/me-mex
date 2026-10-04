@@ -78,4 +78,4 @@ Multi-agent architectures decompose complex operational objectives into bounded 
 - **Asynchronous Task Architecture**: Coordinates Generation, Proximity, Reflection, and Ranking agents.
 - **Idea Tournaments**: Evaluates candidate hypotheses through pairwise debate matches, updating Elo scores using standard logistic distribution dynamics.
 - **Evolutionary Refinement**: Evolution agents mutate top-ranked hypotheses based on peer review feedback.
-- **Key Takeaway for Graph-Memex**: Knowledge nodes should not sit static; conflicting proposals undergo turn-by-turn debate loops until mutual consensus is achieved.
+- **Key Takeaway for Me-Mex**: Specialist Personas execute over mutually exclusive sub-graph partitions without requiring consensus or multi-persona debate. Nodes evolve independently as personas reorganize and split over-clustered concepts using underlying passage context.

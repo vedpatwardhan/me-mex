@@ -17,7 +17,7 @@ Me-Mex is an **Agentic External Memory System** designed to function as an exter
 
 ## 2. Core Architecture & System Lifecycle
 
-Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)** loop: **Input Intent Classification $\rightarrow$ Dynamic Concept Hub Traversal & Web Search $\rightarrow$ Orchestrator Tool Ingestion**.
+Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** loop: **Input Intent Classification $\rightarrow$ Dynamic Concept Hub Traversal & Web Search $\rightarrow$ Orchestrator Tool Ingestion**.
 
 ```
        ┌──────────────────────────────────────────────────────────┐
@@ -55,30 +55,28 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
    - Specialist Personas traverse multi-hop neighborhoods (`max_depth=3`), executing DuckDuckGo search if context is missing.
    - Real-time SSE telemetry streams active glowing node IDs (`traversed_node_ids`) to the visual canvas.
 
-3. **Phase 2: Ingestion & Bilateral Multi-Persona Debate**
-   - Ingestion executes `ingest_document_tool` autonomously, extracting plain-text `PassageRecord`s and concept nodes.
-   - Evaluates proposed commands across personas without upfront DB mutations. Conflicting commands trigger turn-by-turn bilateral dialogue loops (`run_bilateral_persona_debate`) until mutual consensus is reached.
+3. **Phase 2: Ingestion & Independent Concept Reorganization**
+   - Ingestion executes `ingest_document_tool` autonomously, extracting plain-text `PassageRecord`s and immutable intra-document concept nodes.
+   - Personas operate independently over mutually exclusive sub-graph partitions without consensus overhead or bilateral debates.
 
 ---
 
 ## 3. Clean 3-Element Topology & Universal Storage Schema
 
-### Zero Passage Clutter Principle
+### Graph Topology & Node/Edge Classification
+
 Passage text chunks are **NOT** graph nodes in the database network or UI visualizer. Including passages as nodes introduces visual "hairballs".
 
-The active graph network consists **strictly of three node classes**:
-1. **`ROOT_MEDIA` Nodes**: Papers, Reports, Blogs, Transcripts, Code Repos.
-2. **`CONCEPT` Nodes**: Atomic self-evolving notes (`title`, `description`, `passage_ids`).
-3. **`CONNECTION_EDGE`**: Qualitative relation edges (`source_id`, `target_id`, `description`, `weight`).
+The active graph network consists of **Root Nodes**, **Concept Nodes (Immutable vs. Mutable)**, and **Typed Relation Edges**:
 
 ```mermaid
 graph TD
     subgraph Active Graph Network Topology (No Passages)
-        Paper[Root Media Node: Paper / Blog] -->|Emanates To| ConceptH[High-Level Concept Node: World Models]
-        ConceptH -->|Child Concept| ConceptPixel[Pixel-Space World Models]
-        ConceptH -->|Child Concept| ConceptLatent[Latent-Space World Models]
-        ConceptLatent <==>|Active SOTA Link: weight=1.0| DownstreamTask[Action Planning via MPC]
-        ConceptPixel -.->|Decayed Historical Link: weight=0.3| DownstreamTask
+        Paper[Root Node: Paper / Blog (Immutable)] -->|RELEVANT_TO| ConceptH[Domain Hub Node: World Models (Mutable)]
+        ConceptH -->|BUILDS_UPON| ConceptPixel[Intra-Document Concept: Pixel World Models (Immutable)]
+        ConceptH -->|BUILDS_UPON| ConceptLatent[Intra-Document Concept: Latent World Models (Immutable)]
+        ConceptLatent <==>|SUPERSEDES| DownstreamTask[Intermediate Domain Node: MPC Planning (Mutable)]
+        ConceptPixel -.->|HISTORICAL_SUPERSEDED| DownstreamTask
     end
 
     subgraph Out-of-Graph Database Storage
@@ -90,12 +88,33 @@ graph TD
     ConceptLatent -.->|ID Pointers in Metadata| Passage2
 ```
 
-### Node Mutability Hierarchy
+### Node & Edge Schema Taxonomy
 
-The graph network enforces a strict **Hierarchy of Mutability** during ingestion and multi-persona debates:
+1. **`ROOT` Nodes (Immutable)**
+   - Base node for an ingested paper, blog, transcript, or X post, shortly summarizing everything in that document. Cannot be modified or deleted.
+2. **`CONCEPT` Nodes (Immutable vs. Mutable)**
+   - **Intra-Document Concepts (`immutable: True`)**: Direct concepts originating from an ingested document. Preserves ground-truth evidence; personas can only link to them.
+   - **Domain & Intermediate Nodes (`immutable: False`)**: Persona domain hubs and bridge nodes created during graph ingestion. Can be generalized (`EDIT_CONCEPT`) or restructured (`SPLIT_CONCEPT`).
+3. **Qualitative Relation Edges (`GraphEdge`)**
+   - Typed edges with qualitative descriptions contextualizing relationships:
+     - **`SUBSET_OF`**: Concept $A$ is a specialized sub-type or narrower instance of Concept $B$.
+     - **`SUPERSET_OF`**: Concept $A$ is an umbrella category or broader domain containing Concept $B$.
+     - **`RELEVANT_TO`**: General semantic relevance link connecting an intra-document concept to a domain hub or intermediate concept.
+     - **`BUILDS_UPON`**: Incremental theoretical or technical extension of an existing concept.
+     - **`SUPERSEDES`**: New SOTA paradigm replacing or improving upon a historical concept.
+     - **`PARALLEL_TO`**: Contemporary parallel approaches or competing paradigms.
+     - **`CONTRASTS_WITH`**: Asymmetric contrast or explicit contradiction between concepts.
 
-1. **Root Media Nodes (`ROOT_MEDIA`) — IMMUTABLE**
-   - Represents original source document or paper asset. Cannot be modified or deleted.
+### First-Class Temporal Reasoning (No Artificial Weight Decay)
+
+Rather than applying artificial floating-point weight decay (`1.0` down to `0.3`), all nodes and edges store explicit unix timestamps (`created_at`, `updated_at`).
+- **Agent Reasoning**: Specialist Persona agents receive exact creation/update timestamps in their sub-graph context window, enabling natural LLM temporal reasoning (*"Concept A (2024) is superseded by Concept B (2026)"*) without arbitrary numerical penalties.
+- **Frontend Timeline Visualizer**: The WebGL UI visualizer (`react-force-graph-2d`) provides an optional temporal timeline toggle, applying color-coded visual highlights across user-selected time windows.
+
+The graph network enforces a strict **Hierarchy of Mutability**:
+
+1. **Root Nodes (`ROOT`) — IMMUTABLE**
+   - Base node for a paper, blog, transcript, or X post, shortly summarizing everything in that document. Cannot be modified or deleted.
 2. **Intra-Document Concepts (`node_type="concept"`, Extracted) — IMMUTABLE**
    - Direct concepts extracted from the document. Preserves factual ground truth.
    - Personas **cannot** issue `EDIT_CONCEPT` or `DELETE_CONCEPT` targeting these nodes; they can **only link** to them.
@@ -126,20 +145,22 @@ The graph network enforces a strict **Hierarchy of Mutability** during ingestion
 
 Both Retrieval and Ingestion operate on a unified multi-agent pattern structured around **Departments** (Thematic Concept Hubs):
 
-1. **Shared Multi-Hop Sub-Graph Exploration:**
-   - `rustworkx` centrality identifies top project-scoped concept hubs.
-   - **Iterative Multi-Hop Traversal**: Hub personas expand their frontier up to `max_depth = 3`.
-   - **Root Media Traversal Blocking**: Traversal visits Root Media nodes for provenance context, but strictly **blocks Root Media nodes from expanding further hops**.
-2. **Relevance Debate:**
-   - Personas debate the relevance of their accumulated sub-graph context against the prompt and `chat_history`.
-3. **Ingestion-Specific Concept Merging Debate:**
-   - Consolidated concepts are presented as **Immutable Intra-Document Concepts**.
-   - Personas connect intra-document concepts to domain hubs using non-destructive actions:
+1. **Mutually Exclusive Sub-Graph Exploration:**
+   - **Unweighted Topological Hub Detection**: Identifies foundational keystone concepts in real time (<5ms) using `rustworkx` unweighted eigenvector centrality and community partitioning. Each detected concept hub is assigned a dedicated Specialist Persona representing domain expertise for that concept cluster.
+   - **Mutually Exclusive Graph Partitioning**: The graph network is partitioned into mutually exclusive sub-graphs across concept hubs so persona explorations do not overlap.
+   - **Iterative Multi-Hop Traversal**: Each Concept Hub Persona independently expands its strictly assigned sub-graph region up to `max_depth = 3`.
+   - **Root Node Traversal Blocking**: Traversal visits Root Nodes for provenance context and summaries, but strictly **blocks Root Nodes from expanding further hops**.
+2. **Relevance Evaluation & Retrieval-Step Reorganization:**
+   - Each Specialist Persona evaluates the relevance of its accumulated domain nodes, search history, user prompt, and conversation history (`chat_history`) independently.
+   - **Independent Concept Node Splitting**: At every retrieval step, each persona inspects its current sub-graph. If a mutable node has accumulated too many connections (over-clustering), the persona independently splits/reorganizes the concept (`SPLIT_CONCEPT`), referencing the underlying passage chunks (`passages`) corresponding to that concept for ground-truth reorganization.
+3. **Independent Graph Ingestion & Linking:**
+   - Consolidated concepts are ingested as **Immutable Intra-Document Concepts**.
+   - Personas connect intra-document concepts to domain hubs independently using non-destructive actions:
      - **`CONNECT_DIRECT`**: Directly connect an immutable intra-document concept to a domain concept.
      - **`CREATE_INTERMEDIATE`**: Create a new domain bridge concept node and link through it.
      - **`EDIT_CONCEPT`**: Edit or generalize **existing domain or intermediate concepts** (mutations on immutable nodes are blocked).
      - **`SPLIT_CONCEPT`**: Restructure/split a domain node if its connection degree grows too large.
-   - Conflicting commands are clustered into `(Proposing Persona, Objecting Persona)` pairs that engage in interactive turn-by-turn dialogue loops (`run_bilateral_persona_debate`) until mutual consensus is reached.
+   - Because intra-document nodes are immutable and graph partitions are mutually exclusive, persona updates proceed completely independently.
 
 ---
 

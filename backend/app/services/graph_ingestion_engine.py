@@ -450,8 +450,18 @@ class GraphIngestionEngine:
 
         # 4. Process Conflicting Commands via Bilateral Multi-Persona Debate Engine
         if conflicting_commands:
-            proposing_personas = set(o["proposing_persona"] for o in all_objections)
-            objecting_personas = set(o["objecting_persona"] for o in all_objections)
+            proposing_personas = set(
+                o.get("proposing_persona")
+                for o in all_objections
+                if o.get("proposing_persona")
+            ) | set(
+                item["department_name"] for item in conflicting_commands if item.get("department_name")
+            )
+            objecting_personas = set(
+                o.get("objecting_persona")
+                for o in all_objections
+                if o.get("objecting_persona")
+            )
             conflicting_personas = list(proposing_personas | objecting_personas)
             debate_evt = {
                 "event": "persona_debate_start",
@@ -475,9 +485,9 @@ class GraphIngestionEngine:
             # Group conflicting commands into persona pair clusters directly from all_objections
             pair_clusters: Dict[Tuple[str, str], Dict[str, Any]] = {}
             for obj in all_objections:
-                cmd_item = cmd_id_to_item[obj["command_id"]]
-                proposer_dept = name_to_dept[obj["proposing_persona"]]
-                objector_dept = name_to_dept[obj["objecting_persona"]]
+                cmd_item = cmd_id_to_item.get(obj.get("command_id"))
+                proposer_dept = name_to_dept.get(obj.get("proposing_persona")) or (cmd_item["dept"] if cmd_item else None)
+                objector_dept = name_to_dept.get(obj.get("objecting_persona"))
 
                 if (
                     proposer_dept

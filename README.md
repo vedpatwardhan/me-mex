@@ -22,7 +22,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        1. Multi-Modal Ingestion & Staging                              │
+│                        1. Document Ingestion & Staging                                 │
 └────────────────────────────────────────────────────────────────────────────────────────┘
  - Staged Sandbox: Uploaded documents/links do NOT immediately populate the active graph.
  - Out-of-Graph Passage Storage: Text chunks are stored as plain text records in `passages`
@@ -30,28 +30,24 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
  - Plain text retrieval: Passages are opened only when clicked to validate concept extraction.
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                       2. Memory Storage & Clean 3-Element Topology                      │
+│                       2. Memory Storage & Topology                                     │
 └────────────────────────────────────────────────────────────────────────────────────────┘
- - Zero Passage Clutter: Passages are NOT graph nodes. The active network contains only:
-     1. ROOT_MEDIA Nodes : Papers, Reports, Blogs, Transcripts, Code Repos.
-     2. CONCEPT Nodes    : Self-evolving atomic notes (`title`, `description`, `passage_ids`).
-     3. CONNECTION_EDGE  : Qualitative relation edges (`source_id`, `target_id`, `description`).
- - Historical Edge Decay: Superseded relations decay in weight from `1.0` down to `0.3`
-   (`HISTORICAL_SUPERSEDED`), preserving history without cluttering path searches.
+ - Zero Passage Clutter: Passages are NOT graph nodes. The active network contains:
+     1. ROOT Nodes (Immutable)            : Base node for a paper, blog, transcript, or X post, shortly summarizing everything in that document.
+     2. CONCEPT Nodes                     : Self-evolving atomic concepts.
+        - Intra-Document Concepts (Immutable) : Factual concepts extracted directly from document text.
+        - Domain & Intermediate Nodes (Mutable): Persona-created domain hub & bridge concepts.
+     3. QUALITATIVE RELATION EDGES        : Typed structural edges (`SUBSET_OF`, `SUPERSET_OF`, `RELEVANT_TO`, `BUILDS_UPON`, `SUPERSEDES`, `PARALLEL_TO`, `CONTRASTS_WITH`) with contextual edge descriptions.
+ - First-Class Timestamps: Nodes and edges carry explicit creation/update timestamps (`created_at`, `updated_at`), enabling persona agents to reason about temporal progression and historical context naturally without artificial numerical weight decay. Optional frontend toggles visualize timeline progression using color-coded time windows.
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│               3. Unified Concept Hub Persona Exploration & Merging Debate               │
+│             3. Mutually Exclusive Concept Hub Exploration & Relevance Evaluation       │
 └────────────────────────────────────────────────────────────────────────────────────────┘
- - Dynamic Concept Hub Discovery: High-centrality concept nodes detected in real time (<5ms)
-   via `rustworkx` eigenvector/degree centrality.
- - Shared Multi-Hop Sub-Graph Exploration: Both Retrieval and Ingestion start with shared concept hub
-   exploration (`explore_concept_hub`), iteratively expanding neighbor nodes up to `max_depth` (guided by LLM persona selection).
- - Relevance Debate: Personas debate the relevance of their accumulated multi-hop domain knowledge against the user prompt,
-   full conversation history (`chat_history`), and system execution events.
- - Node Mutability Hierarchy: Root Media and Intra-Document concept nodes are **Immutable** (preserving ground truth). Domain hub concepts and persona-created intermediate nodes are **Mutable**.
- - Multi-Persona Zero-Mutation Consensus & Bilateral Merging Debate (Ingestion Specific): Evaluates proposed commands across
-   all personas without upfront DB writes, classifying commands into agreed vs. disputed sets via consensus review (`evaluate_command_objections`). Personas link concepts to domain hubs via `CONNECT_DIRECT`, `CREATE_INTERMEDIATE`, `EDIT_CONCEPT` (on mutable domain/intermediate nodes only), or `SPLIT_CONCEPT`. Direct mutations targeting immutable nodes are strictly blocked. Conflicting commands are clustered into `(Proposing Persona, Objecting Persona)` pairs that engage in interactive turn-by-turn dialogue loops (`run_bilateral_persona_debate`) exchanging sub-graph evidence until mutual consensus is reached.
- - Real-Time SSE Telemetry: Streams persona traversal events (`traversed_node_ids`) and live bilateral debate turns (`persona_debate_turn`) to animate the WebGL canvas (`react-force-graph-2d`).
+ - Unweighted Topological Hub Discovery: Foundational concept hubs are detected in real time (<5ms) via `rustworkx` unweighted eigenvector centrality and community partitioning. Each detected concept hub is assigned a dedicated Specialist Persona representing domain expertise for that concept cluster.
+ - Mutually Exclusive Sub-Graph Partitioning: Rather than overlapping hub traversals, the overall graph network is partitioned into mutually exclusive sub-graph regions across concept hubs. Each Specialist Persona independently explores its strictly assigned sub-graph region (`explore_concept_hub`) up to `max_depth = 3`.
+ - Relevance Evaluation & Independent Operation: Because all intra-document concept nodes are completely immutable, proposals from different personas operate on disjoint/immutable nodes without conflicts.
+ - Independent Node Reorganization & Splitting: At every retrieval step, each persona inspects its active graph window. If a mutable concept node has developed too many connections (high degree/over-clustering), the persona independently reorganizes and splits that concept node (`SPLIT_CONCEPT`), utilizing the underlying text passages stored in `passages` for grounding.
+ - Real-Time SSE Telemetry: Streams live persona traversal events (`traversed_node_ids`) and independent concept reorganization updates to animate the WebGL canvas (`react-force-graph-2d`).
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                      4. Agentic Tool Ingestion & Multi-Hub Integration                 │
@@ -76,19 +72,17 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 
 ---
 
-## 🚀 Backend Implementation & Verification Status
+## 🚀 Backend Implementation
 
-The backend engine (`me-mex/backend`) is fully implemented and verified:
-
-- ✅ **`app/db.py`**: MongoDB Database Engine with models for Documents, Passages, Graph Nodes, Connection Edges, Project Workspaces, Chat Messages, and Staging Records.
-- ✅ **`app/services/llm_gateway.py`**: vLLM gateway client targeting Colab Ministral 3-8B with local rule-based fallback.
-- ✅ **`app/services/graph_analytics.py`**: `rustworkx` Hub Centrality worker with pure centrality dynamic thresholding and project-scoped graph filtering.
-- ✅ **`app/tools/search_tools.py`**: ArXiv research paper search and Trafilatura web article text extractor.
-- ✅ **`app/agents/department_persona.py`**: Specialist Personas for shared sub-graph exploration (`explore_concept_hub`), retrieval synthesis (`explore_and_retrieve`), and structured graph ingestion (`persona_ingestion`).
-- ✅ **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating Direct Conversation, Ingestion, and Persona Retrieval flows with `chat_history` context-aware intent classification.
-- ✅ **`app/api/sse.py`**: FastAPI SSE endpoint (`/api/sse/chat`) streaming live persona traversal telemetry.
-- ✅ **`main.py`**: REST API endpoints for unified chat (`POST /api/chat`), project workspaces (`GET/POST /api/projects`), project chat history (`GET /api/projects/{id}/chat`), and graph querying (`GET /api/graph?project_id=...`).
-- ✅ **`tests/` & `run_tests.py`**: Pytest test suite and runner passing all database, project scoping, analytics, retrieval stream, concept merging, and API checks.
+- **`app/db.py`**: MongoDB Database Engine with models for Documents, Passages, Graph Nodes, Connection Edges, Project Workspaces, Chat Messages, and Staging Records.
+- **`app/services/llm_gateway.py`**: vLLM gateway client targeting Colab Ministral 3-8B with local rule-based fallback.
+- **`app/services/graph_analytics.py`**: `rustworkx` Hub Centrality worker with pure centrality dynamic thresholding and project-scoped graph filtering.
+- **`app/tools/search_tools.py`**: ArXiv research paper search and Trafilatura web article text extractor.
+- **`app/agents/department_persona.py`**: Specialist Personas for shared sub-graph exploration (`explore_concept_hub`), retrieval synthesis (`explore_and_retrieve`), and structured graph ingestion (`persona_ingestion`).
+- **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating Direct Conversation, Ingestion, and Persona Retrieval flows with `chat_history` context-aware intent classification.
+- **`app/api/sse.py`**: FastAPI SSE endpoint (`/api/sse/chat`) streaming live persona traversal telemetry.
+- **`main.py`**: REST API endpoints for unified chat (`POST /api/chat`), project workspaces (`GET/POST /api/projects`), project chat history (`GET /api/projects/{id}/chat`), and graph querying (`GET /api/graph?project_id=...`).
+- **`tests/` & `run_tests.py`**: Pytest test suite and runner passing all database, project scoping, analytics, retrieval stream, concept merging, and API checks.
 
 ---
 
