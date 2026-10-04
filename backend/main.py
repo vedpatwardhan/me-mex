@@ -1,5 +1,5 @@
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -45,7 +45,7 @@ class ChatRequest(BaseModel):
 async def chat_endpoint(req: ChatRequest):
     """Unified Orchestrated Chat Endpoint: Classifies intent, streams events, and collects traversal/tool evidence."""
     final_reply = ""
-    intent = "DIRECT_CONVERSATION"
+    intent = "CONVERSATION"
     department_findings = []
     touched_nodes = []
     tool_calls = []
@@ -68,7 +68,7 @@ async def chat_endpoint(req: ChatRequest):
         events_log.append(event)
 
         if evt_type == "intent_classified":
-            intent = event.get("intent", "DIRECT_CONVERSATION")
+            intent = event.get("intent", "CONVERSATION")
         elif evt_type == "node_touched":
             touched_nodes.append(
                 {

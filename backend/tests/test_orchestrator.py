@@ -12,7 +12,7 @@ from app.agents.orchestrator import orchestrator
 def test_classify_intent_conversation():
     """Verify CONVERSATION path classification for greetings and basic prompts."""
     res = orchestrator.classify_intent("Hello, good morning!", chat_history=[])
-    assert res["intent"] in ["CONVERSATION", "DIRECT_CONVERSATION"]
+    assert res["intent"] == "CONVERSATION"
 
 
 def test_classify_intent_retrieval():
@@ -20,7 +20,7 @@ def test_classify_intent_retrieval():
     res = orchestrator.classify_intent(
         "Explain latent world models vs pixel world models", chat_history=[]
     )
-    assert res["intent"] in ["RETRIEVAL", "GRAPH_RETRIEVAL"]
+    assert res["intent"] == "RETRIEVAL"
 
 
 def test_classify_intent_ingestion():
@@ -28,7 +28,7 @@ def test_classify_intent_ingestion():
     res = orchestrator.classify_intent(
         "https://arxiv.org/abs/2401.12345 paper abstract", chat_history=[]
     )
-    assert res["intent"] in ["INGESTION", "DOCUMENT_INGESTION"]
+    assert res["intent"] == "INGESTION"
 
 
 def test_classify_intent_with_chat_history():
@@ -43,7 +43,7 @@ def test_classify_intent_with_chat_history():
     res = orchestrator.classify_intent(
         "Compare this with diffusion policies", chat_history=history
     )
-    assert res["intent"] in ["RETRIEVAL", "GRAPH_RETRIEVAL"]
+    assert res["intent"] == "RETRIEVAL"
 
 
 def test_consolidate_extracted_concepts():

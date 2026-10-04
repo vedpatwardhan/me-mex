@@ -29,7 +29,7 @@ def test_direct_conversation_flow_continuity():
 
         intent_evts = [e for e in events if e.get("event") == "intent_classified"]
         assert len(intent_evts) > 0
-        assert intent_evts[0]["intent"] == "DIRECT_CONVERSATION"
+        assert intent_evts[0]["intent"] == "CONVERSATION"
 
         complete_evts = [e for e in events if e.get("event") == "chat_complete"]
         assert len(complete_evts) > 0

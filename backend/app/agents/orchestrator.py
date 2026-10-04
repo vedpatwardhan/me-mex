@@ -179,14 +179,6 @@ class ExecutiveOrchestrator:
             )
             data = json.loads(res)
             raw_intent = data.get("intent", "CONVERSATION")
-            # Map legacy names if emitted
-            if raw_intent == "DIRECT_CONVERSATION":
-                raw_intent = "CONVERSATION"
-            elif raw_intent == "GRAPH_RETRIEVAL":
-                raw_intent = "RETRIEVAL"
-            elif raw_intent == "DOCUMENT_INGESTION":
-                raw_intent = "INGESTION"
-
             return {
                 "intent": raw_intent,
                 "source_url": data.get("source_url"),
