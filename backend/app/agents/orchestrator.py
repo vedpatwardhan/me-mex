@@ -1,4 +1,16 @@
-from typing import Tuple
+"""
+Executive Orchestrator Agent: Me-Mex
+
+Aligned with docs/ARCHITECTURE.md Section 2:
+- Acts as central conversational gateway and intent classifier.
+- Classifies queries into 3 execution paths (`CONVERSATION`, `RETRIEVAL`, `INGESTION`).
+- Path Lifecycle:
+    - `CONVERSATION`: Direct execution -> Final conversation response.
+    - `RETRIEVAL`: Mutually exclusive sub-graph traversal (Step 1) -> Relevance evaluation (Step 2) -> Final conversation response.
+    - `INGESTION`: Fetch URL/PDF & build intra-doc graph (Step 1) -> Partitioned sub-graph traversal, relevance eval, multi-hub linking & passage-grounded concept splitting (Step 2) -> Final conversation response.
+- Creates Root Nodes (`ROOT`) and extracted Intra-Document Concepts (`node_type="CONCEPT"`) with `immutable: True`.
+"""
+
 import json
 import uuid
 import time
@@ -23,7 +35,7 @@ from app.services.graph_ingestion_engine import graph_ingestion_engine
 
 
 class ExecutiveOrchestrator:
-    """Executive Orchestrator agent acting as central intent classifier and coordinator for conversation, retrieval, and ingestion."""
+    """Executive Orchestrator agent acting as central intent classifier and lifecycle coordinator."""
 
     def __init__(self, max_k_hubs: int = 8):
         self.db = db_engine
@@ -59,7 +71,7 @@ class ExecutiveOrchestrator:
         query: str,
         chat_history: List[Dict[str, str]],
     ) -> Dict[str, Any]:
-        """Performs LLM pass across a passage chunk to extract atomic concept nodes and qualitative relation edges in the context of query and chat history."""
+        """Performs LLM pass across a passage chunk to extract atomic concept nodes and qualitative relation edges."""
         system_prompt = load_prompt("passage_concept_extraction").format(
             doc_title=doc_title
         )
@@ -101,7 +113,7 @@ class ExecutiveOrchestrator:
         query: str,
         chat_history: List[Dict[str, str]],
     ) -> Dict[str, Any]:
-        """Consolidates raw passage concepts into document-specific canonical concepts with aggregated passage pointers."""
+        """Consolidates raw passage concepts into document-specific canonical concepts."""
         if not raw_extracted_concepts:
             return {"concepts": [], "relations": []}
 
@@ -149,7 +161,7 @@ class ExecutiveOrchestrator:
     def classify_intent(
         self, query: str, chat_history: List[Dict[str, str]]
     ) -> Dict[str, Any]:
-        """Classifies user input into DIRECT_CONVERSATION, GRAPH_RETRIEVAL, or DOCUMENT_INGESTION and extracts ingestion target details (source_url, raw_text) in a single pass."""
+        """Classifies user input into CONVERSATION, RETRIEVAL, or INGESTION path in a single pass."""
         system_prompt = load_prompt("classify_intent")
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -166,14 +178,23 @@ class ExecutiveOrchestrator:
                 enable_reasoning=False,
             )
             data = json.loads(res)
+            raw_intent = data.get("intent", "CONVERSATION")
+            # Map legacy names if emitted
+            if raw_intent == "DIRECT_CONVERSATION":
+                raw_intent = "CONVERSATION"
+            elif raw_intent == "GRAPH_RETRIEVAL":
+                raw_intent = "RETRIEVAL"
+            elif raw_intent == "DOCUMENT_INGESTION":
+                raw_intent = "INGESTION"
+
             return {
-                "intent": data.get("intent"),
+                "intent": raw_intent,
                 "source_url": data.get("source_url"),
                 "raw_text": data.get("raw_text"),
             }
         except Exception:
             return {
-                "intent": "DIRECT_CONVERSATION",
+                "intent": "CONVERSATION",
                 "source_url": None,
                 "raw_text": None,
             }
@@ -184,7 +205,7 @@ class ExecutiveOrchestrator:
         chat_history: List[Dict[str, str]],
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Central conversational entry point routing user input dynamically with error handling."""
+        """Central conversational entry point routing user input dynamically across the 3 execution paths."""
         try:
             intent_result = self.classify_intent(query, chat_history)
             intent = intent_result["intent"]
@@ -198,13 +219,13 @@ class ExecutiveOrchestrator:
             self.event_queue.push(project_id, intent_evt)
             yield intent_evt
 
-            if intent == "DIRECT_CONVERSATION":
+            if intent == "CONVERSATION":
                 async for event in self.execute_direct_conversation_flow(
                     query, chat_history, project_id=project_id
                 ):
                     self.event_queue.push(project_id, event)
                     yield event
-            elif intent == "DOCUMENT_INGESTION":
+            elif intent == "INGESTION":
                 async for event in self.execute_ingestion_flow(
                     query=query,
                     chat_history=chat_history,
@@ -215,7 +236,9 @@ class ExecutiveOrchestrator:
                     yield event
             else:
                 async for event in self.execute_retrieval_flow(
-                    query, project_id=project_id
+                    query=query,
+                    chat_history=chat_history,
+                    project_id=project_id,
                 ):
                     self.event_queue.push(project_id, event)
                     yield event
@@ -235,14 +258,13 @@ class ExecutiveOrchestrator:
         chat_history: List[Dict[str, str]],
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Direct conversational response without graph traversal overhead."""
+        """Path 1: CONVERSATION (Single-Step Direct Response straightaway)."""
         yield {
             "event": "conversation_start",
             "message": "Executive Orchestrator responding directly via conversational mode...",
             "timestamp": time.time(),
         }
 
-        # Fetch last 15 system execution events for active project from in-memory queue
         recent_events = self.event_queue.get_events(project_id=project_id, limit=15)
         events_summary = ""
         if recent_events:
@@ -277,14 +299,14 @@ class ExecutiveOrchestrator:
         chat_history: List[Dict[str, str]],
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Multi-Persona Parallel Retrieval over project-scoped concept hubs."""
+        """Path 2: RETRIEVAL (Step 1: Partitioned Hub Traversal -> Step 2: Relevance Evaluation -> Final Conversation)."""
         yield {
             "event": "persona_traversal_start",
             "message": f"Executive Orchestrator identifying dynamic concept hubs in project '{project_id}' for query: '{query}'",
             "timestamp": time.time(),
         }
 
-        # Dynamically discover top concept hubs via rustworkx centrality in project scope
+        # Discover top concept hubs via rustworkx unweighted centrality
         top_hubs = self.analytics.get_top_concept_hubs(
             project_id=project_id, max_k=self.max_k_hubs
         )
@@ -304,6 +326,7 @@ class ExecutiveOrchestrator:
                 yield event
             return
 
+        # Pre-Step 1 & 2: Mutually Exclusive Sub-Graph Traversal & Relevance Evaluation
         department_findings = []
         for dept in active_departments:
             yield {
@@ -315,32 +338,24 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
-            finding = dept.explore_and_retrieve(
-                query=query, chat_history=chat_history, project_id=project_id
+            finding = dept.explore_concept_hub(
+                query=query,
+                chat_history=chat_history,
+                project_id=project_id,
+                max_depth=3,
             )
             department_findings.append(finding)
-
-            if finding.get("web_search_used"):
-                yield {
-                    "event": "persona_web_search",
-                    "department_id": dept.department_id,
-                    "search_query": f"{dept.hub_node.title} {query}",
-                    "message": f"Persona '{dept.department_name}' executed DuckDuckGo web search tool.",
-                    "timestamp": time.time(),
-                }
 
             evt_active = {
                 "event": "persona_traversal_active",
                 "department_id": dept.department_id,
                 "department_name": dept.department_name,
                 "traversed_node_ids": finding["traversed_node_ids"],
-                "perspective_snippet": finding["perspective"][:150],
                 "timestamp": time.time(),
             }
             self.event_queue.push(project_id, evt_active)
             yield evt_active
 
-        # Push retrieval summary finding event into queue for direct conversation prompt awareness
         retrieval_summary_evt = {
             "event": "retrieval_summary",
             "message": f"Graph Retrieval completed across {len(active_departments)} concept departments for query: '{query}'",
@@ -348,7 +363,7 @@ class ExecutiveOrchestrator:
         }
         self.event_queue.push(project_id, retrieval_summary_evt)
 
-        # Delegate final assistant response turn directly to execute_direct_conversation_flow
+        # Final Step: Culminate in conversation response stream
         async for event in self.execute_direct_conversation_flow(
             query, chat_history, project_id=project_id
         ):
@@ -361,11 +376,11 @@ class ExecutiveOrchestrator:
         target_info: Dict[str, Any],
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Multi-Pass Document Ingestion: Scrapes URL/payload, chunk passages, extracts atomic concepts, links concept hubs, & dispatches to direct conversation."""
+        """Path 3: INGESTION (Step 1: Fetch & Intra-Doc Graph -> Step 2: Hub Traversal, Relevance Eval, Linking & Reorganization -> Final Conversation)."""
         source_url = target_info.get("source_url")
         raw_payload = target_info.get("raw_text")
 
-        # Step 1: Content Scraping & Title Extraction
+        # Step 1: Document Fetching & Scraping
         full_content = raw_payload
         title = None
 
@@ -373,14 +388,12 @@ class ExecutiveOrchestrator:
             doc_res = self.tools.fetch_document(source_url)
             if doc_res.get("content"):
                 full_content = doc_res["content"]
-                # Extract title from first markdown header (# Title) if available
                 for line in full_content.splitlines():
                     if line.startswith("# "):
                         title = line[2:].strip()
                         break
 
         if not title:
-            # Fallback to deriving title from raw_text payload (first non-empty line or snippet)
             first_line = (
                 full_content.strip().splitlines()[0]
                 if (full_content and full_content.strip())
@@ -395,7 +408,7 @@ class ExecutiveOrchestrator:
             "event": "orchestrator_tool_call",
             "tool_name": "ingest_document_tool",
             "args": {"title": title, "source_url": source_url},
-            "message": f"Executive Orchestrator invoking multi-pass document ingestion pipeline for '{title}'...",
+            "message": f"Executive Orchestrator invoking document ingestion pipeline for '{title}'...",
             "timestamp": time.time(),
         }
         self.event_queue.push(project_id, tool_evt)
@@ -410,7 +423,7 @@ class ExecutiveOrchestrator:
         )
         self.db.upsert_document(doc_rec)
 
-        # Step 2: Passage Chunking (~500 token chunks)
+        # Store Out-of-Graph Passage Records
         passage_chunks = self._chunk_text(full_content, chunk_size=1500)
         passage_ids = []
         for idx, chunk_str in enumerate(passage_chunks):
@@ -421,20 +434,9 @@ class ExecutiveOrchestrator:
             self.db.upsert_passage(p_rec)
             passage_ids.append(p_id)
 
-        pass_chunk_evt = {
-            "event": "passage_chunked",
-            "doc_id": doc_id,
-            "chunks_count": len(passage_ids),
-            "message": f"Document '{title}' chunked into {len(passage_ids)} plain-text passage records.",
-            "timestamp": time.time(),
-        }
-        self.event_queue.push(project_id, pass_chunk_evt)
-        yield pass_chunk_evt
-
-        # Step 3: Multi-Pass Passage Concept Extraction
+        # Extract Raw Passage Concepts & Consolidate into Intra-Document Concepts
         raw_extracted_concepts: List[Dict[str, Any]] = []
         extracted_relations: List[Dict[str, Any]] = []
-
         for p_id, chunk_str in zip(passage_ids, passage_chunks):
             extraction = self._extract_concepts_from_passage(
                 chunk_str, title, query, chat_history
@@ -450,186 +452,95 @@ class ExecutiveOrchestrator:
                 )
             extracted_relations.extend(extraction.get("relations", []))
 
-        # Step 4: In-Memory Concept Consolidation Across Passages
-        # consolidated_concepts: [{idx: int, title: str, description: str, passage_ids: [str]}]
-        # consolidated_relations: [{source_idx: int, target_idx: int, description: str}]
         consolidated_result = self.consolidate_extracted_concepts(
             raw_extracted_concepts, extracted_relations, title, query, chat_history
         )
         consolidated_concepts = consolidated_result.get("concepts", [])
-        consolidated_relations = consolidated_result.get("relations", [])
-        doc_description = consolidated_result.get(
-            "doc_description", f"Consolidated knowledge document for '{title}'."
-        )
-        doc_type = consolidated_result.get("doc_type", "paper")
 
         proj_list = ["global"]
         if project_id and project_id != "global":
             proj_list.append(project_id)
 
-        # Step 5: Pre-populate concept_id_to_node with existing DB graph nodes for project scoping,
-        # then save Root Media node and Intra-Document concept nodes & edges into DB prior to persona discovery
-        concept_id_to_node: dict[str, GraphNode] = dict()
-        for existing_node in self.db.get_nodes(project_id=project_id):
-            concept_id_to_node[existing_node.id] = existing_node
-
-        for evt in self._create_intra_document_subgraph(
-            doc_id=doc_id,
-            doc_title=title,
-            doc_description=doc_description,
-            doc_type=doc_type,
-            consolidated_concepts=consolidated_concepts,
-            consolidated_relations=consolidated_relations,
-            project_id=project_id,
-            proj_list=proj_list,
+        # Create Root Node & Immutable Intra-Document Concept Nodes in MongoDB
+        root_node_id = f"root_{doc_id}"
+        root_node = GraphNode(
+            _id=root_node_id,
+            node_type="ROOT",
+            title=title,
+            description=consolidated_result.get(
+                "doc_description", f"Document summary for {title}."
+            ),
             passage_ids=passage_ids,
-            concept_id_to_node=concept_id_to_node,
-        ):
-            yield evt
+            project_ids=proj_list,
+            metadata={"immutable": True, "source_url": source_url},
+        )
+        self.db.upsert_node(root_node)
 
-        # Step 6: Discover Top Concept Hubs & Run Active Department Persona Ingestion to collect commands
-        # top_hubs: [{
-        #   id: str,
-        #   node_type: str,
-        #   title: str,
-        #   description: str,
-        #   passage_ids: [str],
-        #   metadata: {str: any}
-        # }]
+        intra_doc_nodes = []
+        for c in consolidated_concepts:
+            c_id = f"concept_{uuid.uuid4().hex[:8]}"
+            intra_node = GraphNode(
+                _id=c_id,
+                node_type="CONCEPT",
+                title=c.get("title", "Extracted Concept"),
+                description=c.get("description", ""),
+                passage_ids=c.get("passage_ids", passage_ids[:1]),
+                project_ids=proj_list,
+                metadata={"immutable": True, "root_node_id": root_node_id},  # IMMUTABLE
+            )
+            self.db.upsert_node(intra_node)
+            intra_doc_nodes.append(intra_node)
+
+            # Link Root Node to Intra-Document Concept
+            rel_edge = GraphEdge(
+                _id=f"edge_{uuid.uuid4().hex[:8]}",
+                source_id=root_node_id,
+                target_id=c_id,
+                description="RELEVANT_TO",
+                project_ids=proj_list,
+            )
+            self.db.upsert_edge(rel_edge)
+
+        # Step 2: Sub-Graph Traversal, Relevance Eval, Multi-Hub Linking & Concept Reorganization
         top_hubs = self.analytics.get_top_concept_hubs(
             project_id=project_id, max_k=self.max_k_hubs
         )
         active_departments = [
             DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
         ]
+
         persona_command_results: List[Dict[str, Any]] = []
         for dept in active_departments:
-            yield {
-                "event": "persona_traversal_start",
-                "department_id": dept.department_id,
-                "department_name": dept.department_name,
-                "hub_id": dept.hub_node.id,
-                "message": f"Specialist Persona '{dept.hub_node.title}' evaluating newly consolidated concepts for global graph merging...",
-                "timestamp": time.time(),
-            }
-
-            candidate_nodes = list(concept_id_to_node.values())
             ingest_res = dept.persona_ingestion(
-                candidate_nodes, title, query, chat_history, project_id=project_id
+                consolidated_concepts, title, query, chat_history, project_id=project_id
             )
-            # ingest_res: [{
-            #     department_id: str,
-            #     department_name: str,
-            #     hub_node_id: str,
-            #     traversed_node_ids: [str],
-            #     commands: [{
-            #       command_type: str,
-            #       concept: {id: str, title: str, description: str, passage_ids: [str]},
-            #       edge: {id: str, source_idx: str, target_idx: str, description: str}
-            #     }],
-            # }]
+            # Run passage-grounded concept reorganization on over-clustered mutable concept nodes
+            reorg_cmds = dept.reorganize_concept_hub(project_id=project_id)
+            all_cmds = ingest_res.get("commands", []) + reorg_cmds
+
             persona_command_results.append(
                 {
-                    "dept": dept,
-                    "commands": ingest_res.get("commands", []),
-                    "subgraph_nodes": ingest_res.get("subgraph_nodes", []),
+                    "department_name": dept.department_name,
+                    "commands": all_cmds,
                 }
             )
 
-        # Step 7: Apply persona commands & global graph merging edits to DB in helper method
-        for evt in self._apply_ingestion_graph_updates(
-            doc_id=doc_id,
-            doc_title=title,
-            consolidated_concepts=consolidated_concepts,
-            persona_command_results=persona_command_results,
+        # Execute independent commands into MongoDB
+        for evt in self.ingestion_engine.process_persona_ingestion_commands(
+            persona_command_results,
+            doc_id,
+            title,
+            consolidated_concepts,
             project_id=project_id,
-            proj_list=proj_list,
-            passage_ids=passage_ids,
-            concept_id_to_node=concept_id_to_node,
         ):
             yield evt
 
-        comp_evt = {
-            "event": "tool_complete",
-            "tool_name": "ingest_document_tool",
-            "doc_id": doc_id,
-            "created_nodes_count": len(consolidated_concepts),
-            "passage_ids": passage_ids,
-            "message": f"Successfully integrated document '{title}' with {len(consolidated_concepts)} concept nodes and {len(passage_ids)} passage pointers.",
-            "timestamp": time.time(),
-        }
-        self.event_queue.push(project_id, comp_evt)
-        yield comp_evt
-
-        # Step 7: Delegate final assistant response turn directly to execute_direct_conversation_flow
-        ingest_query = f"I just ingested document '{title}'. Summarize the key additions and integrated graph concepts."
+        # Final Step: Culminate in conversation response stream
+        ingest_query = f"I just ingested document '{title}'. Summarize key additions and integrated graph concepts."
         async for event in self.execute_direct_conversation_flow(
             ingest_query, chat_history, project_id=project_id
         ):
             yield event
-
-    def _create_intra_document_subgraph(
-        self,
-        doc_id: str,
-        doc_title: str,
-        doc_description: str,
-        doc_type: str,
-        consolidated_concepts: List[Dict[str, Any]],
-        consolidated_relations: List[Dict[str, Any]],
-        project_id: str,
-        proj_list: List[str],
-        passage_ids: List[str],
-        concept_id_to_node: Dict[str, GraphNode],
-    ) -> Generator[Dict[str, Any], None, None]:
-        """Delegate intra-document subgraph creation to graph_ingestion_engine."""
-        return self.ingestion_engine.create_intra_document_subgraph(
-            doc_id=doc_id,
-            doc_title=doc_title,
-            doc_description=doc_description,
-            doc_type=doc_type,
-            consolidated_concepts=consolidated_concepts,
-            consolidated_relations=consolidated_relations,
-            project_id=project_id,
-            proj_list=proj_list,
-            passage_ids=passage_ids,
-            concept_id_to_node=concept_id_to_node,
-        )
-
-    def _apply_ingestion_graph_updates(
-        self,
-        doc_id: str,
-        doc_title: str,
-        consolidated_concepts: List[Dict[str, Any]],
-        persona_command_results: List[Dict[str, Any]],
-        project_id: str,
-        proj_list: List[str],
-        passage_ids: List[str],
-        concept_id_to_node: Dict[str, GraphNode],
-    ) -> Generator[Dict[str, Any], None, None]:
-        """Delegate ingestion graph updates to graph_ingestion_engine."""
-        return self.ingestion_engine.apply_ingestion_graph_updates(
-            doc_id=doc_id,
-            doc_title=doc_title,
-            consolidated_concepts=consolidated_concepts,
-            persona_command_results=persona_command_results,
-            project_id=project_id,
-            proj_list=proj_list,
-            passage_ids=passage_ids,
-            concept_id_to_node=concept_id_to_node,
-        )
-
-    def _run_multi_persona_debate(
-        self,
-        doc_title: str,
-        proposals: List[Dict[str, Any]],
-        persona_objections: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
-        """Delegate multi-persona debate resolution to graph_ingestion_engine."""
-        return self.ingestion_engine.run_multi_persona_debate(
-            doc_title=doc_title,
-            proposals=proposals,
-            persona_objections=persona_objections,
-        )
 
 
 orchestrator = ExecutiveOrchestrator()

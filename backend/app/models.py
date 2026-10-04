@@ -1,33 +1,68 @@
+"""
+Universal Storage & Domain Models: Me-Mex
+
+Aligned with docs/ARCHITECTURE.md Section 3:
+- Universal Graph Network: Root Nodes (Document Summaries), Concept Nodes (Immutable vs. Mutable), and Typed Relation Edges.
+- First-Class Temporal Reasoning: Explicit creation/update timestamps (`created_at`, `updated_at`) on all nodes/edges without artificial numerical weight decay.
+- Node Mutability Hierarchy:
+    - Root Nodes (`ROOT`) & Intra-Document Concept Nodes (direct extracted concepts connected to Root Nodes) are Immutable (`metadata.immutable = True`).
+    - Persona-created Domain Hubs & Intermediate Nodes are Mutable (`metadata.immutable = False`).
+"""
+
 import time
 from typing import Dict, List, Literal, Optional, Any
 from pydantic import BaseModel, Field
 
-# Canonical Node Types (4 Root Media Types + 1 Concept Type)
-NodeType = Literal["paper", "blog", "video", "post", "concept"]
+# Canonical Node Types (ROOT for base documents; CONCEPT for extracted and domain concepts)
+NodeType = Literal["paper", "blog", "video", "post", "concept", "ROOT", "CONCEPT"]
 
-# 1. Universal Graph Node Model
+
 class GraphNode(BaseModel):
+    """
+    Universal Active Graph Network Node Entity.
+
+    Stores node metadata, title, description, and passage chunk references.
+    Note: Raw passage text chunks are stored out-of-graph in the `passages` collection
+    and referenced via `passage_ids` to keep the active graph topology clean.
+    """
+
     id: str = Field(alias="_id")
     node_type: NodeType = "concept"
     title: str
     description: str = ""
     passage_ids: List[str] = Field(
         default_factory=list
-    )  # Out-of-graph passage chunk IDs
+    )  # Out-of-graph passage chunk ID pointers
     project_ids: List[str] = Field(default_factory=lambda: ["global"])
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
 
+    @property
+    def is_immutable(self) -> bool:
+        """
+        Returns True if node represents ground-truth evidence (Root Node or Intra-Document Concept)
+        that cannot be modified, split, or deleted by persona agents.
+        """
+        if self.node_type == "ROOT" or self.metadata.get("immutable", False):
+            return True
+        return False
 
-# 2. Dual-Mode Connection Edge Model
+
 class GraphEdge(BaseModel):
+    """
+    Qualitative Typed Relation Edge Entity.
+
+    Represents unweighted qualitative relationships (`SUBSET_OF`, `SUPERSET_OF`, `RELEVANT_TO`,
+    `BUILDS_UPON`, `SUPERSEDES`, `PARALLEL_TO`, `CONTRASTS_WITH`) contextualized with descriptions.
+    Temporal progression is tracked directly via `created_at` timestamps without artificial numerical weight decay.
+    """
+
     id: str = Field(alias="_id")
     source_id: str
     target_id: str
     is_directional: bool = True  # False for symmetric parallel concepts
     description: str = ""  # Natural language explanation of relationship
-    weight: float = 1.0  # Decays to 0.3 when superseded
     status: str = "PRIMARY_ACTIVE"  # "PRIMARY_ACTIVE" | "HISTORICAL_SUPERSEDED"
     provenance_quote: Optional[str] = None
     project_ids: List[str] = Field(default_factory=lambda: ["global"])

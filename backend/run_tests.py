@@ -1,3 +1,12 @@
+"""
+Master Backend Test Suite Runner: Me-Mex
+
+Aligned with docs/ARCHITECTURE.md Section 7:
+- Executes test suite against isolated 'test-me-mex' database without mutating production data.
+- Covers DB isolation, rustworkx analytics, intent classification, zero-consensus ingestion linking,
+  node mutability enforcement, concept splitting, and API endpoints.
+"""
+
 import asyncio
 import os
 import sys
@@ -26,22 +35,20 @@ from tests.test_graph_analytics import (
     test_pure_centrality_dynamic_hub_selection,
 )
 from tests.test_orchestrator import (
-    test_classify_intent_direct,
+    test_classify_intent_conversation,
     test_classify_intent_retrieval,
     test_classify_intent_ingestion,
     test_classify_intent_with_chat_history,
     test_consolidate_extracted_concepts,
 )
 from tests.test_concept_reconciliation import (
-    test_reconciliation_no_conflict,
-    test_reconciliation_conflict_debate,
-    test_create_and_delete_commands,
-    test_evaluate_command_objections,
+    test_independent_ingestion_linking,
+    test_node_immutability_enforcement,
+    test_mutable_concept_node_splitting,
 )
 from tests.test_department_persona import (
-    test_department_persona_project_scoping,
     test_department_persona_shared_exploration,
-    test_department_persona_root_media_traversal_blocking,
+    test_department_persona_root_node_traversal_blocking,
 )
 from tests.test_direct_conversation import (
     test_direct_conversation_flow_continuity,
@@ -88,7 +95,7 @@ def run_all_tests():
             test_pure_centrality_dynamic_hub_selection,
             False,
         ),
-        ("Orchestrator: Direct Intent", test_classify_intent_direct, True),
+        ("Orchestrator: Conversation Intent", test_classify_intent_conversation, True),
         ("Orchestrator: Retrieval Intent", test_classify_intent_retrieval, True),
         ("Orchestrator: Ingestion Intent", test_classify_intent_ingestion, True),
         (
@@ -102,38 +109,28 @@ def run_all_tests():
             False,
         ),
         (
-            "Reconciliation: Path 1 (No Conflict)",
-            test_reconciliation_no_conflict,
+            "Reconciliation: Independent Ingestion Linking",
+            test_independent_ingestion_linking,
             False,
         ),
         (
-            "Reconciliation: Path 2 (Multi-Persona Debate)",
-            test_reconciliation_conflict_debate,
+            "Reconciliation: Node Immutability Enforcement",
+            test_node_immutability_enforcement,
             False,
         ),
         (
-            "Reconciliation: Command Mutations (CREATE/DELETE)",
-            test_create_and_delete_commands,
+            "Reconciliation: Mutable Concept Splitting",
+            test_mutable_concept_node_splitting,
             False,
         ),
         (
-            "Reconciliation: Persona Command Objection Review Pass",
-            test_evaluate_command_objections,
-            False,
-        ),
-        (
-            "Persona: Project-Scoped Traversal",
-            test_department_persona_project_scoping,
-            True,
-        ),
-        (
-            "Persona: Shared Exploration & Debate",
+            "Persona: Sub-Graph Exploration",
             test_department_persona_shared_exploration,
             True,
         ),
         (
-            "Persona: Root Media Traversal Blocking",
-            test_department_persona_root_media_traversal_blocking,
+            "Persona: Root Node Traversal Blocking",
+            test_department_persona_root_node_traversal_blocking,
             True,
         ),
         (

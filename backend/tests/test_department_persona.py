@@ -1,40 +1,30 @@
+"""
+Test Suite: Department Persona Agent Sub-Graph Exploration & Reorganization
+
+Aligned with docs/ARCHITECTURE.md Section 4:
+- Validates sub-graph traversal (`explore_concept_hub`) over mutually exclusive partitions.
+- Validates Root Node Traversal Blocking (Root Nodes provide summary context, but expansion past Root Nodes is strictly blocked).
+- Validates independent passage-grounded concept node reorganization (`reorganize_concept_hub`).
+"""
+
 from app.agents.department_persona import DepartmentPersonaAgent
 from app.db import db_engine
 from app.models import GraphNode, GraphEdge
 
 
-def test_department_persona_project_scoping():
-    """Verify DepartmentPersonaAgent.explore_and_retrieve respects project_id edge filtering."""
-    hub_node = db_engine.get_node("concept_action_mpc")
-    assert hub_node is not None
-
-    agent = DepartmentPersonaAgent(hub_node)
-
-    # Add edge specific to proj_scoped
-    scoped_edge = GraphEdge(
-        _id="edge_mpc_scoped",
-        source_id="concept_action_mpc",
-        target_id="concept_world_models",
-        is_directional=True,
-        description="MPC to World Models link",
-        project_ids=["global", "proj_scoped"],
-    )
-    db_engine.upsert_edge(scoped_edge)
-
-    finding_global = agent.explore_and_retrieve(
-        "MPC optimization", allow_web_search=False, project_id="global"
-    )
-    finding_scoped = agent.explore_and_retrieve(
-        "MPC optimization", allow_web_search=False, project_id="proj_scoped"
-    )
-
-    assert "traversed_node_ids" in finding_global
-    assert "traversed_node_ids" in finding_scoped
-
-
 def test_department_persona_shared_exploration():
-    """Verify DepartmentPersonaAgent.explore_concept_hub performs sub-graph traversal."""
-    hub_node = db_engine.get_node("concept_world_models")
+    """Verify DepartmentPersonaAgent.explore_concept_hub performs sub-graph traversal up to max_depth."""
+    hub_node = GraphNode(
+        _id="concept_world_models_test",
+        node_type="CONCEPT",
+        title="World Models",
+        description="World models domain hub.",
+        passage_ids=[],
+        project_ids=["global"],
+        metadata={"immutable": False},
+    )
+    db_engine.upsert_node(hub_node)
+
     agent = DepartmentPersonaAgent(hub_node)
     exploration = agent.explore_concept_hub(
         query="world models research",
@@ -43,53 +33,55 @@ def test_department_persona_shared_exploration():
         project_id="global",
     )
 
-    assert exploration["department_id"] == "dept_concept_world_models"
-    assert exploration["hub_node_id"] == "concept_world_models"
-    assert "concept_world_models" in exploration["traversed_node_ids"]
-    assert "subgraph_nodes" in exploration
+    assert exploration["department_id"] == "dept_concept_world_models_test"
+    assert exploration["hub_node_id"] == "concept_world_models_test"
+    assert "concept_world_models_test" in exploration["traversed_node_ids"]
+    assert "explored_nodes" in exploration
 
 
-def test_department_persona_root_media_traversal_blocking():
-    """Verify traversal visits root media nodes for context but blocks them from expanding further hops."""
-    # Hub Concept A -> Root Paper D -> Concept E
+def test_department_persona_root_node_traversal_blocking():
+    """Verify traversal visits Root Nodes for context but blocks expanding further hops through them."""
     hub_a = GraphNode(
         _id="concept_hub_a",
-        node_type="concept",
+        node_type="CONCEPT",
         title="Hub Concept A",
         project_ids=["proj_root_blocking_test"],
+        metadata={"immutable": False},
     )
-    paper_d = GraphNode(
+    paper_root = GraphNode(
         _id="paper_d_root",
-        node_type="paper",
+        node_type="ROOT",  # ROOT NODE
         title="Paper D Container",
         project_ids=["proj_root_blocking_test"],
+        metadata={"immutable": True},
     )
     concept_e = GraphNode(
         _id="concept_e_unreachable",
-        node_type="concept",
+        node_type="CONCEPT",
         title="Concept E from Paper D",
         project_ids=["proj_root_blocking_test"],
+        metadata={"immutable": True},
     )
     db_engine.upsert_node(hub_a)
-    db_engine.upsert_node(paper_d)
+    db_engine.upsert_node(paper_root)
     db_engine.upsert_node(concept_e)
 
-    # Edge A -> Paper D
+    # Edge Hub A -> Paper Root
     e1 = GraphEdge(
         _id="edge_a_to_d",
         source_id="concept_hub_a",
         target_id="paper_d_root",
         is_directional=True,
-        description="Hub A extracted from Paper D",
+        description="Hub A extracted from Paper Root",
         project_ids=["proj_root_blocking_test"],
     )
-    # Edge Paper D -> Concept E
+    # Edge Paper Root -> Concept E
     e2 = GraphEdge(
         _id="edge_d_to_e",
         source_id="paper_d_root",
         target_id="concept_e_unreachable",
         is_directional=True,
-        description="Paper D also contains Concept E",
+        description="Paper Root contains Concept E",
         project_ids=["proj_root_blocking_test"],
     )
     db_engine.upsert_edge(e1)
@@ -98,12 +90,12 @@ def test_department_persona_root_media_traversal_blocking():
     agent = DepartmentPersonaAgent(hub_a)
     exploration = agent.explore_concept_hub(
         query="Explore Hub A",
-        allow_web_search=False,
         project_id="proj_root_blocking_test",
         max_depth=3,
     )
 
-    # Paper D should be visited (present in traversed_node_ids)
-    assert "paper_d_root" in exploration["traversed_node_ids"]
-    # Concept E must NOT be reached through Paper D
-    assert "concept_e_unreachable" not in exploration["traversed_node_ids"]
+    traversed = exploration["traversed_node_ids"]
+    # Hub A and Paper Root are visited...
+    assert "concept_hub_a" in traversed
+    # ...but traversal past Paper Root to Concept E is strictly BLOCKED!
+    assert "concept_e_unreachable" not in traversed

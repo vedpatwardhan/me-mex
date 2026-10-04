@@ -1,3 +1,14 @@
+"""
+Specialist Persona Agent: Me-Mex
+
+Aligned with docs/ARCHITECTURE.md Section 4:
+- Instantiated dynamically per concept hub partition detected by rustworkx unweighted eigenvector centrality.
+- Conducts sub-graph exploration (`explore_concept_hub`) over mutually exclusive assigned partitions up to max_depth=3.
+- Blocks expansion past Root Nodes (read summary for provenance only).
+- Conducts independent passage-grounded concept node reorganization (`reorganize_concept_hub`) during Ingestion, splitting over-clustered mutable concept nodes (`SPLIT_CONCEPT`) using underlying text passage chunks.
+- Operates zero-consensus independently (no objections or bilateral debate loops).
+"""
+
 import json
 import time
 from collections import defaultdict
@@ -14,7 +25,7 @@ from app.tools.search_tools import search_tools
 
 
 class DepartmentPersonaAgent:
-    """Specialized Persona Agent instantiated dynamically per concept hub."""
+    """Specialized Persona Agent instantiated dynamically per concept hub partition."""
 
     def __init__(self, hub_node: GraphNode, score: float = 1.0):
         self.hub_node = hub_node
@@ -29,12 +40,13 @@ class DepartmentPersonaAgent:
         chat_history: Optional[List[Dict[str, str]]] = None,
         allow_web_search: bool = False,
         project_id: str = "global",
-        max_depth: int = 5,
+        max_depth: int = 3,
+        partition_node_ids: Optional[set] = None,
     ) -> Dict[str, Any]:
-        """Multi-hop sub-graph exploration common to retrieval and ingestion.
+        """Multi-hop sub-graph exploration over mutually exclusive assigned partitions.
 
-        Iteratively expands frontier nodes up to max_depth, asking the persona LLM to evaluate candidate
-        neighbors at each hop to build a rich multi-hop domain context. Emits node_touched events as nodes are visited.
+        Iteratively expands frontier nodes up to max_depth=3. Blocks further traversal past Root Nodes.
+        Emits node_touched telemetry events to animate the visual canvas.
         """
         all_edges = db_engine.get_edges(project_id)
         adj_map: Dict[str, List[GraphEdge]] = defaultdict(list)
@@ -65,8 +77,24 @@ class DepartmentPersonaAgent:
             # Find all unvisited candidate neighbors connected to current frontier nodes
             candidate_neighbors: Dict[str, Dict[str, Any]] = {}
             for f_id in current_frontier:
+                # Root Node Traversal Blocking: Root Nodes provide summary context, but block expanding further hops
+                f_node = db_engine.get_node(f_id)
+                if f_node and f_node.node_type in [
+                    "paper",
+                    "blog",
+                    "video",
+                    "post",
+                    "ROOT",
+                ]:
+                    continue
+
                 for e in adj_map.get(f_id, []):
                     neighbor_id = e.target_id if e.source_id == f_id else e.source_id
+
+                    # Filter by mutually exclusive partition if specified
+                    if partition_node_ids and neighbor_id not in partition_node_ids:
+                        continue
+
                     if (
                         neighbor_id not in visited_node_ids
                         and neighbor_id not in candidate_neighbors
@@ -78,12 +106,13 @@ class DepartmentPersonaAgent:
                                 "title": neighbor_node.title,
                                 "body": neighbor_node.description,
                                 "relation_desc": e.description,
+                                "node_type": neighbor_node.node_type,
                             }
 
             if not candidate_neighbors:
                 break
 
-            # Evaluate candidate neighbors with persona LLM to select relevant nodes to explore deeper
+            # Evaluate candidate neighbors with persona LLM
             prompt_payload = f"""
             Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
             User Query / Context: "{query}"
@@ -120,122 +149,128 @@ class DepartmentPersonaAgent:
                     nid for nid in selected_ids if nid in candidate_neighbors
                 ]
             except Exception as e:
-                print(
-                    f"[{self.department_name}] Hop {depth} expansion error ({e}); selecting top candidates."
-                )
-                next_frontier = list(candidate_neighbors.keys())[:3]
-
-            if not next_frontier:
-                break
+                print(f"[{self.department_name}] Subgraph expansion error: {e}")
+                next_frontier = list(candidate_neighbors.keys())[:2]
 
             for nid in next_frontier:
                 visited_node_ids.add(nid)
-                node_obj = db_engine.get_node(nid)
-                if node_obj:
-                    explored_nodes_map[nid] = node_obj
-                    node_evt = {
+                n_node = db_engine.get_node(nid)
+                if n_node:
+                    explored_nodes_map[nid] = n_node
+                    # Emit real-time telemetry event
+                    evt = {
                         "event": "node_touched",
                         "persona_id": self.department_id,
                         "persona_name": self.department_name,
-                        "node_id": node_obj.id,
-                        "node_title": node_obj.title,
-                        "message": f"Concept '{node_obj.title}' touched by {self.department_name}.",
+                        "node_id": n_node.id,
+                        "node_title": n_node.title,
+                        "message": f"Concept '{n_node.title}' explored at hop {depth} by {self.department_name}.",
                         "timestamp": time.time(),
                     }
-                    event_queue.push(project_id, node_evt)
+                    event_queue.push(project_id, evt)
 
-            # Filter next_frontier to ONLY concept nodes (blocking root media nodes from expanding further hops)
-            current_frontier = [
-                nid
-                for nid in next_frontier
-                if explored_nodes_map.get(nid)
-                and explored_nodes_map[nid].node_type == "concept"
-            ]
+            current_frontier = next_frontier
 
-        traversed_node_ids = list(visited_node_ids)
-        subgraph_nodes = list(explored_nodes_map.values())
-        self.last_explored_nodes = subgraph_nodes
-
+        self.last_explored_nodes = list(explored_nodes_map.values())
         return {
             "department_id": self.department_id,
             "department_name": self.department_name,
-            "hub_node_id": self.hub_node.id,
-            "hub_title": self.hub_node.title,
-            "traversed_node_ids": traversed_node_ids,
-            "subgraph_nodes": subgraph_nodes,
+            "explored_nodes": self.last_explored_nodes,
+            "traversed_node_ids": list(visited_node_ids),
         }
 
-    def explore_and_retrieve(
+    def reorganize_concept_hub(
         self,
-        query: str,
-        chat_history: Optional[List[Dict[str, str]]] = None,
-        allow_web_search: bool = False,
         project_id: str = "global",
-    ) -> Dict[str, Any]:
-        """Retrieval mode: runs concept hub exploration, then synthesizes persona perspective."""
-        exploration = self.explore_concept_hub(
-            query=query,
-            chat_history=chat_history,
-            allow_web_search=False,
-            project_id=project_id,
-        )
-
-        subgraph_nodes = exploration.get("subgraph_nodes", [])
-
-        # Synthesize persona perspective over accumulated multi-hop sub-graph
-        prompt_payload = f"""
-        You are the Specialist Agent for Concept Hub '{self.hub_node.title}'.
-        Your Hub Concept Node Details:
-        - Title: {self.hub_node.title}
-        - Description: {self.hub_node.description}
-
-        Explored Multi-Hop Subgraph Concepts ({len(subgraph_nodes)} nodes):
-        {json.dumps([{"id": n.id, "title": n.title, "body": n.description[:200]} for n in subgraph_nodes])}
-
-        Task / User Query: "{query}"
-
-        Analyze the task from your concept hub perspective using your deep multi-hop graph context. Debate the relevance of your domain knowledge to the prompt and provide expert observations.
+        degree_threshold: int = 5,
+    ) -> List[Dict[str, Any]]:
         """
-        messages = [
-            {
-                "role": "system",
-                "content": load_prompt("department_persona").format(
-                    hub_title=self.hub_node.title
-                ),
-            }
-        ]
-        if chat_history:
-            messages.extend(chat_history[-4:])
-        messages.append({"role": "user", "content": prompt_payload})
+        Independent Concept Node Reorganization & Splitting during Ingestion.
 
-        llm_response = llm_gateway.generate_chat_completion(messages)
+        Inspects mutable concept nodes in the persona's sub-graph. If a mutable node's connection degree
+        exceeds `degree_threshold` (over-clustering), the persona inspects underlying passage chunks in `passages`
+        and emits a `SPLIT_CONCEPT` command to restructure it into distinct sub-concepts.
+        """
+        all_edges = db_engine.get_edges(project_id)
+        degree_map: Dict[str, int] = defaultdict(int)
+        for e in all_edges:
+            degree_map[e.source_id] += 1
+            degree_map[e.target_id] += 1
 
-        return {
-            "department_id": self.department_id,
-            "department_name": self.department_name,
-            "hub_node_id": self.hub_node.id,
-            "hub_title": self.hub_node.title,
-            "traversed_node_ids": exploration.get("traversed_node_ids", []),
-            "subgraph_nodes": subgraph_nodes,
-            "perspective": llm_response,
-            "web_search_used": False,
-        }
+        reorg_commands: List[Dict[str, Any]] = []
+
+        for node in self.last_explored_nodes:
+            # Skip immutable nodes (Root Nodes & Intra-Doc Concepts)
+            if node.is_immutable:
+                continue
+
+            # Check if mutable concept node is over-clustered
+            if degree_map.get(node.id, 0) >= degree_threshold:
+                # Fetch plain-text passage chunks for ground-truth context
+                passages = db_engine.get_passages_by_ids(node.passage_ids)
+                passage_texts = [p.text_content for p in passages]
+
+                prompt = f"""
+                Over-Clustered Mutable Concept Node: '{node.title}' (ID: {node.id})
+                Current Description: {node.description}
+                Connection Degree: {degree_map[node.id]} links
+                
+                Associated Passage Text Chunks for Grounding:
+                {json.dumps(passage_texts, indent=2)}
+
+                Reorganize and split this concept node into 2 distinct focused sub-concepts.
+                Return JSON format:
+                {{
+                  "action": "SPLIT_CONCEPT",
+                  "concept_id": "{node.id}",
+                  "sub_concepts": [
+                    {{"title": "Focused Sub-Concept 1", "description": "...", "passage_ids": {json.dumps(node.passage_ids[:1])}}},
+                    {{"title": "Focused Sub-Concept 2", "description": "...", "passage_ids": {json.dumps(node.passage_ids[1:])}}}
+                  ]
+                }}
+                """
+                messages = [
+                    {
+                        "role": "system",
+                        "content": f"You are {self.department_name}. Reorganize over-clustered mutable concept nodes.",
+                    },
+                    {"role": "user", "content": prompt},
+                ]
+                try:
+                    res = llm_gateway.generate_chat_completion(
+                        messages,
+                        temperature=0.2,
+                        max_tokens=512,
+                        response_format={"type": "json_object"},
+                        enable_reasoning=False,
+                    )
+                    data = json.loads(res)
+                    if data.get("action") == "SPLIT_CONCEPT":
+                        reorg_commands.append(data)
+                except Exception as e:
+                    print(
+                        f"[{self.department_name}] Concept reorg error for {node.id}: {e}"
+                    )
+
+        return reorg_commands
 
     def persona_ingestion(
         self,
-        candidate_nodes: List[GraphNode],
+        consolidated_concepts: List[Dict[str, Any]],
         doc_title: str,
         query: str,
-        chat_history: List[Dict[str, str]],
+        chat_history: Optional[List[Dict[str, str]]] = None,
         project_id: str = "global",
     ) -> Dict[str, Any]:
-        """Ingestion mode: Executes shared exploration first, then outputs a structured command list for graph integration."""
+        """Independent zero-consensus graph ingestion step.
+
+        Emits commands (`CONNECT_DIRECT`, `CREATE_INTERMEDIATE`, `EDIT_CONCEPT` on mutable nodes,
+        and `SPLIT_CONCEPT` on mutable nodes) to link extracted intra-document concepts to domain hubs.
+        """
         exploration = self.explore_concept_hub(
-            query=query,
-            chat_history=chat_history,
-            allow_web_search=False,
-            project_id=project_id,
+            query=query, chat_history=chat_history, project_id=project_id, max_depth=3
         )
+        explored_nodes = exploration["explored_nodes"]
 
         def _format_nodes(nodes: List[GraphNode]) -> List[Dict[str, Any]]:
             return [
@@ -243,26 +278,28 @@ class DepartmentPersonaAgent:
                     "id": n.id,
                     "title": n.title,
                     "description": n.description,
+                    "node_type": n.node_type,
+                    "immutable": n.is_immutable,
                     "passage_ids": n.passage_ids,
                 }
                 for n in nodes
             ]
 
-        subgraph_nodes = exploration.get("subgraph_nodes", [])
-        subgraph_nodes_payload = _format_nodes(subgraph_nodes)
-        candidate_concepts_payload = _format_nodes(candidate_nodes)
+        explored_payload = _format_nodes(explored_nodes)
 
-        prompt_payload = (
-            f"Document Title: {doc_title}\n"
-            f"User Query Context: {query}\n\n"
-            f"Hub Concept: '{self.hub_node.title}' (ID: {self.hub_node.id})\n"
-            f"Hub Description: {self.hub_node.description}\n\n"
-            f"Explored Subgraph Concepts ({len(subgraph_nodes)} nodes):\n"
-            f"{json.dumps(subgraph_nodes_payload, indent=2)}\n\n"
-            f"Candidate Intra-Document Concepts ({len(candidate_nodes)} items):\n"
-            f"{json.dumps(candidate_concepts_payload, indent=2)}"
-        )
+        prompt_str = f"""
+        Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
+        Document Title: '{doc_title}'
+        User Query: "{query}"
 
+        Newly Extracted Intra-Document Concepts (IMMUTABLE):
+        {json.dumps(consolidated_concepts, indent=2)}
+
+        Explored Subgraph Nodes:
+        {json.dumps(explored_payload, indent=2)}
+
+        Emit independent linking and reorganization commands.
+        """
         messages = [
             {
                 "role": "system",
@@ -273,25 +310,25 @@ class DepartmentPersonaAgent:
         ]
         if chat_history:
             messages.extend(chat_history[-4:])
-        messages.append({"role": "user", "content": prompt_payload})
+        messages.append({"role": "user", "content": prompt_str})
 
         try:
             res = llm_gateway.generate_chat_completion(
                 messages,
                 temperature=0.2,
-                max_tokens=2048,
+                max_tokens=1024,
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )
             data = json.loads(res)
-            commands = data.get("commands", [])
+            raw_cmds = data.get("commands", [])
             return {
                 "department_id": self.department_id,
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
                 "traversed_node_ids": exploration.get("traversed_node_ids", []),
-                "subgraph_nodes": subgraph_nodes,
-                "commands": commands,
+                "subgraph_nodes": explored_nodes,
+                "commands": raw_cmds,
             }
         except Exception as e:
             print(f"[{self.department_name}] Persona ingestion error: {e}")
@@ -302,142 +339,4 @@ class DepartmentPersonaAgent:
                 "traversed_node_ids": exploration.get("traversed_node_ids", []),
                 "subgraph_nodes": [],
                 "commands": [],
-            }
-
-    def evaluate_command_objections(
-        self,
-        all_persona_commands: List[Dict[str, Any]],
-        doc_title: str,
-        candidate_nodes: List[GraphNode],
-        explored_nodes: Optional[List[GraphNode]] = None,
-    ) -> List[Dict[str, Any]]:
-        """LLM Step: Review all proposed commands across all personas and report specific objections."""
-        if explored_nodes is None:
-            explored_nodes = self.last_explored_nodes or [self.hub_node]
-        my_commands = []
-        other_commands = []
-
-        for item in all_persona_commands:
-            dept_id = item.get("department_id")
-            dept_name = item.get("department_name", "Unknown Persona")
-            command = item.get("command", {})
-            cmd_item = {
-                "command_id": item.get("command_id"),
-                "command_type": command.get("command_type"),
-                "concept": command.get("concept"),
-                "edge": command.get("edge"),
-                "proposing_persona": dept_name,
-            }
-            if dept_id == self.department_id:
-                my_commands.append(cmd_item)
-            else:
-                other_commands.append(cmd_item)
-
-        def _format_nodes(nodes: List[GraphNode]) -> List[Dict[str, Any]]:
-            return [
-                {
-                    "id": n.id,
-                    "title": n.title,
-                    "description": n.description,
-                    "passage_ids": n.passage_ids,
-                }
-                for n in nodes
-            ]
-
-        explored_payload = _format_nodes(explored_nodes)
-        candidate_payload = _format_nodes(candidate_nodes)
-
-        prompt_str = load_prompt("persona_command_objections").format(
-            hub_title=self.hub_node.title,
-            doc_title=doc_title,
-            explored_subgraph_json=json.dumps(explored_payload, indent=2),
-            candidate_concepts_json=json.dumps(candidate_payload, indent=2),
-            my_commands_json=json.dumps(my_commands, indent=2),
-            other_commands_json=json.dumps(other_commands, indent=2),
-        )
-
-        messages = [
-            {
-                "role": "system",
-                "content": f"You are {self.department_name}. Evaluate proposed commands from other personas for conflicts.",
-            },
-            {"role": "user", "content": prompt_str},
-        ]
-
-        try:
-            res = llm_gateway.generate_chat_completion(
-                messages,
-                temperature=0.2,
-                max_tokens=1024,
-                response_format={"type": "json_object"},
-                enable_reasoning=False,
-            )
-            data = json.loads(res)
-            return data.get("objections", [])
-        except Exception as e:
-            print(f"[{self.department_name}] Command objection evaluation error: {e}")
-            return []
-
-    def respond_to_debate_turn(
-        self,
-        opposing_persona_name: str,
-        opposing_explored_nodes: List[GraphNode],
-        objections_context: List[Dict[str, Any]],
-        debate_history: List[Dict[str, Any]],
-        doc_title: str,
-        current_turn: int,
-        max_turns: int = 3,
-    ) -> Dict[str, Any]:
-        """LLM Turn: Generate argument/counter-proposal or declare consensus in a bilateral debate session."""
-
-        def _format_nodes(nodes: List[GraphNode]) -> List[Dict[str, Any]]:
-            return [
-                {
-                    "id": n.id,
-                    "title": n.title,
-                    "description": n.description,
-                    "passage_ids": n.passage_ids,
-                }
-                for n in (nodes or [])
-            ]
-
-        my_explored = _format_nodes(self.last_explored_nodes or [self.hub_node])
-        opposing_explored = _format_nodes(opposing_explored_nodes)
-
-        prompt_str = load_prompt("persona_ingestion_debate").format(
-            my_persona_name=self.department_name,
-            opposing_persona_name=opposing_persona_name,
-            doc_title=doc_title,
-            my_explored_json=json.dumps(my_explored, indent=2),
-            opposing_explored_json=json.dumps(opposing_explored, indent=2),
-            objections_context_json=json.dumps(objections_context, indent=2),
-            debate_history_json=json.dumps(debate_history, indent=2),
-            current_turn=current_turn,
-            max_turns=max_turns,
-        )
-
-        messages = [
-            {
-                "role": "system",
-                "content": f"You are {self.department_name}, engaging in a bilateral graph reconciliation debate with {opposing_persona_name}.",
-            },
-            {"role": "user", "content": prompt_str},
-        ]
-
-        try:
-            res = llm_gateway.generate_chat_completion(
-                messages,
-                temperature=0.2,
-                max_tokens=1024,
-                response_format={"type": "json_object"},
-                enable_reasoning=False,
-            )
-            data = json.loads(res)
-            return data
-        except Exception as e:
-            print(f"[{self.department_name}] Debate turn error: {e}")
-            return {
-                "consensus_reached": True,
-                "turn_rationale": "Fallback consensus due to LLM error.",
-                "resolved_commands": [],
             }

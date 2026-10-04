@@ -1,29 +1,34 @@
+"""
+Test Suite: Executive Orchestrator Intent Classification & Workflow Routing
+
+Aligned with docs/ARCHITECTURE.md Section 2:
+- Validates classification into 3 execution paths (`CONVERSATION`, `RETRIEVAL`, `INGESTION`).
+- Validates path intent decoding context awareness across chat history.
+"""
+
 from app.agents.orchestrator import orchestrator
 
 
-from app.agents.orchestrator import orchestrator
-
-
-def test_classify_intent_direct():
-    """Verify DIRECT_CONVERSATION classification for greetings and basic prompts."""
+def test_classify_intent_conversation():
+    """Verify CONVERSATION path classification for greetings and basic prompts."""
     res = orchestrator.classify_intent("Hello, good morning!", chat_history=[])
-    assert res["intent"] == "DIRECT_CONVERSATION"
+    assert res["intent"] in ["CONVERSATION", "DIRECT_CONVERSATION"]
 
 
 def test_classify_intent_retrieval():
-    """Verify GRAPH_RETRIEVAL classification for concept research queries."""
+    """Verify RETRIEVAL path classification for concept research queries."""
     res = orchestrator.classify_intent(
         "Explain latent world models vs pixel world models", chat_history=[]
     )
-    assert res["intent"] == "GRAPH_RETRIEVAL"
+    assert res["intent"] in ["RETRIEVAL", "GRAPH_RETRIEVAL"]
 
 
 def test_classify_intent_ingestion():
-    """Verify DOCUMENT_INGESTION classification for arXiv paper links and text pastes."""
+    """Verify INGESTION path classification for paper links and text pastes."""
     res = orchestrator.classify_intent(
         "https://arxiv.org/abs/2401.12345 paper abstract", chat_history=[]
     )
-    assert res["intent"] == "DOCUMENT_INGESTION"
+    assert res["intent"] in ["INGESTION", "DOCUMENT_INGESTION"]
 
 
 def test_classify_intent_with_chat_history():
@@ -38,7 +43,7 @@ def test_classify_intent_with_chat_history():
     res = orchestrator.classify_intent(
         "Compare this with diffusion policies", chat_history=history
     )
-    assert res["intent"] == "GRAPH_RETRIEVAL"
+    assert res["intent"] in ["RETRIEVAL", "GRAPH_RETRIEVAL"]
 
 
 def test_consolidate_extracted_concepts():

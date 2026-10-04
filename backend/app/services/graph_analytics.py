@@ -31,7 +31,7 @@ class GraphAnalyticsWorker:
                 s_idx = node_id_to_idx[e.source_id]
                 t_idx = node_id_to_idx[e.target_id]
                 edge_data = {
-                    "weight": e.weight,
+                    "weight": 1.0,  # Unweighted topological link (w=1.0)
                     "status": e.status,
                     "is_directional": getattr(e, "is_directional", True),
                     "description": getattr(e, "description", ""),
@@ -45,18 +45,16 @@ class GraphAnalyticsWorker:
 
     @staticmethod
     def calculate_hub_centrality(project_id: Optional[str] = None) -> Dict[str, float]:
-        """Compute degree/eigenvector centrality to rank high-level seed concept hubs."""
+        """Compute unweighted eigenvector centrality via rustworkx to rank foundational concept hubs."""
         graph, idx_to_node_id, _ = GraphAnalyticsWorker.build_rustworkx_graph(
             project_id
         )
         if len(graph) == 0:
             return {}
 
-        # Eigenvector centrality via rustworkx (with fallback to degree centrality)
+        # Unweighted eigenvector centrality via rustworkx (with fallback to degree centrality)
         try:
-            centrality_map = rx.eigenvector_centrality(
-                graph, weight_fn=lambda e: e.get("weight", 1.0)
-            )
+            centrality_map = rx.eigenvector_centrality(graph, weight_fn=lambda e: 1.0)
         except Exception:
             # Fallback to in-degree centrality
             centrality_map = {}
