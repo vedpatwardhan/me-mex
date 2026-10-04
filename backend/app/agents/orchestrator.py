@@ -212,7 +212,7 @@ class ExecutiveOrchestrator:
             yield intent_evt
 
             if intent == "CONVERSATION":
-                async for event in self.execute_direct_conversation_flow(
+                async for event in self.execute_conversation_flow(
                     query, chat_history, project_id=project_id
                 ):
                     self.event_queue.push(project_id, event)
@@ -244,7 +244,7 @@ class ExecutiveOrchestrator:
             self.event_queue.push(project_id, err_evt)
             yield err_evt
 
-    async def execute_direct_conversation_flow(
+    async def execute_conversation_flow(
         self,
         query: str,
         chat_history: List[Dict[str, str]],
@@ -269,7 +269,7 @@ class ExecutiveOrchestrator:
                 + "\n".join(formatted_events)
             )
 
-        base_prompt = load_prompt("direct_conversation")
+        base_prompt = load_prompt("conversation")
         system_prompt = f"{base_prompt}{events_summary}"
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -312,7 +312,7 @@ class ExecutiveOrchestrator:
                 "message": "No active concept hubs found in database yet. Falling back to direct conversation.",
                 "timestamp": time.time(),
             }
-            async for event in self.execute_direct_conversation_flow(
+            async for event in self.execute_conversation_flow(
                 query, chat_history, project_id=project_id
             ):
                 yield event
@@ -356,7 +356,7 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, retrieval_summary_evt)
 
         # Final Step: Culminate in conversation response stream
-        async for event in self.execute_direct_conversation_flow(
+        async for event in self.execute_conversation_flow(
             query, chat_history, project_id=project_id
         ):
             yield event
@@ -529,7 +529,7 @@ class ExecutiveOrchestrator:
 
         # Final Step: Culminate in conversation response stream
         ingest_query = f"I just ingested document '{title}'. Summarize key additions and integrated graph concepts."
-        async for event in self.execute_direct_conversation_flow(
+        async for event in self.execute_conversation_flow(
             ingest_query, chat_history, project_id=project_id
         ):
             yield event

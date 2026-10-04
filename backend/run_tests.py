@@ -50,8 +50,8 @@ from tests.test_department_persona import (
     test_department_persona_shared_exploration,
     test_department_persona_root_node_traversal_blocking,
 )
-from tests.test_direct_conversation import (
-    test_direct_conversation_flow_continuity,
+from tests.test_conversation import (
+    test_conversation_flow_continuity,
     test_external_event_understanding,
 )
 from tests.test_api_routes import (
@@ -135,7 +135,7 @@ def run_all_tests():
         ),
         (
             "Direct Conversation: Flow Continuity",
-            test_direct_conversation_flow_continuity,
+            test_conversation_flow_continuity,
             True,
         ),
         (
