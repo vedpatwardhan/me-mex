@@ -12,7 +12,7 @@ All master technical specs, research syntheses, and product roadmaps are consoli
 
 - 🏗️ **[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)**: Unified technical spec, 3-element topology, Node Mutability Hierarchy, 3-step persona workflows, API endpoints, and WebGL specs.
 - 🔬 **[`docs/RESEARCH_SYNTHESIS.md`](./docs/RESEARCH_SYNTHESIS.md)**: Literature surveys on GraphRAG, HippoRAG 2, Stanford STORM, Google Co-Scientist, multi-agent debate frameworks, and deep-dive paper notes.
-- 🗺️ **[`docs/ROADMAP.md`](./docs/ROADMAP.md)**: Strategic 4-milestone execution roadmap and feature progress.
+- 🗺️ **[`docs/ROADMAP.md`](./docs/ROADMAP.md)**: Strategic 5-phase execution roadmap (Backend $\rightarrow$ Testing $\rightarrow$ Frontend $\rightarrow$ End-to-End Interactivity $\rightarrow$ Fine-Tuning & Cortex-OS).
 
 ---
 
@@ -38,7 +38,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
         - Intra-Document Concepts (Immutable) : Factual concepts extracted directly from document text.
         - Domain & Intermediate Nodes (Mutable): Persona-created domain hub & bridge concepts.
      3. QUALITATIVE RELATION EDGES        : Typed structural edges (`SUBSET_OF`, `SUPERSET_OF`, `RELEVANT_TO`, `BUILDS_UPON`, `SUPERSEDES`, `PARALLEL_TO`, `CONTRASTS_WITH`) with contextual edge descriptions.
- - First-Class Timestamps: Nodes and edges carry explicit creation/update timestamps (`created_at`, `updated_at`), enabling persona agents to reason about temporal progression and historical context naturally without artificial numerical weight decay. Optional frontend toggles visualize timeline progression using color-coded time windows.
+ - First-Class Timestamps: Nodes and edges carry explicit creation/update timestamps (`created_at`, `updated_at`), enabling persona agents to reason about temporal progression and historical context naturally. Optional frontend toggles visualize timeline progression using color-coded time windows.
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │             3. Mutually Exclusive Concept Hub Exploration & Relevance Evaluation       │

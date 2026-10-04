@@ -1,81 +1,83 @@
-# Me-Mex Architecture & Implementation Roadmap
+# Me-Mex Master Execution Roadmap
 
-> **Document Purpose**: This document outlines the strategic implementation roadmap, UI-first interaction paradigm, and 4-milestone execution plan for **Me-Mex**.
-
----
-
-## 1. Executive Summary & Core Philosophy
-
-**Me-Mex** is a local-first, interactive visual knowledge graph designed as an external memory system for textual knowledge synthesis (academic research papers, technical blogs, YouTube transcripts), associative recall, and scientific discovery.
-
-Rather than building backend schemas first and guessing interaction patterns, **Me-Mex follows a UI-First, Build-Back Paradigm**. Designing user interaction flows first clarifies node granularity, mutation patterns, ephemerality vs. persistence, and schema requirements before locking down backend MongoDB pipelines.
+> **Document Purpose**: This document outlines the strategic execution roadmap for **Me-Mex**, detailing the 5-phase engineering progression from backend implementation to specialized model fine-tuning for Cortex-OS.
 
 ---
 
-## 2. The 3-Pane UI Interaction Model
+## 1. Executive Summary & Strategic Vision
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                               GRAPH-MEMEX INTERACTION CANVAS                           │
-├─────────────────────────┬───────────────────────────────┬──────────────────────────────┤
-│ 1. SCRATCHPAD & INBOX   │ 2. FORCE GRAPH CANVAS         │ 3. SLIDE-OUT MARKDOWN DRAWER │
-│    (Agent Activity)     │    (react-force-graph)        │    (Reader & Editor)         │
-├─────────────────────────┼───────────────────────────────┼──────────────────────────────┤
-│ [Active Intake Feed]    │  (Category Hub: VLA)          │ # Paper Title                │
-│ • Paper X ingested      │       /       \               │                              │
-│ • Proposed Links (2)    │      /         \              │ **2-Line Takeaway**          │
-│   - [Accept] [Reject]   │ [Paper A] === [Paper B]       │ Compact factual summary...   │
-│                         │     \           /             │                              │
-│ [Curriculum Review]     │      \         /              │ **Connections**              │
-│ • Due Today: 12 nodes   │    [Deep Lesson Hub]          │ -> Builds upon [Paper A]     │
-│   [Start 15m Session]   │                               │ -> Contrasts with [Paper C]  │
-│                         │ Physics:                      │                              │
-│ [Idea Tournament]       │ • Solid: Strong mesh links    │ **Detailed Notes / AST**     │
-│ • Top Elo Hypotheses    │ • Dashed: Weak umbrellas      │ Interactive body text...     │
-└─────────────────────────┴───────────────────────────────┴──────────────────────────────┘
-```
+**Me-Mex** is an agentic external memory system designed as an external extension of your brain for organizing, synthesizing, and retrieving textual knowledge (academic papers, technical blogs, YouTube transcripts, reports, X posts).
 
-1. **Pane 1: Scratchpad / Proposal Inbox (Left Rail)**: Serves as the staging area where agents propose link mutations and paper ingests for human approval (`[Accept] / [Reject]`).
-2. **Pane 2: Main Force Canvas (Center View)**: Visualizes decoupled physics using `react-force-graph-2d`, where strong mesh lines pull related concepts into tight visual clusters.
-3. **Pane 3: Markdown Reader & Quick Editor (Right Slide-Out Drawer)**: Displays parsed Markdown AST, executive takeaways, wiki-links, and passage references with inline editing capabilities.
+The roadmap bridges core engine implementation with real-time UI interactivity, end-to-end empirical verification, and eventual custom model fine-tuning to transition from a memory subsystem into a broader agentic operating system (**Cortex-OS**).
 
 ---
 
-## 3. The 4-Milestone Prototype Roadmap
+## 2. The 5-Phase Strategic Execution Roadmap
 
 ```
  ┌────────────────────────────────────────────────────────────────────────────────────────┐
- │                        THE 4-MILESTONE PROTOTYPE ROADMAP                               │
+ │                         THE 5-PHASE EXECUTION ROADMAP                                  │
  └────────────────────────────────────────────────────────────────────────────────────────┘
 
-  [ Milestone 1: Visual Scratchpad & Interactive Graph UI (Frontend-First) ] — COMPLETED
-   ├── Scaffold Vite client using react-force-graph-2d
-   ├── Slide-out Markdown drawer for reading & editing
-   └── Scratchpad view showing real-time agent proposals and user confirmation toggles
+  [ Goal 1: Core Engine & Substrate Implementation ] — IN PROGRESS
+   ├── Ingestion Pipeline: Out-of-graph text chunk storage in `passages` collection
+   ├── Clean 3-Element Topology: Root Nodes, Intra-Doc Concepts, Persona Domain Hubs, & Typed Edges
+   ├── Node Mutability Enforcement: Root & Intra-Doc nodes (Immutable), Domain Hubs (Mutable)
+   ├── 3 Gateway Execution Paths: Conversation (direct), Retrieval (2 pre-steps), Ingestion (2 pre-steps)
+   └── Mutually Exclusive Hub Partitioning: rustworkx unweighted eigenvector hub detection
 
-  [ Milestone 2: Local Ground Truth & Data Plane (File & DB Sync) ] — COMPLETED
-   ├── 100% sync between Markdown files & MongoDB collections (MongoDB / In-Memory store)
-   ├── Pydantic schema validation for GraphNode and GraphEdge entities
-   └── FastMCP tool service exposing basic CRUD, vector search, and local hops ($graphLookup)
+  [ Goal 2: Comprehensive Backend Testing Pipeline ] — UPCOMING
+   ├── Unit Test Suite: MongoDB models, FastMCP search tools, Pydantic schema validation
+   ├── Project Isolation Tests: Scoped graph querying (`project_id`) & workspace chat history
+   ├── Persona Exploration & Reorganization Tests: Sub-graph partitioning & passage-grounded splitting
+   └── SSE Telemetry Verification: Fast non-reasoning intent classification & SSE event streams
 
-  [ Milestone 3: High-Speed Intake & Topological Associative Retrieval ] — COMPLETED
-   ├── Zero-mutation ingestion pipeline with out-of-graph PassageRecord storage
-   ├── Mutually exclusive concept hub exploration via rustworkx eigenvector centrality
-   └── Independent persona sub-graph reorganization & passage-grounded concept splitting
+  [ Goal 3: Frontend Implementation & Visualizer Integration ] — UPCOMING
+   ├── WebGL Force Graph Canvas: 2D force graph (`react-force-graph-2d`) with dynamic physics
+   ├── Dynamic Palette Telemetry: Live visual node glowing mapped to active persona departments over SSE
+   ├── Slide-Out Reader & Editor Drawer: Markdown AST viewer, passage references, & quick node editor
+   └── Temporal Timeline Visualizer: Color-coded visual highlights across user-selected time windows
 
-  [ Milestone 4: Autonomous Ideation, Dynamic Evolution & Spaced Repetition ] — IN PROGRESS
-   ├── Tournament loops: Generation, Reflection (falsification), Ranking (Elo)
-   ├── Dynamic node evolution updating overall_insights.md takeaways
-   └── FSRS-DAG morning briefing queue for targeted <15-minute reviews
+  [ Goal 4: End-to-End System Testing & Graph Interactivity Enhancements ] — UPCOMING
+   ├── End-to-End Validation: Automated multi-document intake, search retrieval, & chat stream checks
+   ├── Interactivity Enhancements: Drag-and-drop intake staging sandbox, dynamic re-clustering
+   └── Report Studio Integration: Graph-grounded markdown synthesis and manuscript draft generation
+
+  [ Goal 5: Model Fine-Tuning & Cortex-OS Foundation ] — LONG-TERM
+   ├── Synthetic Dataset Curation: Ingestion transcripts, sub-graph traversals, & reorganization actions
+   ├── Ministral Model Fine-Tuning: Fine-tuning local Ministral 3-8B / Colab vLLM server
+   └── System Integration: Expanding Me-Mex memory into a broader agentic operating system (Cortex-OS)
 ```
 
 ---
 
-## 4. Scientific Literature & Framework Alignment
+## 3. Detailed Phase Specifications
 
-| Functional Tier | Target Papers / Frameworks | Specific Role in Graph-Memex |
-| :--- | :--- | :--- |
-| **1. Intake & Streaming** | **fastbmRAG**, **LightRAG**, **Cognee** | Abstract-first drafting into `deeper_read_notes` before main-text parsing; Key-Value entity profiling; Extract-Cognify-Load (ECL) schemas. |
-| **2. Memory & Substrate** | **HippoRAG 2**, **A-MEM**, **Graphiti**, **MongoDB** | Dual-node graph (Passages vs. Phrases); Zettelkasten atomic note evolution; bi-temporal edge invalidation (`valid_time` vs `transaction_time`). |
-| **3. Search & Evidence Audit** | **HippoRAG 2**, **PaperQA2**, **ScientistOne** | Joint Vector + Personalized PageRank (PPR) multi-hop recall; Reranking Contextual Summarization (RCS) token filtering; Chain-of-Evidence (CoE) provenance. |
-| **4. Ideation & Evolution** | **Google Co-Scientist**, **STORM**, **EvoFSM**, **py-fsrs** | Assumption decomposition, hostile reflection (falsification), pairwise Elo tournaments, perspective-driven self-play, and FSRS morning review queues. |
+### Goal 1: Core Engine & Substrate Implementation
+- Build out `app/db.py`, `app/models.py`, `app/services/graph_analytics.py`, and `app/services/llm_gateway.py`.
+- Implement clean 3-element topology (Root Nodes, Intra-Doc Concepts, Persona Domain Hubs, and Relation Edges).
+- Enforce strict **Node Mutability Hierarchy**: Root Nodes and Intra-Doc concepts are `immutable: True`; Persona Domain Hubs and Intermediate nodes are `immutable: False`.
+- Implement 3 execution paths (`CONVERSATION`, `RETRIEVAL`, `INGESTION`) where Retrieval and Ingestion run sub-graph traversal and relevance evaluation before triggering the final conversation response.
+- Partition graph into mutually exclusive sub-graph regions across `rustworkx` unweighted eigenvector hubs.
+
+### Goal 2: Comprehensive Backend Testing Pipeline
+- Construct complete unit test suite in `tests/` covering database models, project workspace isolation, and FastMCP search tools.
+- Verify path routing for `CONVERSATION`, `RETRIEVAL`, and `INGESTION`.
+- Test independent persona sub-graph traversal, relevance evaluation, and passage-grounded concept splitting (`SPLIT_CONCEPT`).
+- Validate SSE telemetry streaming (`GET /api/sse/chat`) ensuring real-time `node_touched` and traversal events emit cleanly.
+
+### Goal 3: Frontend Implementation & Visualizer Integration
+- Implement Vite React client featuring `react-force-graph-2d` for interactive visual node visualization.
+- Connect frontend SSE client to render real-time glowing node IDs during persona traversal and concept reorganization.
+- Build slide-out Markdown reader drawer displaying parsed Markdown AST, executive takeaways, wiki-links, and raw passage references.
+- Integrate frontend timeline toggle applying color-coded visual highlights across user-selected time windows based on explicit node/edge `created_at` timestamps.
+
+### Goal 4: End-to-End System Testing & Graph Interactivity Enhancements
+- Conduct end-to-end empirical testing across multi-document PDF/web ingestion, associative recall, and report generation.
+- Enhance graph canvas interactivity with node dragging, manual edge creation, node merging, and intake staging sandbox approval toggles.
+- Build Report Studio enabling node-grounded markdown report drafting and export.
+
+### Goal 5: Model Fine-Tuning & Cortex-OS Foundation
+- Curate synthetic training trajectories from successful sub-graph traversals, intent classifications, and concept reorganization actions.
+- Fine-tune local Ministral 3-8B model on Colab vLLM server to optimize structured graph actions (`CONNECT_DIRECT`, `CREATE_INTERMEDIATE`, `SPLIT_CONCEPT`) with zero-shot reliability.
+- Expand Me-Mex beyond external memory into the core memory and context backbone of **Cortex-OS**.

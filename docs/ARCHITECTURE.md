@@ -109,10 +109,10 @@ graph TD
      - **`PARALLEL_TO`**: Contemporary parallel approaches or competing paradigms.
      - **`CONTRASTS_WITH`**: Asymmetric contrast or explicit contradiction between concepts.
 
-### First-Class Temporal Reasoning (No Artificial Weight Decay)
+### First-Class Temporal Reasoning
 
-Rather than applying artificial floating-point weight decay (`1.0` down to `0.3`), all nodes and edges store explicit unix timestamps (`created_at`, `updated_at`).
-- **Agent Reasoning**: Specialist Persona agents receive exact creation/update timestamps in their sub-graph context window, enabling natural LLM temporal reasoning (*"Concept A (2024) is superseded by Concept B (2026)"*) without arbitrary numerical penalties.
+All nodes and edges store explicit unix timestamps (`created_at`, `updated_at`).
+- **Agent Reasoning**: Specialist Persona agents receive exact creation/update timestamps in their sub-graph context window, enabling natural LLM temporal reasoning (*"Concept A (2024) is superseded by Concept B (2026)"*).
 - **Frontend Timeline Visualizer**: The WebGL UI visualizer (`react-force-graph-2d`) provides an optional temporal timeline toggle, applying color-coded visual highlights across user-selected time windows.
 
 The graph network enforces a strict **Hierarchy of Mutability**:
