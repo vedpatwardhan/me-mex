@@ -166,7 +166,14 @@ class ExecutiveOrchestrator:
 
         messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
-            messages.extend(chat_history[-4:])
+            for item in chat_history[-4:]:
+                role = (
+                    "assistant"
+                    if item.get("role") in ("agent", "assistant")
+                    else "user"
+                )
+                content = item.get("content") or item.get("text", "")
+                messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": query})
 
         try:
@@ -194,10 +201,12 @@ class ExecutiveOrchestrator:
     async def process_user_message(
         self,
         query: str,
-        chat_history: List[Dict[str, str]],
+        chat_history: Optional[List[Dict[str, str]]] = None,
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Central conversational entry point routing user input dynamically across the 3 execution paths."""
+        if chat_history is None:
+            chat_history = []
         try:
             intent_result = self.classify_intent(query, chat_history)
             intent = intent_result["intent"]

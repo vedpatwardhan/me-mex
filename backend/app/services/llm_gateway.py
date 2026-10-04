@@ -37,7 +37,7 @@ class LLMGateway:
             "Bypass-Tunnel-Reminder": "true",
             "User-Agent": "Me-Mex-Client",
         }
-        self.client = httpx.Client(timeout=timeout, headers=headers)
+        self.client = httpx.Client(timeout=timeout, headers=headers, trust_env=False)
 
     def prepare_reasoning_messages(
         self, messages: List[Dict[str, Any]]
@@ -84,8 +84,21 @@ class LLMGateway:
     def is_server_available(self) -> bool:
         """Ping vLLM server endpoint to verify live availability."""
         try:
-            resp = self.client.get(f"{self.base_url}/models", timeout=2.0)
-            return resp.status_code == 200
+            # We perform a minimal POST to /chat/completions or GET to /models
+            resp = self.client.get(f"{self.base_url}/models", timeout=5.0)
+            if resp.status_code == 200:
+                return True
+            # Fallback check via chat completions if /models is forbidden by tunnel proxy
+            resp_post = self.client.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 1,
+                },
+                timeout=5.0,
+            )
+            return resp_post.status_code == 200
         except Exception:
             return False
 

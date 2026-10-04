@@ -11,12 +11,10 @@ from app.agents.orchestrator import orchestrator
 from app.services.llm_gateway import llm_gateway
 
 
-def test_direct_conversation_flow_continuity():
-    """Verify that direct conversation mode maintains engaging, detailed multi-turn conversation."""
+def test_conversation_flow_continuity():
+    """Verify that conversation mode maintains engaging, detailed multi-turn conversation."""
     if not llm_gateway.is_server_available():
-        print(
-            "  ⏭️ test_direct_conversation_flow_continuity [SKIPPED - vLLM Server Offline]"
-        )
+        print("  ⏭️ test_conversation_flow_continuity [SKIPPED - vLLM Server Offline]")
         return
 
     async def _run():

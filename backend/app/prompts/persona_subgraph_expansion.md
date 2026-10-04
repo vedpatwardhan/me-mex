@@ -15,7 +15,7 @@ Given your current explored knowledge base and candidate neighbor concepts:
 Analyze which candidate neighbor concepts are relevant and worth exploring deeper.
 
 Return JSON format:
-{
+{{
   "selected_neighbor_ids": ["concept_id_1", "concept_id_3"],
   "rationale": "Brief explanation of why these nodes were selected for deeper expansion."
-}
+}}

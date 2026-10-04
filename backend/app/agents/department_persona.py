@@ -175,6 +175,7 @@ class DepartmentPersonaAgent:
         return {
             "department_id": self.department_id,
             "department_name": self.department_name,
+            "hub_node_id": self.hub_node.id,
             "explored_nodes": self.last_explored_nodes,
             "traversed_node_ids": list(visited_node_ids),
         }

@@ -39,46 +39,46 @@ Command Actions Allowed:
    - `sub_concepts`: List of new sub-concept objects with `title`, `description`, and `passage_ids`.
 
 Return JSON format strictly:
-{
+{{
   "commands": [
-    {
+    {{
       "action": "CONNECT_DIRECT",
-      "edge": {
+      "edge": {{
         "source_id": "intra_doc_concept_1",
         "target_id": "domain_hub_1",
         "relation_type": "RELEVANT_TO",
         "description": "Links factual intra-document concept to main domain hub."
-      }
-    },
-    {
+      }}
+    }},
+    {{
       "action": "CREATE_INTERMEDIATE",
-      "concept": {
+      "concept": {{
         "title": "Bridge Concept: Latent Policy Optimization",
         "description": "Synthesized intermediate concept bridging model-based planning and RL."
-      },
+      }},
       "edges": [
-        {
+        {{
           "source_id": "intra_doc_concept_1",
           "target_id": "intermediate_bridge_id",
           "description": "Sub-type relation"
-        }
+        }}
       ]
-    },
-    {
+    }},
+    {{
       "action": "SPLIT_CONCEPT",
       "concept_id": "overclustered_mutable_domain_node",
       "sub_concepts": [
-        {
+        {{
           "title": "Pixel-Based World Models",
           "description": "World models operating directly in raw pixel space.",
           "passage_ids": ["pass_101"]
-        },
-        {
+        }},
+        {{
           "title": "Latent Feature World Models",
           "description": "World models operating in compact latent representations.",
           "passage_ids": ["pass_102"]
-        }
+        }}
       ]
-    }
+    }}
   ]
-}
+}}
