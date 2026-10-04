@@ -1,8 +1,8 @@
-# Graph-Memex (`me-mex`)
+# Me-Mex
 
-> **Agentic Knowledge Graph & Multi-Modal High-Volume Intake Engine**
+> **Agentic Knowledge Graph & External Memory System**
 
-Graph-Memex (`me-mex`) is an agentic research assistant and personal long-term memory system designed to digest massive streams of multi-modal content—including academic research papers, YouTube transcripts, lecture audio, codebase repositories, and experimental logs—without manual file scrolling or cognitive overload.
+Me-Mex is an agentic external memory system designed to function as an external extension of your brain for organizing, linking, and retrieving textual knowledge—including academic research papers, technical blogs, and YouTube video transcripts—without manual note scrolling or cognitive overload.
 
 ---
 

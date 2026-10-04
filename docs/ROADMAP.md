@@ -1,14 +1,14 @@
-# Graph-Memex (`me-mex`) Architecture & Implementation Roadmap
+# Me-Mex Architecture & Implementation Roadmap
 
-> **Document Purpose**: This document outlines the strategic implementation roadmap, UI-first interaction paradigm, and 4-milestone execution plan for **Graph-Memex (`me-mex`)**.
+> **Document Purpose**: This document outlines the strategic implementation roadmap, UI-first interaction paradigm, and 4-milestone execution plan for **Me-Mex**.
 
 ---
 
 ## 1. Executive Summary & Core Philosophy
 
-**Graph-Memex (`me-mex`)** is a local-first, interactive visual knowledge graph and autonomous ideation engine designed for high-throughput literature synthesis, associative recall, and scientific discovery. 
+**Me-Mex** is a local-first, interactive visual knowledge graph designed as an external memory system for textual knowledge synthesis (academic research papers, technical blogs, YouTube transcripts), associative recall, and scientific discovery.
 
-Rather than building backend schemas first and guessing interaction patterns, **Graph-Memex follows a UI-First, Build-Back Paradigm**. Designing user interaction flows first clarifies node granularity, mutation patterns, ephemerality vs. persistence, and schema requirements before locking down backend MongoDB pipelines.
+Rather than building backend schemas first and guessing interaction patterns, **Me-Mex follows a UI-First, Build-Back Paradigm**. Designing user interaction flows first clarifies node granularity, mutation patterns, ephemerality vs. persistence, and schema requirements before locking down backend MongoDB pipelines.
 
 ---
 

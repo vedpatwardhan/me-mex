@@ -1,6 +1,6 @@
-# Master Research Synthesis & Literature Survey: Graph-Memex (`me-mex`)
+# Master Research Synthesis & Literature Survey: Me-Mex
 
-> **Document Purpose**: This document serves as the master research reference for **Graph-Memex (`me-mex`)**, consolidating theoretical literature surveys, multi-agent debate frameworks, automated scientific discovery architectures, and deep-dive paper notes into a single comprehensive synthesis.
+> **Document Purpose**: This document serves as the master research reference for **Me-Mex**, consolidating theoretical literature surveys, multi-agent debate frameworks, automated scientific discovery architectures, and deep-dive paper notes into a single comprehensive synthesis.
 
 ---
 

@@ -1,12 +1,12 @@
-# Master Architecture & Technical Specification: Graph-Memex (`me-mex`)
+# Master Architecture & Technical Specification: Me-Mex
 
-> **Document Purpose**: This document serves as the single master technical specification for **Graph-Memex (`me-mex`)**, unifying system architecture, clean 3-element graph topology, Node Mutability Hierarchy, 3-step persona workflows, WebGL UI/UX specifications, REST/SSE API endpoints, FastMCP tools, and backend test specifications.
+> **Document Purpose**: This document serves as the single master technical specification for **Me-Mex**, unifying system architecture, clean 3-element graph topology, Node Mutability Hierarchy, 3-step persona workflows, WebGL UI/UX specifications, REST/SSE API endpoints, FastMCP tools, and backend test specifications.
 
 ---
 
 ## 1. System Motivation & Macro Scope
 
-Graph-Memex is an **Agentic Research Assistant and Multi-Modal High-Volume Intake Engine** designed to digest scientific literature, technical blogs, YouTube transcripts, lecture audio, codebase repos, and experimental logs without manual file scrolling or cognitive overload.
+Me-Mex is an **Agentic External Memory System** designed to function as an external extension of your brain for organizing, synthesizing, and retrieving textual knowledge—including academic research papers, technical blogs, and YouTube video transcripts—without manual note scrolling or cognitive overload.
 
 ### Core Problems Addressed
 1. **Manual Overhead & Linear Scrolling**: Reviewing massive paper additions daily via linear text file scrolling is inefficient.
