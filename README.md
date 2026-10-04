@@ -6,6 +6,16 @@ Graph-Memex (`me-mex`) is an agentic research assistant and personal long-term m
 
 ---
 
+## 📚 Master Documentation Index
+
+All master technical specs, research syntheses, and product roadmaps are consolidated in the `docs/` directory:
+
+- 🏗️ **[`docs/ARCHITECTURE.md`](file:///Users/vedpatwardhan/Desktop/cortex-os/me-mex/docs/ARCHITECTURE.md)**: Unified technical spec, 3-element topology, Node Mutability Hierarchy, 3-step persona workflows, API endpoints, and WebGL specs.
+- 🔬 **[`docs/RESEARCH_SYNTHESIS.md`](file:///Users/vedpatwardhan/Desktop/cortex-os/me-mex/docs/RESEARCH_SYNTHESIS.md)**: Literature surveys on GraphRAG, HippoRAG 2, Stanford STORM, Google Co-Scientist, multi-agent debate frameworks, and deep-dive paper notes.
+- 🗺️ **[`docs/ROADMAP.md`](file:///Users/vedpatwardhan/Desktop/cortex-os/me-mex/docs/ROADMAP.md)**: Strategic 4-milestone execution roadmap and feature progress.
+
+---
+
 ## 🏗️ The Operational System Architecture
 
 Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)** loop unifying Direct Conversation, Persona Retrieval, and Agentic Tool Ingestion:
