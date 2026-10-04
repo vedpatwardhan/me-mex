@@ -18,7 +18,7 @@ All master technical specs, research syntheses, and product roadmaps are consoli
 
 ## 🏗️ The Operational System Architecture
 
-Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)** loop unifying Direct Conversation, Persona Retrieval, and Agentic Tool Ingestion:
+Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)** loop unifying **Conversation** (direct response), **Retrieval** (2 pre-steps $\rightarrow$ final conversation), and **Ingestion** (2 pre-steps $\rightarrow$ final conversation):
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
@@ -46,16 +46,14 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
  - Unweighted Topological Hub Discovery: Foundational concept hubs are detected in real time (<5ms) via `rustworkx` unweighted eigenvector centrality and community partitioning. Each detected concept hub is assigned a dedicated Specialist Persona representing domain expertise for that concept cluster.
  - Mutually Exclusive Sub-Graph Partitioning: Rather than overlapping hub traversals, the overall graph network is partitioned into mutually exclusive sub-graph regions across concept hubs. Each Specialist Persona independently explores its strictly assigned sub-graph region (`explore_concept_hub`) up to `max_depth = 3`.
  - Relevance Evaluation & Independent Operation: Because all intra-document concept nodes are completely immutable, proposals from different personas operate on disjoint/immutable nodes without conflicts.
- - Independent Node Reorganization & Splitting: At every retrieval step, each persona inspects its active graph window. If a mutable concept node has developed too many connections (high degree/over-clustering), the persona independently reorganizes and splits that concept node (`SPLIT_CONCEPT`), utilizing the underlying text passages stored in `passages` for grounding.
- - Real-Time SSE Telemetry: Streams live persona traversal events (`traversed_node_ids`) and independent concept reorganization updates to animate the WebGL canvas (`react-force-graph-2d`).
+ - Real-Time SSE Telemetry: Streams live persona traversal events (`traversed_node_ids`) to animate the WebGL canvas (`react-force-graph-2d`).
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                      4. Agentic Tool Ingestion & Multi-Hub Integration                 │
 └────────────────────────────────────────────────────────────────────────────────────────┘
- - Tool-Based Ingestion: Executive Orchestrator calls `ingest_document_tool` when URLs/PDFs are pasted.
- - Passage Chunking: Stores raw text chunks in `passages` collection.
- - Multi-Pass In-Memory Pre-Merge: Consolidates extracted concepts across passages.
- - Multi-Hub Edge Attachment: Links extracted concepts to multiple persona hubs across the graph.
+ - Tool-Based Fetching & Construction: Executive Orchestrator calls `ingest_document_tool` when URLs/PDFs are pasted, storing text chunks in `passages` and building intra-document concept nodes.
+ - Sub-Graph Traversal & Relevance Evaluation: Performs partitioned sub-graph traversal and relevance evaluation across concept hubs to determine optimal attachment points.
+ - Multi-Hub Edge Attachment & Node Reorganization: Links extracted intra-document concepts to existing domain hubs, and independently reorganizes/splits over-clustered mutable concept nodes (`SPLIT_CONCEPT`) using underlying text passages stored in `passages` for grounding.
 ```
 
 ---

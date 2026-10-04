@@ -17,7 +17,7 @@ Me-Mex is an **Agentic External Memory System** designed to function as an exter
 
 ## 2. Core Architecture & System Lifecycle
 
-Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** loop: **Input Intent Classification $\rightarrow$ Dynamic Concept Hub Traversal & Web Search $\rightarrow$ Orchestrator Tool Ingestion**.
+Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** loop. While **Conversation** streams a response straightaway, **Retrieval** and **Ingestion** execute preliminary processing steps before culminating in a final **Conversation** response:
 
 ```
        ┌──────────────────────────────────────────────────────────┐
@@ -28,36 +28,40 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
        [PHASE 0: UNIFIED CONVERSATIONAL GATEWAY (POST /api/chat)]
        - Executive Orchestrator analyzes query & chat history
        - Routes execution to ONE of three internal paths:
-           1. DIRECT_CONVERSATION (Greetings, math, direct Q&A)
-           2. GRAPH_RETRIEVAL     (Dynamic concept hubs, WebGL glowing)
-           3. DOCUMENT_INGESTION  (Agent tool call: ingest_document_tool)
+           1. CONVERSATION (Direct execution -> Conversation response)
+           2. RETRIEVAL    (Step 1: Partitioned Hub Traversal -> Step 2: Relevance Evaluation -> Final Conversation)
+           3. INGESTION    (Step 1: Fetch URL & Build Intra-Doc Graph -> Step 2: Hub Traversal, Relevance Eval & Reorg/Linking -> Final Conversation)
                                     │
            ┌────────────────────────┼────────────────────────┐
            │                        │                        │
            ▼                        ▼                        ▼
- [PATH 1: DIRECT CONVERSATION] [PATH 2: GRAPH RETRIEVAL]  [PATH 3: TOOL INGESTION]
- - Direct LLM stream           - Discover concept hubs   - Orchestrator calls
- - Zero persona overhead         via rustworkx           `ingest_document_tool`
- - Fast Q&A answer             - Persona traversal per   - Scrapes URL/PDF/Voice
-                                 hub + DuckDuckGo search - Out-of-graph passages
-                               - Stream glowing node IDs - Integrates concept node
+     [CONVERSATION]            [RETRIEVAL]              [INGESTION]
+  (Direct Execution)      (Step 1: Hub Traversal    (Step 1: Fetch URL & Build
+  - Immediate LLM         - Step 2: Domain Node       Intra-Document Graph
+    response stream          Relevance Evaluation)  - Step 2: Hub Traversal,
+                                                       Relevance Eval, Link
+                                                       & Reorganize/Split)
+           │                        │                        │
+           └────────────────────────┴────────────────────────┘
+                                    │
+                                    ▼
+                 [FINAL CONVERSATION RESPONSE STREAM]
+                 - Synthesizes retrieved / ingested context
+                 - Streams final answer to user in chat UI
 ```
 
-### Operational Phases
+### Operational Path Breakdown
 
-1. **Phase 0: Conversational Gateway (`POST /api/chat` & `GET /api/sse/chat`)**
-   - User inputs text, URLs, paper abstracts, or questions in a selected **Project Workspace** (`project_id`).
-   - Executive Orchestrator evaluates prompt and `chat_history` context to route into `DIRECT_CONVERSATION`, `GRAPH_RETRIEVAL`, or `DOCUMENT_INGESTION`.
-   - **Fast Non-Reasoning Intent Decoding**: `classify_intent` uses `enable_reasoning=False` and `max_tokens=128` to minimize latency.
-
-2. **Phase 1: Dynamic Concept Hub Personas & Web Search**
-   - Concept hubs discovered in real time (<5ms) using `rustworkx` eigenvector/degree centrality scoped to `project_id`.
-   - Specialist Personas traverse multi-hop neighborhoods (`max_depth=3`), executing DuckDuckGo search if context is missing.
-   - Real-time SSE telemetry streams active glowing node IDs (`traversed_node_ids`) to the visual canvas.
-
-3. **Phase 2: Ingestion & Independent Concept Reorganization**
-   - Ingestion executes `ingest_document_tool` autonomously, extracting plain-text `PassageRecord`s and immutable intra-document concept nodes.
-   - Personas operate independently over mutually exclusive sub-graph partitions without consensus overhead or bilateral debates.
+1. **Path 1: `CONVERSATION` (Single-Step Direct Response)**
+   - **Direct Execution**: Fast-path for greetings, quick questions, and direct synthesis without graph overhead. Streams the conversation response straightaway.
+2. **Path 2: `RETRIEVAL` (Two Pre-Steps $\rightarrow$ Final Conversation Response)**
+   - **Pre-Step 1 (Partitioned Sub-Graph Traversal)**: Discovers unweighted eigenvector hubs and assigns Specialist Personas to explore mutually exclusive sub-graph partitions.
+   - **Pre-Step 2 (Relevance Evaluation)**: Personas evaluate domain relevance across their explored nodes, user prompt, and conversation history (`chat_history`).
+   - **Final Conversation**: With enriched topological graph context assembled, the system triggers the final conversation step to generate and stream the response to the user.
+3. **Path 3: `INGESTION` (Two Pre-Steps $\rightarrow$ Final Conversation Response)**
+   - **Pre-Step 1 (Document Fetching & Intra-Document Graph Construction)**: Orchestrator calls `ingest_document_tool` to fetch/scrape text content from URLs/PDFs, stores plain-text chunks in `passages`, and extracts immutable intra-document concept nodes.
+   - **Pre-Step 2 (Sub-Graph Traversal, Relevance Evaluation, Linking & Reorganization)**: Performs partitioned sub-graph traversal and relevance evaluation across concept hubs. Personas link newly ingested intra-document concepts to existing domain hubs, and independently reorganize/split over-clustered mutable concept nodes (`SPLIT_CONCEPT`) using underlying passage context.
+   - **Final Conversation**: Once graph integration and reorganization complete, the system triggers the final conversation step to provide an executive summary and confirmation response to the user.
 
 ---
 
@@ -72,11 +76,11 @@ The active graph network consists of **Root Nodes**, **Concept Nodes (Immutable 
 ```mermaid
 graph TD
     subgraph Active Graph Network Topology (No Passages)
-        Paper[Root Node: Paper / Blog (Immutable)] -->|RELEVANT_TO| ConceptH[Domain Hub Node: World Models (Mutable)]
-        ConceptH -->|BUILDS_UPON| ConceptPixel[Intra-Document Concept: Pixel World Models (Immutable)]
-        ConceptH -->|BUILDS_UPON| ConceptLatent[Intra-Document Concept: Latent World Models (Immutable)]
-        ConceptLatent <==>|SUPERSEDES| DownstreamTask[Intermediate Domain Node: MPC Planning (Mutable)]
-        ConceptPixel -.->|HISTORICAL_SUPERSEDED| DownstreamTask
+        Paper[Root Node: Paper / Blog (Immutable)] -->|RELEVANT_TO| ConceptPixel[Intra-Document Concept: Pixel World Models (Immutable)]
+        Paper -->|RELEVANT_TO| ConceptLatent[Intra-Document Concept: Latent World Models (Immutable)]
+        ConceptPixel -->|SUBSET_OF| ConceptH[Persona Domain Hub Node: World Models (Mutable)]
+        ConceptLatent -->|SUBSET_OF| ConceptH
+        ConceptH <==>|SUPERSEDES| DownstreamTask[Persona Intermediate Node: MPC Planning (Mutable)]
     end
 
     subgraph Out-of-Graph Database Storage
@@ -114,13 +118,13 @@ Rather than applying artificial floating-point weight decay (`1.0` down to `0.3`
 The graph network enforces a strict **Hierarchy of Mutability**:
 
 1. **Root Nodes (`ROOT`) — IMMUTABLE**
-   - Base node for a paper, blog, transcript, or X post, shortly summarizing everything in that document. Cannot be modified or deleted.
+   - Base node for a paper, blog, transcript, or X post, summarizing the document. Cannot be modified or deleted.
 2. **Intra-Document Concepts (`node_type="concept"`, Extracted) — IMMUTABLE**
-   - Direct concepts extracted from the document. Preserves factual ground truth.
-   - Personas **cannot** issue `EDIT_CONCEPT` or `DELETE_CONCEPT` targeting these nodes; they can **only link** to them.
-3. **Domain Hub & Intermediate Concepts — MUTABLE**
-   - Persona domain hub concepts and persona-created intermediate/bridge nodes.
-   - Personas **can** create, edit/generalize (`EDIT_CONCEPT`), or split/restructure (`SPLIT_CONCEPT`) these nodes as new documents arrive.
+   - Concept nodes directly originating from and connected to a Root Node during ingestion. Preserves factual ground truth.
+   - Personas **cannot** modify (`EDIT_CONCEPT`), restructure (`SPLIT_CONCEPT`), or delete (`DELETE_CONCEPT`) these nodes; they can **only link** from them.
+3. **Persona Domain Hubs & Intermediate Concepts — MUTABLE**
+   - Concept nodes created deeper in the graph by personas during ingestion for linking, synthesizing, or grouping concepts across documents.
+   - Personas **can** create, edit/generalize (`EDIT_CONCEPT`), or restructure/split (`SPLIT_CONCEPT`) these nodes as new documents arrive.
 
 ```json
 {
@@ -150,16 +154,15 @@ Both Retrieval and Ingestion operate on a unified multi-agent pattern structured
    - **Mutually Exclusive Graph Partitioning**: The graph network is partitioned into mutually exclusive sub-graphs across concept hubs so persona explorations do not overlap.
    - **Iterative Multi-Hop Traversal**: Each Concept Hub Persona independently expands its strictly assigned sub-graph region up to `max_depth = 3`.
    - **Root Node Traversal Blocking**: Traversal visits Root Nodes for provenance context and summaries, but strictly **blocks Root Nodes from expanding further hops**.
-2. **Relevance Evaluation & Retrieval-Step Reorganization:**
+2. **Relevance Evaluation:**
    - Each Specialist Persona evaluates the relevance of its accumulated domain nodes, search history, user prompt, and conversation history (`chat_history`) independently.
-   - **Independent Concept Node Splitting**: At every retrieval step, each persona inspects its current sub-graph. If a mutable node has accumulated too many connections (over-clustering), the persona independently splits/reorganizes the concept (`SPLIT_CONCEPT`), referencing the underlying passage chunks (`passages`) corresponding to that concept for ground-truth reorganization.
-3. **Independent Graph Ingestion & Linking:**
+3. **Independent Graph Ingestion, Linking & Concept Reorganization:**
    - Consolidated concepts are ingested as **Immutable Intra-Document Concepts**.
    - Personas connect intra-document concepts to domain hubs independently using non-destructive actions:
      - **`CONNECT_DIRECT`**: Directly connect an immutable intra-document concept to a domain concept.
      - **`CREATE_INTERMEDIATE`**: Create a new domain bridge concept node and link through it.
      - **`EDIT_CONCEPT`**: Edit or generalize **existing domain or intermediate concepts** (mutations on immutable nodes are blocked).
-     - **`SPLIT_CONCEPT`**: Restructure/split a domain node if its connection degree grows too large.
+     - **`SPLIT_CONCEPT`**: Restructure/split a mutable domain node if its connection degree grows too large (over-clustered), referencing the underlying passage chunks (`passages`) corresponding to that concept for ground-truth reorganization.
    - Because intra-document nodes are immutable and graph partitions are mutually exclusive, persona updates proceed completely independently.
 
 ---
