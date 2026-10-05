@@ -125,21 +125,30 @@ class GraphAnalyticsWorker:
         max_k: int = 8,
         relative_threshold: float = 0.30,
     ) -> List[Tuple[GraphNode, float]]:
-        """Identify concept hub nodes dynamically using eigenvector/degree centrality with relative thresholding."""
-        centralities = GraphAnalyticsWorker.calculate_hub_centrality(project_id)
-        concept_nodes = [
-            n for n in db_engine.get_nodes(project_id) if n.node_type == "concept"
+        """Identify mutable domain concept hub nodes dynamically using eigenvector/degree centrality with relative thresholding."""
+        # Filter candidate concept hubs BEFORE calculation: excludes Root Nodes & Immutable Intra-Document Concepts
+        all_nodes = db_engine.get_nodes(project_id)
+        mutable_concept_hubs = [
+            n
+            for n in all_nodes
+            if n.node_type.lower() == "concept" and not n.is_immutable
         ]
 
-        if not concept_nodes:
-            return []
+        # If no mutable concept hubs exist, return empty straightaway without building graph/computing centrality
+        if not mutable_concept_hubs:
+            # Fallback to any concept nodes if no mutable hubs exist yet
+            fallback_concepts = [
+                n for n in all_nodes if n.node_type.lower() == "concept"
+            ]
+            if not fallback_concepts:
+                return []
+            return [(n, 1.0) for n in fallback_concepts[:max_k]]
 
-        if not centralities:
-            return [(n, 1.0) for n in concept_nodes[:max_k]]
+        centralities = GraphAnalyticsWorker.calculate_hub_centrality(project_id)
 
-        # Filter candidates strictly to 'concept' nodes
+        # Filter scores strictly for candidate concept hubs
         concept_scores: List[Tuple[GraphNode, float]] = []
-        for c_node in concept_nodes:
+        for c_node in mutable_concept_hubs:
             score = centralities.get(c_node.id, 0.0)
             concept_scores.append((c_node, score))
 
