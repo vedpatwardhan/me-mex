@@ -79,13 +79,7 @@ class DepartmentPersonaAgent:
             for f_id in current_frontier:
                 # Root Node Traversal Blocking: Root Nodes provide summary context, but block expanding further hops
                 f_node = db_engine.get_node(f_id)
-                if f_node and f_node.node_type in [
-                    "paper",
-                    "blog",
-                    "video",
-                    "post",
-                    "ROOT",
-                ]:
+                if f_node and f_node.is_root_node:
                     continue
 
                 for e in adj_map.get(f_id, []):

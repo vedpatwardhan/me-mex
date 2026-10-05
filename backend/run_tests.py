@@ -49,6 +49,7 @@ from tests.test_concept_reconciliation import (
 from tests.test_department_persona import (
     test_department_persona_shared_exploration,
     test_department_persona_root_node_traversal_blocking,
+    test_department_persona_mutually_exclusive_partitioning,
 )
 from tests.test_conversation import (
     test_conversation_flow_continuity,
@@ -132,6 +133,11 @@ def run_all_tests():
             "Persona: Root Node Traversal Blocking",
             test_department_persona_root_node_traversal_blocking,
             True,
+        ),
+        (
+            "Persona: Mutually Exclusive Sub-Graph Partitioning",
+            test_department_persona_mutually_exclusive_partitioning,
+            False,
         ),
         (
             "Direct Conversation: Flow Continuity",

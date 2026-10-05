@@ -328,6 +328,9 @@ class ExecutiveOrchestrator:
             return
 
         # Pre-Step 1 & 2: Mutually Exclusive Sub-Graph Traversal & Relevance Evaluation
+        department_communities = self.analytics.partition_department_communities(
+            project_id
+        )
         department_findings = []
         for dept in active_departments:
             yield {
@@ -339,11 +342,13 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
+            partition_ids = set(department_communities.get(dept.department_name, []))
             finding = dept.explore_concept_hub(
                 query=query,
                 chat_history=chat_history,
                 project_id=project_id,
                 max_depth=3,
+                partition_node_ids=partition_ids if partition_ids else None,
             )
             department_findings.append(finding)
 

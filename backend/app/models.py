@@ -13,7 +13,8 @@ import time
 from typing import Dict, List, Literal, Optional, Any
 from pydantic import BaseModel, Field
 
-# Canonical Node Types (ROOT for base documents; CONCEPT for extracted and domain concepts)
+# Canonical Node Types
+ROOT_NODE_TYPES = {"paper", "blog", "video", "post", "ROOT"}
 NodeType = Literal["paper", "blog", "video", "post", "concept", "ROOT", "CONCEPT"]
 
 
@@ -39,12 +40,17 @@ class GraphNode(BaseModel):
     updated_at: float = Field(default_factory=time.time)
 
     @property
+    def is_root_node(self) -> bool:
+        """Returns True if node represents a base document container (paper, blog, video, post)."""
+        return self.node_type in ROOT_NODE_TYPES
+
+    @property
     def is_immutable(self) -> bool:
         """
         Returns True if node represents ground-truth evidence (Root Node or Intra-Document Concept)
         that cannot be modified, split, or deleted by persona agents.
         """
-        if self.node_type == "ROOT" or self.metadata.get("immutable", False):
+        if self.is_root_node or self.metadata.get("immutable", False):
             return True
         return False
 

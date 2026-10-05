@@ -99,3 +99,66 @@ def test_department_persona_root_node_traversal_blocking():
     assert "concept_hub_a" in traversed
     # ...but traversal past Paper Root to Concept E is strictly BLOCKED!
     assert "concept_e_unreachable" not in traversed
+
+
+def test_department_persona_mutually_exclusive_partitioning():
+    """Verify DepartmentPersonaAgent.explore_concept_hub strictly obeys partition_node_ids boundaries."""
+    hub_a = GraphNode(
+        _id="hub_a",
+        node_type="CONCEPT",
+        project_ids=["proj_partition_test"],
+        metadata={"immutable": False},
+        title="Hub A",
+    )
+    c_inside = GraphNode(
+        _id="concept_inside_partition",
+        node_type="CONCEPT",
+        project_ids=["proj_partition_test"],
+        metadata={"immutable": False},
+        title="Inside Partition Concept",
+    )
+    c_outside = GraphNode(
+        _id="concept_outside_partition",
+        node_type="CONCEPT",
+        project_ids=["proj_partition_test"],
+        metadata={"immutable": False},
+        title="Outside Partition Concept",
+    )
+
+    db_engine.upsert_node(hub_a)
+    db_engine.upsert_node(c_inside)
+    db_engine.upsert_node(c_outside)
+
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="e1",
+            source_id="hub_a",
+            target_id="concept_inside_partition",
+            project_ids=["proj_partition_test"],
+        )
+    )
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="e2",
+            source_id="hub_a",
+            target_id="concept_outside_partition",
+            project_ids=["proj_partition_test"],
+        )
+    )
+
+    agent = DepartmentPersonaAgent(hub_a)
+
+    # Restrict partition strictly to {"hub_a", "concept_inside_partition"}
+    partition = {"hub_a", "concept_inside_partition"}
+    exploration = agent.explore_concept_hub(
+        query="test partition",
+        project_id="proj_partition_test",
+        max_depth=3,
+        partition_node_ids=partition,
+    )
+
+    traversed = exploration["traversed_node_ids"]
+    assert "hub_a" in traversed
+    assert "concept_inside_partition" in traversed
+    # concept_outside_partition MUST be excluded because it is outside partition boundary!
+    assert "concept_outside_partition" not in traversed
