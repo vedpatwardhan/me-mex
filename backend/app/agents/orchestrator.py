@@ -515,10 +515,51 @@ class ExecutiveOrchestrator:
             DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
         ]
 
+        # Partition network into mutually exclusive sub-graph communities
+        department_communities = self.analytics.partition_department_communities(
+            project_id
+        )
+
         persona_command_results: List[Dict[str, Any]] = []
         for dept in active_departments:
+            yield {
+                "event": "persona_traversal_start",
+                "department_id": dept.department_id,
+                "department_name": dept.department_name,
+                "hub_id": dept.hub_node.id,
+                "message": f"Specialist Persona for '{dept.hub_node.title}' exploring sub-graph partition during ingestion...",
+                "timestamp": time.time(),
+            }
+
+            # 1. Partitioned Sub-Graph Traversal
+            partition_ids = set(department_communities.get(dept.department_name, []))
+            traversal_finding = dept.explore_concept_hub(
+                query=query,
+                chat_history=chat_history,
+                project_id=project_id,
+                max_depth=3,
+                partition_node_ids=partition_ids if partition_ids else None,
+            )
+
+            # Telemetry: Active persona traversal nodes
+            evt_active = {
+                "event": "persona_traversal_active",
+                "department_id": dept.department_id,
+                "department_name": dept.department_name,
+                "traversed_node_ids": traversal_finding["traversed_node_ids"],
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, evt_active)
+            yield evt_active
+
+            # 2. Ingestion Linking & Passage-Grounded Concept Reorganization
             ingest_res = dept.persona_ingestion(
-                consolidated_concepts, title, query, chat_history, project_id=project_id
+                consolidated_concepts,
+                title,
+                query,
+                traversal_finding["explored_nodes"],
+                chat_history=chat_history,
+                project_id=project_id,
             )
             # Run passage-grounded concept reorganization on over-clustered mutable concept nodes
             reorg_cmds = dept.reorganize_concept_hub(project_id=project_id)

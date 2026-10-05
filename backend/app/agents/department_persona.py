@@ -254,6 +254,7 @@ class DepartmentPersonaAgent:
         consolidated_concepts: List[Dict[str, Any]],
         doc_title: str,
         query: str,
+        explored_nodes: List[GraphNode],
         chat_history: Optional[List[Dict[str, str]]] = None,
         project_id: str = "global",
     ) -> Dict[str, Any]:
@@ -262,10 +263,6 @@ class DepartmentPersonaAgent:
         Emits commands (`CONNECT_DIRECT`, `CREATE_INTERMEDIATE`, `EDIT_CONCEPT` on mutable nodes,
         and `SPLIT_CONCEPT` on mutable nodes) to link extracted intra-document concepts to domain hubs.
         """
-        exploration = self.explore_concept_hub(
-            query=query, chat_history=chat_history, project_id=project_id, max_depth=3
-        )
-        explored_nodes = exploration["explored_nodes"]
 
         def _format_nodes(nodes: List[GraphNode]) -> List[Dict[str, Any]]:
             return [

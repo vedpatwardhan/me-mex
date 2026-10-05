@@ -70,10 +70,16 @@ from app.services.llm_gateway import llm_gateway
 def run_all_tests():
     print("=== Running Backend Test Suite on 'test-me-mex' Database ===")
 
+    force_llm = os.getenv("SKIP_LLM", "0") != "1"
     server_online = llm_gateway.is_server_available()
-    if not server_online:
+
+    if not server_online and not force_llm:
         print(
             "⚠️ [vLLM Colab Server Offline] LLM-dependent tests will be SKIPPED cleanly."
+        )
+    elif not server_online and force_llm:
+        print(
+            "⚡ [LLM Required Mode] Forcing LLM tests to execute against vLLM server..."
         )
 
     unit_test_funcs = [
@@ -153,7 +159,7 @@ def run_all_tests():
 
     try:
         for name, func, requires_llm in unit_test_funcs:
-            if requires_llm and not server_online:
+            if requires_llm and not server_online and not force_llm:
                 print(f"  ⏭️ {name} [SKIPPED - vLLM Server Offline]")
                 continue
 

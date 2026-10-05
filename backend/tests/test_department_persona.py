@@ -108,21 +108,24 @@ def test_department_persona_mutually_exclusive_partitioning():
         node_type="CONCEPT",
         project_ids=["proj_partition_test"],
         metadata={"immutable": False},
-        title="Hub A",
+        title="Model-Based Reinforcement Learning",
+        description="Core domain hub for model-based RL and trajectory planning.",
     )
     c_inside = GraphNode(
         _id="concept_inside_partition",
         node_type="CONCEPT",
         project_ids=["proj_partition_test"],
         metadata={"immutable": False},
-        title="Inside Partition Concept",
+        title="Model Predictive Control Planning",
+        description="MPC optimizes action sequences over predicted world model states.",
     )
     c_outside = GraphNode(
         _id="concept_outside_partition",
         node_type="CONCEPT",
         project_ids=["proj_partition_test"],
         metadata={"immutable": False},
-        title="Outside Partition Concept",
+        title="Unrelated Concept Outside Partition",
+        description="Unrelated concept outside the assigned partition.",
     )
 
     db_engine.upsert_node(hub_a)
@@ -134,6 +137,7 @@ def test_department_persona_mutually_exclusive_partitioning():
             _id="e1",
             source_id="hub_a",
             target_id="concept_inside_partition",
+            description="SUBSET_OF",
             project_ids=["proj_partition_test"],
         )
     )
@@ -142,6 +146,7 @@ def test_department_persona_mutually_exclusive_partitioning():
             _id="e2",
             source_id="hub_a",
             target_id="concept_outside_partition",
+            description="PARALLEL_TO",
             project_ids=["proj_partition_test"],
         )
     )
