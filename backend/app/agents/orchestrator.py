@@ -554,7 +554,7 @@ class ExecutiveOrchestrator:
 
             # 2. Ingestion Linking & Passage-Grounded Concept Reorganization
             ingest_res = dept.persona_ingestion(
-                consolidated_concepts,
+                intra_doc_nodes,
                 title,
                 query,
                 traversal_finding["explored_nodes"],

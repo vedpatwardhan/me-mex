@@ -251,7 +251,7 @@ class DepartmentPersonaAgent:
 
     def persona_ingestion(
         self,
-        consolidated_concepts: List[Dict[str, Any]],
+        intra_doc_nodes: List[GraphNode],
         doc_title: str,
         query: str,
         explored_nodes: List[GraphNode],
@@ -278,14 +278,15 @@ class DepartmentPersonaAgent:
             ]
 
         explored_payload = _format_nodes(explored_nodes)
+        intra_payload = _format_nodes(intra_doc_nodes)
 
         prompt_str = f"""
         Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
         Document Title: '{doc_title}'
         User Query: "{query}"
 
-        Newly Extracted Intra-Document Concepts (IMMUTABLE):
-        {json.dumps(consolidated_concepts, indent=2)}
+        Newly Extracted Intra-Document Concepts (IMMUTABLE, use these exact 'id' values when linking):
+        {json.dumps(intra_payload, indent=2)}
 
         Explored Subgraph Nodes:
         {json.dumps(explored_payload, indent=2)}
