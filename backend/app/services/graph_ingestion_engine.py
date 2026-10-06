@@ -44,8 +44,8 @@ class GraphIngestionEngine:
         action = item.get("action") or item.get("command_type")
         dept_name = item.get("department_name", "Ingestion Engine")
 
-        # 1. Action: CONNECT_DIRECT (Connect concepts with qualitative relation edge)
-        if action in ["CONNECT_DIRECT", "CONSTRUCT_EDGE"]:
+        # 1. Action: CREATE_EDGE / CONNECT_DIRECT (Connect concepts with qualitative relation edge)
+        if action in ["CREATE_EDGE", "CONNECT_DIRECT", "CONSTRUCT_EDGE"]:
             edge_data = item.get("edge", {})
             src_id = edge_data.get("source_id")
             tgt_id = edge_data.get("target_id")

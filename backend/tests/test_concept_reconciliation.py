@@ -47,7 +47,7 @@ def test_independent_ingestion_linking():
             "department_name": "Persona Specialist: World Models",
             "commands": [
                 {
-                    "action": "CONNECT_DIRECT",
+                    "action": "CREATE_EDGE",
                     "edge": {
                         "source_id": intra_concept_id,
                         "target_id": domain_hub_id,
