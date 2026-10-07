@@ -309,7 +309,7 @@ Associated Passage Text Chunks for Grounding:
                 "department_id": self.department_id,
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
-                "traversed_node_ids": exploration.get("traversed_node_ids", []),
+                "traversed_node_ids": [n.id for n in explored_nodes],
                 "subgraph_nodes": explored_nodes,
                 "commands": raw_cmds,
             }
@@ -319,7 +319,7 @@ Associated Passage Text Chunks for Grounding:
                 "department_id": self.department_id,
                 "department_name": self.department_name,
                 "hub_node_id": self.hub_node.id,
-                "traversed_node_ids": exploration.get("traversed_node_ids", []),
+                "traversed_node_ids": [n.id for n in explored_nodes],
                 "subgraph_nodes": [],
                 "commands": [],
             }

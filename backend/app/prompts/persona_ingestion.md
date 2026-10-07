@@ -18,11 +18,11 @@ Command Actions Allowed:
 
 1. `"CREATE_EDGE"`:
    - Connect an immutable intra-document concept directly to a mutable domain concept node.
-   - `edge`: `{"source_id": "exact_intra_doc_concept_id", "target_id": "exact_domain_hub_id", "relation_type": "SUBSET_OF" | "SUPERSET_OF" | "RELEVANT_TO" | "BUILDS_UPON" | "SUPERSEDES" | "PARALLEL_TO" | "CONTRASTS_WITH", "description": "..."}`
+   - `edge`: `{{"source_id": "exact_intra_doc_concept_id", "target_id": "exact_domain_hub_id", "relation_type": "SUBSET_OF" | "SUPERSET_OF" | "RELEVANT_TO" | "BUILDS_UPON" | "SUPERSEDES" | "PARALLEL_TO" | "CONTRASTS_WITH", "description": "..."}}`
 
 2. `"EDIT_CONCEPT"` (MUTABLE NODES ONLY):
    - Update or generalize an existing mutable domain concept node's title or description to absorb new evidence.
-   - `concept`: `{"id": "mutable_domain_node_id", "title": "...", "description": "..."}`
+   - `concept`: `{{"id": "mutable_domain_node_id", "title": "...", "description": "..."}}`
 
 Return JSON format strictly:
 {{
