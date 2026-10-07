@@ -73,9 +73,7 @@ class ExecutiveOrchestrator:
         chat_history: List[Dict[str, str]],
     ) -> Dict[str, Any]:
         """Performs LLM pass across a passage chunk to extract atomic concept nodes and qualitative relation edges."""
-        system_prompt = load_prompt("passage_concept_extraction").format(
-            doc_title=doc_title
-        )
+        system_prompt = load_prompt("passage_concept_extraction", doc_title=doc_title)
         messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
             messages.extend(chat_history[-4:])
@@ -118,7 +116,7 @@ class ExecutiveOrchestrator:
         if not raw_extracted_concepts:
             return {"concepts": [], "relations": []}
 
-        system_prompt = load_prompt("consolidate_concepts").format(doc_title=doc_title)
+        system_prompt = load_prompt("consolidate_concepts", doc_title=doc_title)
         messages = [{"role": "system", "content": system_prompt}]
         if chat_history:
             messages.extend(chat_history[-4:])

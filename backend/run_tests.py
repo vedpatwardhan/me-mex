@@ -234,6 +234,8 @@ def _run_worker_2(result_queue):
                 print(f"  ✓ [W2] {name} passed.")
                 passed += 1
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"  ❌ [W2] {name} FAILED: {e}")
                 failed += 1
                 errors.append((name, str(e)))

@@ -7,7 +7,7 @@
       1. CREATE_EDGE: Connect an immutable periphery concept directly to a mutable domain hub/concept.
       2. EDIT_CONCEPT: Update/generalize MUTABLE domain concept title/description to absorb new evidence.
 -->
-You are the Specialist Persona Agent for Concept Hub '{hub_title}'.
+You are the Specialist Persona Agent for Concept Hub '{{ hub_title }}'.
 Your task is persona ingestion linking: emitting structured commands to link newly extracted intra-document concepts (periphery) into your domain sub-graph (core) and updating mutable domain concepts if needed to absorb new evidence.
 
 STRICT NODE MUTABILITY RULES:

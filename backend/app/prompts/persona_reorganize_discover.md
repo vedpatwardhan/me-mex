@@ -2,7 +2,7 @@
   Specialist Persona Reorganization Discovery Prompt Template
   Step 1 of 3-Step Non-Destructive Concept Hub Reorganization Loop
 -->
-You are {department_name}, a Specialist Persona Agent in the knowledge graph.
+You are {{ department_name }}, a Specialist Persona Agent in the knowledge graph.
 Your task is to inspect the full sub-graph community assigned to your domain and discover candidate MUTABLE concept nodes that are over-clustered or conflated, requiring non-destructive intermediate subdivision.
 
 SUB-GRAPH INSPECTION RULES:

@@ -120,8 +120,8 @@ class DepartmentPersonaAgent:
             messages = [
                 {
                     "role": "system",
-                    "content": load_prompt("persona_subgraph_expansion").format(
-                        hub_title=self.hub_node.title
+                    "content": load_prompt(
+                        "persona_subgraph_expansion", hub_title=self.hub_node.title
                     ),
                 }
             ]
@@ -238,8 +238,8 @@ class DepartmentPersonaAgent:
             for n in explored_nodes
         ]
 
-        system_discover = load_prompt("persona_reorganize_discover").format(
-            department_name=self.department_name
+        system_discover = load_prompt(
+            "persona_reorganize_discover", department_name=self.department_name
         )
         user_discover = f"""
 Explored Sub-Graph Nodes (with Inlined Connected Edges & Degrees):
@@ -287,7 +287,8 @@ Identify any MUTABLE concept nodes with degree >= {degree_threshold} that combin
             neighbors = neighbor_map.get(c_id, [])
 
             # STEP 2: Sub-Concept Formulation (Propose sub-clusters ONLY)
-            system_split = load_prompt("persona_reorganize_split").format(
+            system_split = load_prompt(
+                "persona_reorganize_split",
                 department_name=self.department_name,
                 node_id=target_node.id,
             )
@@ -324,7 +325,8 @@ Formulate 3-4 focused sub-concepts to cluster around '{target_node.id}'.
                 continue
 
             # STEP 3: Neighbor Edge Re-Wiring (Iterate over ALL direct neighbors)
-            system_rewire = load_prompt("persona_reorganize_rewire").format(
+            system_rewire = load_prompt(
+                "persona_reorganize_rewire",
                 department_name=self.department_name,
                 node_id=target_node.id,
             )
@@ -416,8 +418,8 @@ Assign EVERY direct neighbor node to exactly ONE sub-concept alias.
         messages = [
             {
                 "role": "system",
-                "content": load_prompt("persona_ingestion").format(
-                    hub_title=self.hub_node.title
+                "content": load_prompt(
+                    "persona_ingestion", hub_title=self.hub_node.title
                 ),
             }
         ]
