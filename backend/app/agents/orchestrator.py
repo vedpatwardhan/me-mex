@@ -520,7 +520,6 @@ class ExecutiveOrchestrator:
             project_id
         )
 
-        persona_command_results: List[Dict[str, Any]] = []
         for dept in active_departments:
             yield {
                 "event": "persona_traversal_start",
@@ -552,7 +551,7 @@ class ExecutiveOrchestrator:
             self.event_queue.push(project_id, evt_active)
             yield evt_active
 
-            # 2. Ingestion Linking & Passage-Grounded Concept Reorganization
+            # 2. Ingestion Linking (Immediate execution into MongoDB)
             ingest_res = dept.persona_ingestion(
                 intra_doc_nodes,
                 title,
@@ -561,29 +560,39 @@ class ExecutiveOrchestrator:
                 chat_history=chat_history,
                 project_id=project_id,
             )
-            # Run 3-step non-destructive concept reorganization on over-clustered mutable concept nodes
+            for cmd in ingest_res.get("commands", []):
+                cmd["department_name"] = dept.department_name
+                evt = self.ingestion_engine.execute_single_command(
+                    cmd, title, proj_list
+                )
+                if evt:
+                    self.event_queue.push(project_id, evt)
+                    yield evt
+
+            # 3. Non-Destructive Concept Hub Reorganization (Operating on real-time graph state)
             reorg_cmds = dept.reorganize_concept_hub(
                 explored_nodes=traversal_finding["explored_nodes"],
                 project_id=project_id,
             )
-            all_cmds = ingest_res.get("commands", []) + reorg_cmds
+            for cmd in reorg_cmds:
+                cmd["department_name"] = dept.department_name
+                evt = self.ingestion_engine.execute_single_command(
+                    cmd, title, proj_list
+                )
+                if evt:
+                    self.event_queue.push(project_id, evt)
+                    yield evt
 
-            persona_command_results.append(
-                {
-                    "department_name": dept.department_name,
-                    "commands": all_cmds,
-                }
-            )
-
-        # Execute independent commands into MongoDB
-        for evt in self.ingestion_engine.process_persona_ingestion_commands(
-            persona_command_results,
-            doc_id,
-            title,
-            consolidated_concepts,
-            project_id=project_id,
-        ):
-            yield evt
+        summary_evt = {
+            "event": "ingestion_completed",
+            "doc_id": doc_id,
+            "title": title,
+            "concepts_count": len(consolidated_concepts),
+            "message": f"Document '{title}' successfully ingested and merged into knowledge graph.",
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, summary_evt)
+        yield summary_evt
 
         # Final Step: Culminate in conversation response stream
         ingest_query = f"I just ingested document '{title}'. Summarize key additions and integrated graph concepts."
