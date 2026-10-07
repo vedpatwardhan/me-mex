@@ -4,8 +4,10 @@ import {
   X,
   ExternalLink,
   BookOpen,
-  Sparkles,
-  Trophy
+  Trophy,
+  Lock,
+  Edit3,
+  GitCommit
 } from 'lucide-react';
 
 export const RightDrawer: React.FC = () => {
@@ -22,8 +24,16 @@ export const RightDrawer: React.FC = () => {
 
   if (!selectedNode) return null;
 
+  const isImmutable = selectedNode.node_type === 'ROOT' || selectedNode.is_immutable;
+  const umbrellaHubId = selectedNode.metadata?.sub_of_hub;
+
   const getNodeTypeBadge = () => {
     switch (selectedNode.node_type) {
+      case 'ROOT':
+        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-slate-900 text-slate-300 border border-slate-700 shadow-sm">Document Root</span>;
+      case 'CONCEPT':
+      case 'concept':
+        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-amber-950/70 text-amber-400 border border-amber-500/40 shadow-sm">Atomic Concept Hub</span>;
       case 'paper':
         return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-sky-950/70 text-sky-400 border border-sky-500/40 shadow-sm">Research Paper</span>;
       case 'blog':
@@ -32,11 +42,24 @@ export const RightDrawer: React.FC = () => {
         return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-red-950/70 text-red-400 border border-red-500/40 shadow-sm">Video Transcript</span>;
       case 'post':
         return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-purple-950/70 text-purple-400 border border-purple-500/40 shadow-sm">Social / Voice Post</span>;
-      case 'concept':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-amber-950/70 text-amber-400 border border-amber-500/40 shadow-sm">Atomic Concept</span>;
       default:
         return null;
     }
+  };
+
+  const getMutabilityBadge = () => {
+    if (isImmutable) {
+      return (
+        <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-slate-900 text-slate-400 border border-slate-700 flex items-center gap-1">
+          <Lock className="w-3 h-3 text-slate-400" /> Immutable Node
+        </span>
+      );
+    }
+    return (
+      <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+        <Edit3 className="w-3 h-3 text-emerald-400" /> Mutable Concept Hub
+      </span>
+    );
   };
 
   return (
@@ -45,6 +68,7 @@ export const RightDrawer: React.FC = () => {
       <div className="p-4 border-b border-white/10 bg-[#090d16]/80 flex items-center justify-between">
         <div className="flex items-center gap-2">
           {getNodeTypeBadge()}
+          {getMutabilityBadge()}
         </div>
         <div className="flex items-center gap-1.5">
           <button
@@ -64,6 +88,22 @@ export const RightDrawer: React.FC = () => {
           <h2 className="font-display font-bold text-base text-slate-100 leading-snug tracking-tight">{selectedNode.title}</h2>
           <div className="text-[10px] text-slate-500 font-mono">ID: {selectedNode.id}</div>
         </div>
+
+        {/* Sub-Concept Parent Umbrella Hub Linkage */}
+        {umbrellaHubId && (
+          <div className="bg-emerald-950/30 border border-emerald-500/30 p-3 rounded-xl flex items-center gap-2 text-[11px] text-emerald-300">
+            <GitCommit className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div className="truncate">
+              Sub-concept generated from Umbrella Hub:{' '}
+              <button
+                onClick={() => setSelectedNodeId(umbrellaHubId)}
+                className="font-mono underline font-bold hover:text-emerald-200"
+              >
+                {umbrellaHubId}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Metadata Badges */}
         {selectedNode.metadata && Object.keys(selectedNode.metadata).length > 0 && (

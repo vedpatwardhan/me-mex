@@ -74,10 +74,15 @@ export const GraphCanvas: React.FC = () => {
     return DEPARTMENT_PALETTE[index];
   }, []);
 
-  // Node Color taxonomy mapping
+  // Node Color taxonomy mapping (Spherical Topology)
   const getNodeColor = (node: GraphNode) => {
     if (traversingNodeIds.includes(node.id)) return '#fbbf24'; // Glowing Gold for active intake traversal
+    if (node.node_type === 'ROOT' || node.is_immutable) return '#64748b'; // Outer Shell Slate Blue
+    if (node.metadata?.sub_of_hub) return '#34d399'; // Emerald for Sub-Concept nodes
     switch (node.node_type) {
+      case 'CONCEPT':
+      case 'concept':
+        return '#fbbf24'; // Amber Yellow Core Hub
       case 'paper':
         return '#38bdf8'; // Sky Blue
       case 'blog':
@@ -86,8 +91,6 @@ export const GraphCanvas: React.FC = () => {
         return '#f87171'; // Coral / Red
       case 'post':
         return '#c084fc'; // Purple
-      case 'concept':
-        return '#fbbf24'; // Amber Yellow
       default:
         return '#94a3b8';
     }
@@ -101,6 +104,7 @@ export const GraphCanvas: React.FC = () => {
       const isSelected = node.id === selectedNodeId;
       const isHovered = node.id === hoveredNodeId;
       const isTraversing = traversingNodeIds.includes(node.id);
+      const isImmutable = node.node_type === 'ROOT' || node.is_immutable;
 
       const radius = isSelected ? 10 : isHovered ? 8.5 : 6.5;
 
@@ -122,9 +126,13 @@ export const GraphCanvas: React.FC = () => {
       ctx.fillStyle = getNodeColor(node as GraphNode);
       ctx.fill();
 
-      // Border Ring
-      ctx.lineWidth = isSelected ? 2.5 / globalScale : 1.2 / globalScale;
-      ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.2)';
+      // Border Ring (Solid accent for mutable hubs, double/dashed lock ring for immutable root nodes)
+      ctx.lineWidth = isSelected ? 2.5 / globalScale : 1.5 / globalScale;
+      ctx.strokeStyle = isSelected
+        ? '#ffffff'
+        : isImmutable
+        ? '#94a3b8'
+        : 'rgba(255, 255, 255, 0.3)';
       ctx.stroke();
 
       // Text Label

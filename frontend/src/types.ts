@@ -1,4 +1,6 @@
 export type NodeType =
+  | 'ROOT'
+  | 'CONCEPT'
   | 'paper'
   | 'blog'
   | 'video'
@@ -11,6 +13,7 @@ export interface GraphNode {
   title: string;
   content: string;
   raw_doc_id?: string;
+  is_immutable?: boolean;
   project_ids: string[];
   metadata: Record<string, any>;
   created_at: string;
@@ -62,4 +65,15 @@ export interface AgentThinkingState {
   isThinking: boolean;
   currentAction: string;
   visitedNodeIds: string[];
+}
+
+export interface IngestionProgressEvent {
+  event: 'intent_classified' | 'passage_extraction_progress' | 'ingestion_completed' | 'chat_complete' | 'error';
+  intent?: string;
+  current_chunk?: number;
+  total_chunks?: number;
+  doc_title?: string;
+  message?: string;
+  reply?: string;
+  grounded_node_ids?: string[];
 }
