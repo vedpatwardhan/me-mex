@@ -205,31 +205,21 @@ class DepartmentPersonaAgent:
                 passages = db_engine.get_passages_by_ids(node.passage_ids)
                 passage_texts = [p.text_content for p in passages]
 
-                prompt = f"""
-                Over-Clustered Mutable Concept Node: '{node.title}' (ID: {node.id})
-                Current Description: {node.description}
-                Connection Degree: {degree_map[node.id]} links
-                
-                Associated Passage Text Chunks for Grounding:
-                {json.dumps(passage_texts, indent=2)}
+                system_prompt = load_prompt("persona_reorganize_concept").format(
+                    department_name=self.department_name,
+                    node_id=node.id,
+                )
+                user_payload = f"""
+Over-Clustered Mutable Concept Node: '{node.title}' (ID: {node.id})
+Current Description: {node.description}
+Connection Degree: {degree_map[node.id]} links
 
-                Reorganize and split this concept node into 2 distinct focused sub-concepts.
-                Return JSON format:
-                {{
-                  "action": "SPLIT_CONCEPT",
-                  "concept_id": "{node.id}",
-                  "sub_concepts": [
-                    {{"title": "Focused Sub-Concept 1", "description": "...", "passage_ids": {json.dumps(node.passage_ids[:1])}}},
-                    {{"title": "Focused Sub-Concept 2", "description": "...", "passage_ids": {json.dumps(node.passage_ids[1:])}}}
-                  ]
-                }}
-                """
+Associated Passage Text Chunks for Grounding:
+{json.dumps(passage_texts, indent=2)}
+"""
                 messages = [
-                    {
-                        "role": "system",
-                        "content": f"You are {self.department_name}. Reorganize over-clustered mutable concept nodes.",
-                    },
-                    {"role": "user", "content": prompt},
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_payload},
                 ]
                 try:
                     res = llm_gateway.generate_chat_completion(
