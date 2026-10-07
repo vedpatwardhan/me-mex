@@ -69,9 +69,10 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
 
 ### Graph Topology & Node/Edge Classification
 
-Passage text chunks are **NOT** graph nodes in the database network or UI visualizer. Including passages as nodes introduces visual "hairballs".
-
-The active graph network consists of **Root Nodes**, **Concept Nodes (Immutable vs. Mutable)**, and **Typed Relation Edges**:
+The active graph network operates on an eventual **Spherical Topology Model**:
+- **Periphery (Outer Shell)**: `ROOT` nodes (immutable base documents/papers) and extracted factual **Intra-Document Concepts** (immutable evidence).
+- **Core (Inner Hubs)**: Dynamic, mutable **Persona Domain Hubs & Intermediate Nodes** that cluster and evolve over time.
+- **Typed Relation Edges**: Connect immutable periphery concepts inward to mutable domain hubs or link core hubs together.
 
 ```mermaid
 graph TD
@@ -157,13 +158,12 @@ Both Retrieval and Ingestion operate on a unified multi-agent pattern structured
 2. **Relevance Evaluation:**
    - Each Specialist Persona evaluates the relevance of its accumulated domain nodes, search history, user prompt, and conversation history (`chat_history`) independently.
 3. **Independent Graph Ingestion, Linking & Concept Reorganization:**
-   - Consolidated concepts are ingested as **Immutable Intra-Document Concepts**.
-   - Personas connect intra-document concepts to domain hubs independently using non-destructive actions:
-     - **`CONNECT_DIRECT`**: Directly connect an immutable intra-document concept to a domain concept.
-     - **`CREATE_INTERMEDIATE`**: Create a new domain bridge concept node and link through it.
-     - **`EDIT_CONCEPT`**: Edit or generalize **existing domain or intermediate concepts** (mutations on immutable nodes are blocked).
-     - **`SPLIT_CONCEPT`**: Restructure/split a mutable domain node if its connection degree grows too large (over-clustered), referencing the underlying passage chunks (`passages`) corresponding to that concept for ground-truth reorganization.
-   - Because intra-document nodes are immutable and graph partitions are mutually exclusive, persona updates proceed completely independently.
+   - Consolidated concepts are ingested as **Immutable Intra-Document Concepts** on the periphery of the spherical topology.
+   - During persona ingestion, personas have **two direct options** to integrate intra-document concepts into the graph:
+     - **`CREATE_EDGE`**: Connect an immutable intra-document concept node on the periphery to an existing mutable domain hub concept node.
+     - **`EDIT_CONCEPT`**: Generalize or edit an existing mutable domain hub concept node to incorporate the newly acquired knowledge.
+   - Later in the pipeline, specialized persona workflows handle macro reorganization across over-clustered concept hubs (`SPLIT_CONCEPT` / `reorganize_concept_hub`).
+   - Because intra-document nodes are immutable and graph partitions are mutually exclusive, persona updates proceed completely independently without conflicts.
 
 ---
 

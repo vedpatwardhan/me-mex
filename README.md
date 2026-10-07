@@ -53,7 +53,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 └────────────────────────────────────────────────────────────────────────────────────────┘
  - Tool-Based Fetching & Construction: Executive Orchestrator calls `ingest_document_tool` when URLs/PDFs are pasted, storing text chunks in `passages` and building intra-document concept nodes.
  - Sub-Graph Traversal & Relevance Evaluation: Performs partitioned sub-graph traversal and relevance evaluation across concept hubs to determine optimal attachment points.
- - Multi-Hub Edge Attachment & Node Reorganization: Links extracted intra-document concepts to existing domain hubs, and independently reorganizes/splits over-clustered mutable concept nodes (`SPLIT_CONCEPT`) using underlying text passages stored in `passages` for grounding.
+ - Multi-Hub Edge Attachment & Node Reorganization: Persona ingestion uses two direct options (`CREATE_EDGE` to link an immutable periphery concept to a domain hub, or `EDIT_CONCEPT` to update a domain hub). Macro node reorganization (`SPLIT_CONCEPT`) is executed later in the pipeline.
 ```
 
 ---
