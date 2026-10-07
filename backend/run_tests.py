@@ -55,6 +55,11 @@ from tests.test_conversation import (
     test_conversation_flow_continuity,
     test_external_event_understanding,
 )
+from tests.test_e2e_workflows import (
+    test_e2e_conversation_workflow,
+    test_e2e_retrieval_workflow,
+    test_e2e_ingestion_workflow_real_paper,
+)
 from tests.test_api_routes import (
     test_root_endpoint,
     test_projects_endpoints,
@@ -146,13 +151,18 @@ def run_all_tests():
             False,
         ),
         (
-            "Direct Conversation: Flow Continuity",
-            test_conversation_flow_continuity,
+            "E2E Workflow: Path 1 Conversation",
+            test_e2e_conversation_workflow,
             True,
         ),
         (
-            "Direct Conversation: External Event Understanding",
-            test_external_event_understanding,
+            "E2E Workflow: Path 2 Retrieval",
+            test_e2e_retrieval_workflow,
+            True,
+        ),
+        (
+            "E2E Workflow: Path 3 Real Paper Ingestion (ArXiv 2502.18864v2)",
+            test_e2e_ingestion_workflow_real_paper,
             True,
         ),
     ]
