@@ -32,10 +32,15 @@ DB_NAME = settings.DB_NAME
 class GraphMemexDatabase:
     """Hybrid MongoDB Database Engine with in-memory fallback for local execution."""
 
+    @property
+    def db(self):
+        if self.use_mongo and self.client:
+            return self.client[settings.DB_NAME]
+        return None
+
     def __init__(self):
         self.use_mongo = False
         self.client = None
-        self.db = None
 
         # In-memory fallbacks
         self.mem_documents: Dict[str, DocumentRecord] = {}
@@ -49,12 +54,10 @@ class GraphMemexDatabase:
 
         if HAS_PYMONGO:
             try:
-                db_name = settings.DB_NAME
                 self.client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=1500)
                 self.client.admin.command("ping")
-                self.db = self.client[db_name]
                 self.use_mongo = True
-                print(f"[Database] Connected to MongoDB at {MONGO_URI}, DB: {db_name}")
+                print(f"[Database] Connected to MongoDB at {MONGO_URI}, DB: {settings.DB_NAME}")
             except Exception as e:
                 print(
                     f"[Database] MongoDB unavailable ({e}). Running in-memory fallback mode."
