@@ -1,7 +1,9 @@
-import React, { useRef, useCallback, useMemo } from 'react';
+import React, { useRef, useCallback, useMemo, useEffect } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { useMemexStore } from '../store/useMemexStore';
-import { GraphNode, NodeType } from '../types';
+import { NodeType } from '../types';
+import { createGlowTextureCache, drawMeMexNode } from '../utils/graphRenderers';
+import { prewarmForceSimulation } from '../utils/physicsPipeline';
 import { Search, Filter, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
 export const GraphCanvas: React.FC = () => {
@@ -20,11 +22,13 @@ export const GraphCanvas: React.FC = () => {
   } = useMemexStore();
 
   const traversingNodeIds = thinkingState.visitedNodeIds || [];
-
   const fgRef = useRef<any>(null);
 
-  // MEMOIZE graphData so hovering/selecting nodes DOES NOT re-trigger D3 force simulation or expand nodes!
-  const graphData = useMemo(() => {
+  // Initialize offscreen glow texture sprite cache
+  const glowCache = useMemo(() => createGlowTextureCache(), []);
+
+  // Filter nodes & links based on user query/filter
+  const rawGraphData = useMemo(() => {
     const filteredNodes = nodes.filter((n) => {
       const matchesSearch =
         !searchQuery ||
@@ -52,103 +56,30 @@ export const GraphCanvas: React.FC = () => {
     };
   }, [nodes, edges, searchQuery, selectedNodeTypeFilter]);
 
-  // Dynamic high-contrast frontend color palette array for departments
-  const DEPARTMENT_PALETTE = [
-    '#38bdf8', // Sky Blue
-    '#fbbf24', // Amber Yellow
-    '#c084fc', // Bright Purple
-    '#34d399', // Emerald Green
-    '#f87171', // Coral Red
-    '#f43f5e', // Rose
-    '#a855f7', // Violet
-    '#06b6d4', // Cyan
-  ];
+  // Headless physics pre-warming simulation to eliminate bouncing on initial mount
+  const stabilizedGraphData = useMemo(() => {
+    return prewarmForceSimulation(rawGraphData.nodes, rawGraphData.links, 180);
+  }, [rawGraphData]);
 
-  const getDepartmentColor = useCallback((departmentId?: string) => {
-    if (!departmentId) return DEPARTMENT_PALETTE[0];
-    let hash = 0;
-    for (let i = 0; i < departmentId.length; i++) {
-      hash = departmentId.charCodeAt(i) + ((hash << 5) - hash);
+  // Configure runtime force viscosity parameters
+  useEffect(() => {
+    if (!fgRef.current) return;
+    const fg = fgRef.current;
+    if (typeof fg.d3VelocityDecay === 'function') {
+      fg.d3VelocityDecay(0.55);
     }
-    const index = Math.abs(hash) % DEPARTMENT_PALETTE.length;
-    return DEPARTMENT_PALETTE[index];
   }, []);
 
-  // Node Color taxonomy mapping (Spherical Topology)
-  const getNodeColor = (node: GraphNode) => {
-    if (traversingNodeIds.includes(node.id)) return '#fbbf24'; // Glowing Gold for active intake traversal
-    if (node.node_type === 'ROOT' || node.is_immutable) return '#64748b'; // Outer Shell Slate Blue
-    if (node.metadata?.sub_of_hub) return '#34d399'; // Emerald for Sub-Concept nodes
-    switch (node.node_type) {
-      case 'CONCEPT':
-      case 'concept':
-        return '#fbbf24'; // Amber Yellow Core Hub
-      case 'paper':
-        return '#38bdf8'; // Sky Blue
-      case 'blog':
-        return '#34d399'; // Emerald Green
-      case 'video':
-        return '#f87171'; // Coral / Red
-      case 'post':
-        return '#c084fc'; // Purple
-      default:
-        return '#94a3b8';
-    }
-  };
-
-  // Node shape canvas rendering with custom typography
+  // Custom high-performance node drawing callback
   const drawNode = useCallback(
     (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      const label = node.title || '';
-      const fontSize = 11 / globalScale;
       const isSelected = node.id === selectedNodeId;
       const isHovered = node.id === hoveredNodeId;
-      const isTraversing = traversingNodeIds.includes(node.id);
-      const isImmutable = node.node_type === 'ROOT' || node.is_immutable;
+      const isTraversed = traversingNodeIds.includes(node.id);
 
-      const radius = isSelected ? 10 : isHovered ? 8.5 : 6.5;
-
-      // Outer Glow Halo for selection/traversal
-      if (isSelected || isHovered || isTraversing) {
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, radius + (isTraversing ? 7 : 5), 0, 2 * Math.PI, false);
-        ctx.fillStyle = isTraversing
-          ? 'rgba(251, 191, 36, 0.4)'
-          : isSelected
-          ? 'rgba(56, 189, 248, 0.35)'
-          : 'rgba(255, 255, 255, 0.2)';
-        ctx.fill();
-      }
-
-      // Draw Main Node Shape
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
-      ctx.fillStyle = getNodeColor(node as GraphNode);
-      ctx.fill();
-
-      // Border Ring (Solid accent for mutable hubs, double/dashed lock ring for immutable root nodes)
-      ctx.lineWidth = isSelected ? 2.5 / globalScale : 1.5 / globalScale;
-      ctx.strokeStyle = isSelected
-        ? '#ffffff'
-        : isImmutable
-        ? '#94a3b8'
-        : 'rgba(255, 255, 255, 0.3)';
-      ctx.stroke();
-
-      // Text Label
-      if (globalScale > 1.1 || isSelected || isHovered) {
-        ctx.font = `600 ${fontSize}px "Plus Jakarta Sans", sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = isSelected ? '#ffffff' : '#cbd5e1';
-        ctx.fillText(
-          label.length > 26 ? `${label.slice(0, 23)}...` : label,
-          node.x,
-          node.y + radius + 11 / globalScale
-        );
-      }
+      drawMeMexNode(node, ctx, globalScale, glowCache, isSelected, isHovered, isTraversed);
     },
-    [selectedNodeId, hoveredNodeId, traversingNodeIds]
+    [selectedNodeId, hoveredNodeId, traversingNodeIds, glowCache]
   );
 
   return (
@@ -173,11 +104,11 @@ export const GraphCanvas: React.FC = () => {
 
           {[
             { id: 'all', label: 'All' },
+            { id: 'ROOT', label: 'Roots', color: 'text-slate-300' },
+            { id: 'CONCEPT', label: 'Hubs', color: 'text-amber-400' },
             { id: 'paper', label: 'Papers', color: 'text-sky-400' },
             { id: 'blog', label: 'Blogs', color: 'text-emerald-400' },
-            { id: 'video', label: 'Videos', color: 'text-red-400' },
             { id: 'post', label: 'Posts', color: 'text-purple-400' },
-            { id: 'concept', label: 'Concepts', color: 'text-amber-400' },
           ].map((item) => (
             <button
               key={item.id}
@@ -194,39 +125,29 @@ export const GraphCanvas: React.FC = () => {
         </div>
       </div>
 
-      {/* Force Graph WebGL Canvas */}
+      {/* Force Graph Canvas */}
       <ForceGraph2D
         ref={fgRef}
-        graphData={graphData}
+        graphData={stabilizedGraphData}
         nodeCanvasObject={drawNode}
-        cooldownTicks={100}
-        d3AlphaDecay={0.05}
+        cooldownTicks={120}
+        d3AlphaDecay={0.04}
+        d3VelocityDecay={0.55}
+        linkCurvature={0.18}
         nodePointerAreaPaint={(node: any, color, ctx) => {
           ctx.fillStyle = color;
           ctx.beginPath();
-          ctx.arc(node.x, node.y, 11, 0, 2 * Math.PI, false);
+          ctx.arc(node.x, node.y, 14, 0, 2 * Math.PI, false);
           ctx.fill();
         }}
         linkColor={(link: any) => {
-          if (link.edge_type === 'REFUTES' || link.edge_type === 'CONTRASTS_WITH') return '#f87171';
-          if (link.edge_type === 'CATEGORY_MEMBER') return 'rgba(148, 163, 184, 0.2)';
-          return '#10b981'; // Green solid link
+          if (link.description?.includes('SUPERSEDES') || link.is_directional) return '#f59e0b';
+          if (link.description?.includes('CONTRASTS')) return '#ef4444';
+          return '#334155';
         }}
-        linkLineDash={(link: any) => (link.edge_type === 'CATEGORY_MEMBER' ? [3, 3] : null)}
+        linkLineDash={(link: any) => (link.description?.includes('CONTRASTS') ? [3, 2] : null)}
         linkDirectionalArrowLength={4}
-        linkDirectionalArrowRelPos={0.9}
-        linkWidth={(link: any) => (link.edge_type === 'BUILDS_UPON' ? 2 : 1)}
-        onEngineStop={() => {
-          if (fgRef.current) {
-            // Disable charge repulsion and link forces after initial layout completes so other nodes stay static
-            fgRef.current.d3Force('charge')?.strength(0);
-            fgRef.current.d3Force('link')?.strength(0);
-          }
-        }}
-        onNodeDrag={(node: any) => {
-          node.fx = node.x;
-          node.fy = node.y;
-        }}
+        linkDirectionalArrowRelPos={0.95}
         onNodeDragEnd={(node: any) => {
           node.fx = node.x;
           node.fy = node.y;
@@ -246,23 +167,15 @@ export const GraphCanvas: React.FC = () => {
       <div className="absolute bottom-4 left-4 z-20 flex items-center gap-3 bg-[#121824]/90 backdrop-blur-md border border-white/10 px-3.5 py-2 rounded-xl shadow-xl text-[11px] font-medium">
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-[#38bdf8] shadow-sm" />
-          <span className="text-slate-300">Paper</span>
+          <span className="text-slate-300">Document Root (Immutable)</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-[#fbbf24] shadow-sm" />
-          <span className="text-slate-300">Human Insight</span>
+          <span className="text-slate-300">Domain Hub (Mutable)</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#c084fc] shadow-sm" />
-          <span className="text-slate-300">Hypothesis</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#2dd4bf] shadow-sm" />
-          <span className="text-slate-300">Concept</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#f87171] shadow-sm" />
-          <span className="text-slate-300">Falsified</span>
+          <span className="w-2.5 h-2.5 rounded-full bg-[#34d399] shadow-sm" />
+          <span className="text-slate-300">Sub-Concept</span>
         </div>
       </div>
 
