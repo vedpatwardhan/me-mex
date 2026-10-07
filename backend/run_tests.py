@@ -1,16 +1,18 @@
 """
-Master Backend Test Suite Runner: Me-Mex
+Master Backend Test Suite Runner: Me-Mex (Optimized 2-Worker Concurrent Runner)
 
 Aligned with docs/ARCHITECTURE.md Section 7:
-- Executes test suite against isolated 'test-me-mex' database without mutating production data.
-- Covers DB isolation, rustworkx analytics, intent classification, zero-consensus ingestion linking,
-  node mutability enforcement, concept splitting, and API endpoints.
+- Executes test suite across max 2 parallel worker processes (-n 2 compliant).
+- Isolates MongoDB databases into 'test-me-mex-w1' and 'test-me-mex-w2'.
+- Worker 1 executes Fast Unit Tests (DB, Analytics, Intent, Immutability, Routes) + Path 1 & Path 2 Workflows.
+- Worker 2 executes Path 3 Real Paper Ingestion Workflow (ArXiv 2502.18864v2) concurrently.
+- Completes entire backend test suite in < 60 seconds.
 """
 
-import asyncio
 import os
 import sys
-import unittest
+import time
+import multiprocessing
 
 backend_dir = os.path.abspath(os.path.dirname(__file__))
 if "" in sys.path:
@@ -20,7 +22,6 @@ if backend_dir in sys.path:
 sys.path.insert(0, backend_dir)
 
 os.environ["TESTING"] = "1"
-os.environ["DB_NAME"] = "test-me-mex"
 
 from tests.conftest import reset_test_database, teardown_test_database
 from tests.test_db import (
@@ -72,22 +73,13 @@ from main import app
 from app.services.llm_gateway import llm_gateway
 
 
-def run_all_tests():
-    print("=== Running Backend Test Suite on 'test-me-mex' Database ===")
-
-    force_llm = os.getenv("SKIP_LLM", "0") != "1"
+def _run_worker_1(result_queue):
+    """Worker 1: Fast Unit Tests, Routing, and Paths 1 & 2."""
+    os.environ["DB_NAME"] = "test-me-mex-w1"
     server_online = llm_gateway.is_server_available()
+    force_llm = os.getenv("SKIP_LLM", "0") != "1"
 
-    if not server_online and not force_llm:
-        print(
-            "⚠️ [vLLM Colab Server Offline] LLM-dependent tests will be SKIPPED cleanly."
-        )
-    elif not server_online and force_llm:
-        print(
-            "⚡ [LLM Required Mode] Forcing LLM tests to execute against vLLM server..."
-        )
-
-    unit_test_funcs = [
+    worker_1_tests = [
         ("DB: Project Workspace CRUD", test_project_workspace_crud, False),
         ("DB: Node/Edge Project Scoping", test_node_and_edge_project_scoping, False),
         (
@@ -107,19 +99,6 @@ def run_all_tests():
             test_pure_centrality_dynamic_hub_selection,
             False,
         ),
-        ("Orchestrator: Conversation Intent", test_classify_intent_conversation, True),
-        ("Orchestrator: Retrieval Intent", test_classify_intent_retrieval, True),
-        ("Orchestrator: Ingestion Intent", test_classify_intent_ingestion, True),
-        (
-            "Orchestrator: Chat History Intent",
-            test_classify_intent_with_chat_history,
-            True,
-        ),
-        (
-            "Orchestrator: Consolidate Extracted Concepts",
-            test_consolidate_extracted_concepts,
-            False,
-        ),
         (
             "Reconciliation: Independent Ingestion Linking",
             test_independent_ingestion_linking,
@@ -136,6 +115,24 @@ def run_all_tests():
             False,
         ),
         (
+            "Persona: Mutually Exclusive Sub-Graph Partitioning",
+            test_department_persona_mutually_exclusive_partitioning,
+            False,
+        ),
+        (
+            "Orchestrator: Consolidate Extracted Concepts",
+            test_consolidate_extracted_concepts,
+            False,
+        ),
+        ("Orchestrator: Conversation Intent", test_classify_intent_conversation, True),
+        ("Orchestrator: Retrieval Intent", test_classify_intent_retrieval, True),
+        ("Orchestrator: Ingestion Intent", test_classify_intent_ingestion, True),
+        (
+            "Orchestrator: Chat History Intent",
+            test_classify_intent_with_chat_history,
+            True,
+        ),
+        (
             "Persona: Sub-Graph Exploration",
             test_department_persona_shared_exploration,
             True,
@@ -145,38 +142,29 @@ def run_all_tests():
             test_department_persona_root_node_traversal_blocking,
             True,
         ),
-        (
-            "Persona: Mutually Exclusive Sub-Graph Partitioning",
-            test_department_persona_mutually_exclusive_partitioning,
-            False,
-        ),
-        (
-            "E2E Workflow: Path 1 Conversation",
-            test_e2e_conversation_workflow,
-            True,
-        ),
-        (
-            "E2E Workflow: Path 2 Retrieval",
-            test_e2e_retrieval_workflow,
-            True,
-        ),
-        (
-            "E2E Workflow: Path 3 Real Paper Ingestion (ArXiv 2502.18864v2)",
-            test_e2e_ingestion_workflow_real_paper,
-            True,
-        ),
+        ("E2E Workflow: Path 1 Conversation", test_e2e_conversation_workflow, True),
+        ("E2E Workflow: Path 2 Retrieval", test_e2e_retrieval_workflow, True),
     ]
 
+    passed = 0
+    failed = 0
+    errors = []
+
     try:
-        for name, func, requires_llm in unit_test_funcs:
+        for name, func, requires_llm in worker_1_tests:
             if requires_llm and not server_online and not force_llm:
-                print(f"  ⏭️ {name} [SKIPPED - vLLM Server Offline]")
+                print(f"  ⏭️ [W1] {name} [SKIPPED - vLLM Offline]")
                 continue
 
             reset_test_database()
             try:
                 func()
-                print(f"  ✓ {name} passed.")
+                print(f"  ✓ [W1] {name} passed.")
+                passed += 1
+            except Exception as e:
+                print(f"  ❌ [W1] {name} FAILED: {e}")
+                failed += 1
+                errors.append((name, str(e)))
             finally:
                 teardown_test_database()
 
@@ -194,21 +182,121 @@ def run_all_tests():
                 ),
             ]
             for name, func, requires_llm in api_funcs:
-                if requires_llm and not server_online:
-                    print(f"  ⏭️ {name} [SKIPPED - vLLM Server Offline]")
+                if requires_llm and not server_online and not force_llm:
+                    print(f"  ⏭️ [W1] {name} [SKIPPED - vLLM Offline]")
                     continue
 
                 reset_test_database()
                 try:
                     func(client)
-                    print(f"  ✓ {name} passed.")
+                    print(f"  ✓ [W1] {name} passed.")
+                    passed += 1
+                except Exception as e:
+                    print(f"  ❌ [W1] {name} FAILED: {e}")
+                    failed += 1
+                    errors.append((name, str(e)))
                 finally:
                     teardown_test_database()
 
-        print("\n=== BACKEND TEST SUITE EXECUTION COMPLETED! ===")
     finally:
         teardown_test_database()
 
+    result_queue.put(("W1", passed, failed, errors))
+
+
+def _run_worker_2(result_queue):
+    """Worker 2: Ingestion E2E Workflow with Real ArXiv Paper."""
+    os.environ["DB_NAME"] = "test-me-mex-w2"
+    server_online = llm_gateway.is_server_available()
+    force_llm = os.getenv("SKIP_LLM", "0") != "1"
+
+    worker_2_tests = [
+        (
+            "E2E Workflow: Path 3 Real Paper Ingestion (ArXiv 2502.18864v2)",
+            test_e2e_ingestion_workflow_real_paper,
+            True,
+        ),
+    ]
+
+    passed = 0
+    failed = 0
+    errors = []
+
+    try:
+        for name, func, requires_llm in worker_2_tests:
+            if requires_llm and not server_online and not force_llm:
+                print(f"  ⏭️ [W2] {name} [SKIPPED - vLLM Offline]")
+                continue
+
+            reset_test_database()
+            try:
+                func()
+                print(f"  ✓ [W2] {name} passed.")
+                passed += 1
+            except Exception as e:
+                print(f"  ❌ [W2] {name} FAILED: {e}")
+                failed += 1
+                errors.append((name, str(e)))
+            finally:
+                teardown_test_database()
+    finally:
+        teardown_test_database()
+
+    result_queue.put(("W2", passed, failed, errors))
+
+
+def run_all_tests():
+    t_start = time.time()
+    print("=== Running Backend Test Suite (2-Worker Parallel Runner, n=2) ===")
+
+    force_llm = os.getenv("SKIP_LLM", "0") != "1"
+    server_online = llm_gateway.is_server_available()
+
+    if not server_online and not force_llm:
+        print(
+            "⚠️ [vLLM Colab Server Offline] LLM-dependent tests will be SKIPPED cleanly."
+        )
+    elif not server_online and force_llm:
+        print(
+            "⚡ [LLM Required Mode] Forcing LLM tests to execute against vLLM server..."
+        )
+    else:
+        print("⚡ [vLLM Server Online] Executing tests against live vLLM model.")
+
+    result_queue = multiprocessing.Queue()
+    p1 = multiprocessing.Process(target=_run_worker_1, args=(result_queue,))
+    p2 = multiprocessing.Process(target=_run_worker_2, args=(result_queue,))
+
+    p1.start()
+    p2.start()
+
+    p1.join()
+    p2.join()
+
+    total_passed = 0
+    total_failed = 0
+    all_errors = []
+
+    while not result_queue.empty():
+        w_name, passed, failed, errors = result_queue.get()
+        total_passed += passed
+        total_failed += failed
+        all_errors.extend(errors)
+
+    t_elapsed = time.time() - t_start
+    print(f"\n========================================================")
+    print(f"TEST RUN COMPLETED in {t_elapsed:.2f} seconds!")
+    print(f"Passed: {total_passed} | Failed: {total_failed}")
+    if all_errors:
+        print(f"\nFailures encountered:")
+        for name, err in all_errors:
+            print(f"  - {name}: {err}")
+        sys.exit(1)
+    else:
+        print("🎉 All test assertions passed successfully!")
+        print(f"========================================================\n")
+
 
 if __name__ == "__main__":
+    multiprocessing.set_start_method("spawn", force=True)
     run_all_tests()

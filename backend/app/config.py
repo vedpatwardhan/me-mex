@@ -20,7 +20,11 @@ class Settings:
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
     MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-    DB_NAME: str = os.getenv("DB_NAME", "me-mex")
+
+    @property
+    def DB_NAME(self) -> str:
+        return os.getenv("DB_NAME", "me-mex")
+
     COLAB_VLLM_URL: str = os.getenv("COLAB_VLLM_URL", "http://localhost:8000/v1")
     LLM_MODEL_NAME: str = os.getenv(
         "LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512"

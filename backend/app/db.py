@@ -49,11 +49,12 @@ class GraphMemexDatabase:
 
         if HAS_PYMONGO:
             try:
+                db_name = settings.DB_NAME
                 self.client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=1500)
                 self.client.admin.command("ping")
-                self.db = self.client[DB_NAME]
+                self.db = self.client[db_name]
                 self.use_mongo = True
-                print(f"[Database] Connected to MongoDB at {MONGO_URI}, DB: {DB_NAME}")
+                print(f"[Database] Connected to MongoDB at {MONGO_URI}, DB: {db_name}")
             except Exception as e:
                 print(
                     f"[Database] MongoDB unavailable ({e}). Running in-memory fallback mode."
@@ -267,6 +268,13 @@ class GraphMemexDatabase:
             return DocumentRecord(**d) if d else None
         else:
             return self.mem_documents.get(doc_id)
+
+    def get_documents(self) -> List[DocumentRecord]:
+        if self.use_mongo:
+            docs = list(self.db.documents.find({}))
+            return [DocumentRecord(**d) for d in docs]
+        else:
+            return list(self.mem_documents.values())
 
     # --- Staging Operations ---
     def upsert_staging(self, stage: StagingRecord):

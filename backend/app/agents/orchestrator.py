@@ -14,6 +14,7 @@ Aligned with docs/ARCHITECTURE.md Section 2:
 import json
 import uuid
 import time
+import asyncio
 from collections import defaultdict
 from typing import List, Dict, Any, AsyncGenerator, Generator, Optional
 from app.db import db_engine
@@ -286,7 +287,7 @@ class ExecutiveOrchestrator:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": query})
 
-        direct_response = self.llm.generate_chat_completion(messages)
+        direct_response = self.llm.generate_chat_completion(messages, max_tokens=1024)
 
         yield {
             "event": "chat_complete",
@@ -392,12 +393,15 @@ class ExecutiveOrchestrator:
 
         if source_url:
             doc_res = self.tools.fetch_document(source_url)
-            if doc_res.get("content"):
-                full_content = doc_res["content"]
+            fetched_content = doc_res.get("content", "")
+            if fetched_content and doc_res.get("status") == "SUCCESS":
+                full_content = fetched_content
                 for line in full_content.splitlines():
                     if line.startswith("# "):
                         title = line[2:].strip()
                         break
+            elif not full_content and fetched_content:
+                full_content = fetched_content
 
         if not title:
             first_line = (
@@ -440,13 +444,27 @@ class ExecutiveOrchestrator:
             self.db.upsert_passage(p_rec)
             passage_ids.append(p_id)
 
-        # Extract Raw Passage Concepts & Consolidate into Intra-Document Concepts
+        # Extract Raw Passage Concepts concurrently across all chunks & Consolidate into Intra-Document Concepts
         raw_extracted_concepts: List[Dict[str, Any]] = []
         extracted_relations: List[Dict[str, Any]] = []
-        for p_id, chunk_str in zip(passage_ids, passage_chunks):
-            extraction = self._extract_concepts_from_passage(
-                chunk_str, title, query, chat_history
+
+        async def _extract_chunk(p_id: str, chunk_str: str):
+            extraction = await asyncio.to_thread(
+                self._extract_concepts_from_passage,
+                chunk_str,
+                title,
+                query,
+                chat_history,
             )
+            return p_id, extraction
+
+        extractions = await asyncio.gather(
+            *[
+                _extract_chunk(p_id, chunk_str)
+                for p_id, chunk_str in zip(passage_ids, passage_chunks)
+            ]
+        )
+        for p_id, extraction in extractions:
             for c in extraction.get("concepts", []):
                 raw_extracted_concepts.append(
                     {
