@@ -137,7 +137,7 @@ class GraphIngestionEngine:
                         "timestamp": time.time(),
                     }
 
-        # 4. Action: SPLIT_CONCEPT (Restructure over-clustered mutable concept node)
+        # 4. Action: SPLIT_CONCEPT (Non-destructive intermediate subdivision & re-wiring)
         elif action == "SPLIT_CONCEPT":
             concept_id = item.get("concept_id") or item.get("concept", {}).get("id")
             if concept_id:
@@ -150,13 +150,18 @@ class GraphIngestionEngine:
                     return None
 
                 sub_concepts = item.get("sub_concepts", [])
+                rewired_edges = item.get("rewired_edges", [])
                 if target_node and sub_concepts:
-                    # Deactivate or remove over-clustered target node
-                    self.db.delete_node(concept_id)
+                    # PRESERVE ORIGINAL HUB: Target node remains as umbrella concept node!
+                    sub_alias_map: Dict[str, str] = {}
 
-                    # Insert newly split sub-concept nodes
+                    # Insert newly created sub-concept nodes & connect to original hub
                     for sub in sub_concepts:
                         new_sub_id = f"concept_{uuid.uuid4().hex[:8]}"
+                        alias = sub.get("sub_id_alias")
+                        if alias:
+                            sub_alias_map[alias] = new_sub_id
+
                         sub_node = GraphNode(
                             _id=new_sub_id,
                             node_type="CONCEPT",
@@ -164,15 +169,43 @@ class GraphIngestionEngine:
                             description=sub.get("description", ""),
                             passage_ids=sub.get("passage_ids", target_node.passage_ids),
                             project_ids=proj_list,
-                            metadata={"immutable": False, "split_from": concept_id},
+                            metadata={"immutable": False, "sub_of_hub": concept_id},
                         )
                         self.db.upsert_node(sub_node)
+
+                        # Link sub-concept directly to original target concept hub
+                        hub_edge = GraphEdge(
+                            _id=f"edge_{uuid.uuid4().hex[:8]}",
+                            source_id=new_sub_id,
+                            target_id=concept_id,
+                            description="SUBSET_OF",
+                            project_ids=proj_list,
+                        )
+                        self.db.upsert_edge(hub_edge)
+
+                    # Re-wire neighbor edges to target the new sub-concepts
+                    for rewired in rewired_edges:
+                        neighbor_id = rewired.get("neighbor_id")
+                        sub_alias = rewired.get("connect_to_sub_alias")
+                        target_sub_id = sub_alias_map.get(sub_alias)
+                        if neighbor_id and target_sub_id:
+                            rewired_edge = GraphEdge(
+                                _id=f"edge_{uuid.uuid4().hex[:8]}",
+                                source_id=neighbor_id,
+                                target_id=target_sub_id,
+                                description=rewired.get("relation_type", "RELEVANT_TO"),
+                                project_ids=proj_list,
+                            )
+                            self.db.upsert_edge(rewired_edge)
 
                     return {
                         "event": "node_touched",
                         "persona_name": dept_name,
                         "node_id": concept_id,
-                        "message": f"Split over-clustered concept '{target_node.title}' into {len(sub_concepts)} sub-concepts.",
+                        "message": (
+                            f"Subdivided concept hub '{target_node.title}' into "
+                            f"{len(sub_concepts)} intermediate sub-concepts."
+                        ),
                         "timestamp": time.time(),
                     }
 

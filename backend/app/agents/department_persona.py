@@ -176,66 +176,196 @@ class DepartmentPersonaAgent:
 
     def reorganize_concept_hub(
         self,
+        explored_nodes: list[GraphNode] | None = None,
         project_id: str = "global",
         degree_threshold: int = 5,
     ) -> List[Dict[str, Any]]:
         """
-        Independent Concept Node Reorganization & Splitting during Ingestion.
+        3-Step Non-Destructive Concept Node Reorganization & Subdivision during Ingestion.
 
-        Inspects mutable concept nodes in the persona's sub-graph. If a mutable node's connection degree
-        exceeds `degree_threshold` (over-clustering), the persona inspects underlying passage chunks in `passages`
-        and emits a `SPLIT_CONCEPT` command to restructure it into distinct sub-concepts.
+        Step 1 (Discovery): Inspects full sub-graph payload to discover candidate over-clustered mutable concept nodes.
+        Step 2 (Formulation): Formulates 2-3 focused sub-concepts around each target node using passage text grounding.
+        Step 3 (Neighbor Re-Wiring): Re-wires direct neighbor edges to connect through the new sub-concepts while preserving the original concept hub as an umbrella node.
         """
         all_edges = db_engine.get_edges(project_id)
+        node_id_set = {n.id for n in explored_nodes}
+        node_map = {n.id: n for n in explored_nodes}
+
+        # Filter edges active within the explored sub-graph partition
+        subgraph_edges = [
+            e
+            for e in all_edges
+            if e.source_id in node_id_set or e.target_id in node_id_set
+        ]
+
         degree_map: Dict[str, int] = defaultdict(int)
-        for e in all_edges:
+        neighbor_map: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+        def _make_neighbor(n_id: str, direction: str, rel_type: str) -> Dict[str, Any]:
+            n_node = db_engine.get_node(n_id)
+            return {
+                "neighbor_id": n_id,
+                "neighbor_title": n_node.title if n_node else n_id,
+                "direction": direction,
+                "relation_type": rel_type,
+            }
+
+        for e in subgraph_edges:
             degree_map[e.source_id] += 1
             degree_map[e.target_id] += 1
 
+            if e.source_id in node_id_set:
+                neighbor_map[e.source_id].append(
+                    _make_neighbor(e.target_id, "outgoing", e.description)
+                )
+            if e.target_id in node_id_set:
+                neighbor_map[e.target_id].append(
+                    _make_neighbor(e.source_id, "incoming", e.description)
+                )
+
+        # STEP 1: Discovery Phase (Identify candidate mutable concept nodes)
+        # Inlining connected edges directly into each node object for unified LLM inspection
+        nodes_payload = [
+            {
+                "id": n.id,
+                "title": n.title,
+                "description": n.description,
+                "immutable": n.is_immutable,
+                "degree": degree_map.get(n.id, 0),
+                "passage_ids": n.passage_ids,
+                "connected_edges": neighbor_map.get(n.id, []),
+            }
+            for n in explored_nodes
+        ]
+
+        system_discover = load_prompt("persona_reorganize_discover").format(
+            department_name=self.department_name
+        )
+        user_discover = f"""
+Explored Sub-Graph Nodes (with Inlined Connected Edges & Degrees):
+{json.dumps(nodes_payload, indent=2)}
+
+Identify any MUTABLE concept nodes with degree >= {degree_threshold} that combine distinct sub-themes requiring non-destructive intermediate subdivision.
+"""
+        candidate_ids = []
+        try:
+            res_discover = llm_gateway.generate_chat_completion(
+                [
+                    {"role": "system", "content": system_discover},
+                    {"role": "user", "content": user_discover},
+                ],
+                temperature=0.2,
+                max_tokens=256,
+                response_format={"type": "json_object"},
+                enable_reasoning=False,
+            )
+            data_discover = json.loads(res_discover)
+            candidate_ids = data_discover.get("candidate_concept_ids", [])
+        except Exception as e:
+            print(f"[{self.department_name}] Reorg discovery error: {e}")
+            # Fallback heuristic: check degree threshold directly on mutable nodes
+            candidate_ids = [
+                n.id
+                for n in explored_nodes
+                if not n.is_immutable and degree_map.get(n.id, 0) >= degree_threshold
+            ]
+
         reorg_commands: List[Dict[str, Any]] = []
 
-        for node in self.last_explored_nodes:
-            # Skip immutable nodes (Root Nodes & Intra-Doc Concepts)
-            if node.is_immutable:
+        # STEPS 2 & 3: Separated Sub-Concept Formulation & Neighbor Edge Re-Wiring per candidate concept node
+        for c_id in candidate_ids:
+            target_node = node_map.get(c_id) or db_engine.get_node(c_id)
+            if not target_node or target_node.is_immutable:
                 continue
 
-            # Check if mutable concept node is over-clustered
-            if degree_map.get(node.id, 0) >= degree_threshold:
-                # Fetch plain-text passage chunks for ground-truth context
-                passages = db_engine.get_passages_by_ids(node.passage_ids)
-                passage_texts = [p.text_content for p in passages]
+            # Fetch plain-text passage chunks with explicit passage_id keys for grounding
+            passages = db_engine.get_passages(target_node.passage_ids)
+            passage_payload = [
+                {"passage_id": p.id, "text_content": p.text_content} for p in passages
+            ]
 
-                system_prompt = load_prompt("persona_reorganize_concept").format(
-                    department_name=self.department_name,
-                    node_id=node.id,
-                )
-                user_payload = f"""
-Over-Clustered Mutable Concept Node: '{node.title}' (ID: {node.id})
-Current Description: {node.description}
-Connection Degree: {degree_map[node.id]} links
+            neighbors = neighbor_map.get(c_id, [])
 
-Associated Passage Text Chunks for Grounding:
-{json.dumps(passage_texts, indent=2)}
+            # STEP 2: Sub-Concept Formulation (Propose sub-clusters ONLY)
+            system_split = load_prompt("persona_reorganize_split").format(
+                department_name=self.department_name,
+                node_id=target_node.id,
+            )
+            user_split = f"""
+Target Over-Clustered Mutable Concept Hub: '{target_node.title}' (ID: {target_node.id})
+Current Description: {target_node.description}
+Connection Degree: {degree_map.get(target_node.id, 0)}
+
+Associated Grounding Passages with Explicit IDs:
+{json.dumps(passage_payload, indent=2)}
+
+Formulate 3-4 focused sub-concepts to cluster around '{target_node.id}'.
 """
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_payload},
-                ]
-                try:
-                    res = llm_gateway.generate_chat_completion(
-                        messages,
-                        temperature=0.2,
-                        max_tokens=512,
-                        response_format={"type": "json_object"},
-                        enable_reasoning=False,
-                    )
-                    data = json.loads(res)
-                    if data.get("action") == "SPLIT_CONCEPT":
-                        reorg_commands.append(data)
-                except Exception as e:
-                    print(
-                        f"[{self.department_name}] Concept reorg error for {node.id}: {e}"
-                    )
+            sub_concepts = []
+            try:
+                res_split = llm_gateway.generate_chat_completion(
+                    [
+                        {"role": "system", "content": system_split},
+                        {"role": "user", "content": user_split},
+                    ],
+                    temperature=0.2,
+                    max_tokens=512,
+                    response_format={"type": "json_object"},
+                    enable_reasoning=False,
+                )
+                data_split = json.loads(res_split)
+                sub_concepts = data_split.get("sub_concepts", [])
+            except Exception as e:
+                print(
+                    f"[{self.department_name}] Step 2 Sub-concept formulation error for {target_node.id}: {e}"
+                )
+
+            if not sub_concepts:
+                continue
+
+            # STEP 3: Neighbor Edge Re-Wiring (Iterate over ALL direct neighbors)
+            system_rewire = load_prompt("persona_reorganize_rewire").format(
+                department_name=self.department_name,
+                node_id=target_node.id,
+            )
+            user_rewire = f"""
+Target Concept Hub: '{target_node.title}' (ID: {target_node.id})
+
+Formulated Sub-Concepts Available for Connection:
+{json.dumps(sub_concepts, indent=2)}
+
+Complete List of Direct Neighbor Nodes to Re-Wire:
+{json.dumps(neighbors, indent=2)}
+
+Assign EVERY direct neighbor node to exactly ONE sub-concept alias.
+"""
+            rewired_edges = []
+            try:
+                res_rewire = llm_gateway.generate_chat_completion(
+                    [
+                        {"role": "system", "content": system_rewire},
+                        {"role": "user", "content": user_rewire},
+                    ],
+                    temperature=0.2,
+                    max_tokens=512,
+                    response_format={"type": "json_object"},
+                    enable_reasoning=False,
+                )
+                data_rewire = json.loads(res_rewire)
+                rewired_edges = data_rewire.get("rewired_edges", [])
+            except Exception as e:
+                print(
+                    f"[{self.department_name}] Step 3 Neighbor edge re-wiring error for {target_node.id}: {e}"
+                )
+
+            reorg_commands.append(
+                {
+                    "action": "SPLIT_CONCEPT",
+                    "concept_id": target_node.id,
+                    "sub_concepts": sub_concepts,
+                    "rewired_edges": rewired_edges,
+                }
+            )
 
         return reorg_commands
 

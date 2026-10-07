@@ -155,13 +155,14 @@ def test_mutable_concept_node_splitting():
     assert evt is not None
     assert evt["event"] == "node_touched"
 
-    # Original over-clustered node deleted/deactivated
+    # Original over-clustered node PRESERVED as umbrella node!
     old_node = db_engine.get_node(mutable_hub_id)
-    assert old_node is None
+    assert old_node is not None
+    assert old_node.id == mutable_hub_id
 
     # New focused sub-concepts inserted into DB
     all_nodes = db_engine.get_nodes(project_id="global")
-    sub_nodes = [n for n in all_nodes if n.metadata.get("split_from") == mutable_hub_id]
+    sub_nodes = [n for n in all_nodes if n.metadata.get("sub_of_hub") == mutable_hub_id]
     assert len(sub_nodes) == 2
     titles = [n.title for n in sub_nodes]
     assert "Sub-Concept Alpha" in titles

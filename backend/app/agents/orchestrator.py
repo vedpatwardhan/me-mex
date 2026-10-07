@@ -561,8 +561,11 @@ class ExecutiveOrchestrator:
                 chat_history=chat_history,
                 project_id=project_id,
             )
-            # Run passage-grounded concept reorganization on over-clustered mutable concept nodes
-            reorg_cmds = dept.reorganize_concept_hub(project_id=project_id)
+            # Run 3-step non-destructive concept reorganization on over-clustered mutable concept nodes
+            reorg_cmds = dept.reorganize_concept_hub(
+                explored_nodes=traversal_finding["explored_nodes"],
+                project_id=project_id,
+            )
             all_cmds = ingest_res.get("commands", []) + reorg_cmds
 
             persona_command_results.append(

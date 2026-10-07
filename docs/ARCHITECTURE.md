@@ -157,12 +157,13 @@ Both Retrieval and Ingestion operate on a unified multi-agent pattern structured
    - **Root Node Traversal Blocking**: Traversal visits Root Nodes for provenance context and summaries, but strictly **blocks Root Nodes from expanding further hops**.
 2. **Relevance Evaluation:**
    - Each Specialist Persona evaluates the relevance of its accumulated domain nodes, search history, user prompt, and conversation history (`chat_history`) independently.
-3. **Independent Graph Ingestion, Linking & Concept Reorganization:**
+3. **Independent Graph Ingestion, Linking & 3-Step Concept Reorganization:**
    - Consolidated concepts are ingested as **Immutable Intra-Document Concepts** on the periphery of the spherical topology.
-   - During persona ingestion, personas have **two direct options** to integrate intra-document concepts into the graph:
-     - **`CREATE_EDGE`**: Connect an immutable intra-document concept node on the periphery to an existing mutable domain hub concept node.
-     - **`EDIT_CONCEPT`**: Generalize or edit an existing mutable domain hub concept node to incorporate the newly acquired knowledge.
-   - Later in the pipeline, specialized persona workflows handle macro reorganization across over-clustered concept hubs (`SPLIT_CONCEPT` / `reorganize_concept_hub`).
+   - During persona ingestion, personas integrate intra-document concepts via **`CREATE_EDGE`** (connecting periphery concepts to core domain hubs) or **`EDIT_CONCEPT`** (updating mutable domain hubs).
+   - **3-Step Non-Destructive Concept Hub Reorganization**:
+     - **Step 1 (Discovery)**: Personas inspect their full assigned sub-graph community (nodes, mutability, edges, and connection degrees) to discover over-clustered or conflated mutable concept hubs.
+     - **Step 2 (Sub-Concept Formulation)**: Personas propose 3–4 focused sub-concepts around each over-clustered concept hub using grounded passage text chunks containing explicit `passage_id` keys. **No edge re-wiring or neighbor assignments occur in this step.** The original concept hub is preserved as an umbrella node, and sub-concepts link directly to it (`SUBSET_OF`).
+     - **Step 3 (Neighbor Edge Re-Wiring)**: In a dedicated separate step, personas iterate over the complete list of direct neighbor nodes previously connected to the over-clustered hub, assigning each neighbor node to connect to the single most appropriate newly created sub-concept alias.
    - Because intra-document nodes are immutable and graph partitions are mutually exclusive, persona updates proceed completely independently without conflicts.
 
 ---
