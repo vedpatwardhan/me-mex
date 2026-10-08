@@ -113,30 +113,37 @@ export const GraphCanvas: React.FC = () => {
           />
         </div>
 
-        {/* Node Type Filter Chips */}
-        <div className="flex items-center gap-1.5 bg-[#121824]/90 backdrop-blur-md border border-white/10 p-1.5 rounded-xl shadow-xl pointer-events-auto">
-          <Filter className="w-3.5 h-3.5 text-slate-400 mx-1" />
+        {/* Node Type Filter Chips with Subtitle Note Below */}
+        <div className="flex flex-col items-end gap-1 pointer-events-auto">
+          <div className="flex items-center gap-1.5 bg-[#121824]/90 backdrop-blur-md border border-white/10 p-1.5 rounded-xl shadow-xl">
+            <Filter className="w-3.5 h-3.5 text-slate-400 mx-1" />
 
-          {[
-            { id: 'all', label: 'All', color: 'text-slate-300' },
-            { id: 'paper', label: 'Papers', color: 'text-sky-400' },
-            { id: 'blog', label: 'Blogs', color: 'text-emerald-400' },
-            { id: 'post', label: 'Posts', color: 'text-purple-400' },
-            { id: 'immutable_concept', label: 'Immutable Concepts', color: 'text-sky-300' },
-            { id: 'mutable_concept', label: 'Mutable Concepts', color: 'text-amber-400' },
-          ].map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setSelectedNodeTypeFilter(item.id as any)}
-              className={`px-3 py-1 text-[11px] font-bold rounded-lg transition-all ${
-                selectedNodeTypeFilter === item.id
-                  ? 'bg-[#1e293b] text-slate-100 border border-white/20 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-              }`}
-            >
-              <span className={item.color || ''}>{item.label}</span>
-            </button>
-          ))}
+            {[
+              { id: 'all', label: 'All', dot: 'bg-slate-400', color: 'text-slate-300' },
+              { id: 'paper', label: 'Papers', dot: 'bg-[#38bdf8]', color: 'text-sky-400' },
+              { id: 'blog', label: 'Blogs', dot: 'bg-[#34d399]', color: 'text-emerald-400' },
+              { id: 'post', label: 'Posts', dot: 'bg-[#c084fc]', color: 'text-purple-400' },
+              { id: 'immutable_concept', label: 'Concepts (I)', dot: 'bg-[#fb7185]', color: 'text-rose-400', title: 'Immutable Concepts (direct source extractions)' },
+              { id: 'mutable_concept', label: 'Concepts (M)', dot: 'bg-[#fbbf24]', color: 'text-amber-400', title: 'Mutable Concepts (cross-paper synthesized)' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setSelectedNodeTypeFilter(item.id as any)}
+                title={item.title}
+                className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all ${
+                  selectedNodeTypeFilter === item.id
+                    ? 'bg-[#1e293b] text-slate-100 border border-white/20 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${item.dot}`} />
+                <span className={item.color || ''}>{item.label}</span>
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-slate-500 font-mono pr-2 select-none">
+            I: Immutable • M: Mutable
+          </span>
         </div>
       </div>
 
@@ -177,30 +184,6 @@ export const GraphCanvas: React.FC = () => {
         onNodeHover={(node: any) => setHoveredNodeId(node ? node.id : null)}
         backgroundColor="#090d16"
       />
-
-      {/* Canvas Legend Bar */}
-      <div className="absolute bottom-4 left-4 z-20 flex items-center gap-4 bg-[#121824]/90 backdrop-blur-md border border-white/10 px-3.5 py-2 rounded-xl shadow-xl text-[11px] font-medium">
-        <div className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#38bdf8] shadow-sm" />
-          <span className="text-slate-300">Paper Root</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#34d399] shadow-sm" />
-          <span className="text-slate-300">Blog Root</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#c084fc] shadow-sm" />
-          <span className="text-slate-300">Post Root</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#0ea5e9] shadow-sm" />
-          <span className="text-slate-300">Immutable Concept</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#fbbf24] shadow-sm" />
-          <span className="text-slate-300">Mutable Concept</span>
-        </div>
-      </div>
 
       {/* Floating Zoom & Recenter Tools */}
       <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 bg-[#121824]/90 backdrop-blur-md border border-white/10 p-1.5 rounded-xl shadow-xl">

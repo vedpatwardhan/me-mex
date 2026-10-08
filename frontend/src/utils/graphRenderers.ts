@@ -2,8 +2,8 @@ import { GraphNode, isRootNode, getRootSubType, isImmutableConcept } from '../ty
 
 export const createGlowTextureCache = (): Map<string, HTMLCanvasElement> => {
   const cache = new Map<string, HTMLCanvasElement>();
-  // Sky Blue (Paper), Emerald (Blog), Purple (Post), Cyan (Immutable Concept), Amber (Mutable Concept), Slate (Generic Root)
-  const colors = ['#38bdf8', '#34d399', '#c084fc', '#0ea5e9', '#fbbf24', '#94a3b8'];
+  // Sky Blue (Paper), Emerald (Blog), Purple (Post), Rose/Coral (Immutable Concept), Amber (Mutable Concept), Slate (Generic Root)
+  const colors = ['#38bdf8', '#34d399', '#c084fc', '#fb7185', '#fbbf24', '#94a3b8'];
 
   colors.forEach((color) => {
     const size = 64;
@@ -48,7 +48,7 @@ export const drawMeMexNode = (
     else if (rootType === 'post') baseColor = '#c084fc'; // Purple
     else baseColor = '#94a3b8'; // Slate generic
   } else if (isImmutable) {
-    baseColor = '#0ea5e9'; // Cyan for Immutable Concept (Directly from Root)
+    baseColor = '#fb7185'; // Rose / Coral for Immutable Concepts (Ground-truth extracted from Root)
   }
 
   // 1. Draw cached offscreen radial glow for active state

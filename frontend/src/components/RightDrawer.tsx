@@ -47,9 +47,9 @@ export const RightDrawer: React.FC = () => {
 
     // Concept Nodes
     if (isImmutable) {
-      return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-sky-950/70 text-sky-300 border border-sky-500/40 shadow-sm">Immutable Concept</span>;
+      return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-rose-950/70 text-rose-300 border border-rose-500/40 shadow-sm">Concepts (I)</span>;
     }
-    return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-amber-950/70 text-amber-400 border border-amber-500/40 shadow-sm">Mutable Concept</span>;
+    return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-amber-950/70 text-amber-400 border border-amber-500/40 shadow-sm">Concepts (M)</span>;
   };
 
   const getMutabilityBadge = () => {
@@ -62,8 +62,8 @@ export const RightDrawer: React.FC = () => {
     }
     if (isImmutable) {
       return (
-        <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-sky-950/80 text-sky-300 border border-sky-500/40 flex items-center gap-1">
-          <Lock className="w-3 h-3 text-sky-400" /> Direct Root Extraction
+        <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-rose-950/80 text-rose-300 border border-rose-500/40 flex items-center gap-1">
+          <Lock className="w-3 h-3 text-rose-400" /> Direct Root Extraction
         </span>
       );
     }

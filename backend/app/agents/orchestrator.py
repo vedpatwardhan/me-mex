@@ -187,9 +187,14 @@ class ExecutiveOrchestrator:
             raw_intent = data.get("intent", "CONVERSATION")
 
             if raw_intent == "INGESTION":
+                doc_type = data.get("doc_type")
+                if not doc_type:
+                    raise ValueError(
+                        "Classified INGESTION intent but 'doc_type' is missing from LLM output."
+                    )
                 return {
                     "intent": "INGESTION",
-                    "doc_type": data.get("doc_type") or "paper",
+                    "doc_type": doc_type,
                     "source_url": data.get("source_url"),
                     "raw_text": data.get("raw_text"),
                 }
@@ -530,31 +535,12 @@ class ExecutiveOrchestrator:
         if project_id and project_id != "global":
             proj_list.append(project_id)
 
-        # Determine specific Document Root subtype (paper, blog, post, or ROOT)
-        doc_type = (
-            target_info.get("doc_type")
-            or consolidated_result.get("doc_type")
-            or "paper"
-        )
-        if not target_info.get("doc_type"):
-            if source_url:
-                src_lower = source_url.lower()
-                if "arxiv.org" in src_lower or ".pdf" in src_lower:
-                    doc_type = "paper"
-                elif (
-                    "twitter.com" in src_lower
-                    or "x.com" in src_lower
-                    or "reddit.com" in src_lower
-                ):
-                    doc_type = "post"
-                elif (
-                    "medium.com" in src_lower
-                    or "blog" in src_lower
-                    or "substack" in src_lower
-                ):
-                    doc_type = "blog"
-            elif not source_url and len(full_content or "") < 1000:
-                doc_type = "post"
+        # Determine specific Document Root subtype (strictly required from intent classification)
+        doc_type = target_info.get("doc_type")
+        if not doc_type:
+            raise ValueError(
+                "Ingestion execution aborted: 'doc_type' is strictly required for ingestion and cannot be missing or None."
+            )
 
         # Create Root Node & Immutable Intra-Document Concept Nodes in MongoDB
         root_node_id = f"root_{doc_id}"
