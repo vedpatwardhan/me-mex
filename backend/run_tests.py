@@ -142,70 +142,76 @@ def _run_worker_1(result_queue):
             test_department_persona_root_node_traversal_blocking,
             True,
         ),
-        ("E2E Workflow: Path 1 Conversation", test_e2e_conversation_workflow, True),
         ("E2E Workflow: Path 2 Retrieval", test_e2e_retrieval_workflow, True),
     ]
 
     passed = 0
     failed = 0
     errors = []
+    timings = []
 
     try:
         for name, func, requires_llm in worker_1_tests:
             if requires_llm and not server_online and not force_llm:
                 print(f"  ⏭️ [W1] {name} [SKIPPED - vLLM Offline]")
+                timings.append((name, 0.0, "SKIPPED"))
                 continue
 
             reset_test_database()
+            t0 = time.time()
             try:
                 func()
-                print(f"  ✓ [W1] {name} passed.")
+                dur = time.time() - t0
+                print(f"  ✓ [W1] {name} passed ({dur:.2f}s).")
                 passed += 1
+                timings.append((name, dur, "PASSED"))
             except Exception as e:
-                print(f"  ❌ [W1] {name} FAILED: {e}")
+                dur = time.time() - t0
+                print(f"  ❌ [W1] {name} FAILED ({dur:.2f}s): {e}")
                 failed += 1
                 errors.append((name, str(e)))
+                timings.append((name, dur, "FAILED"))
             finally:
                 teardown_test_database()
 
-        # API Route tests with TestClient
+        # Read-only API Route tests with TestClient
         with TestClient(app) as client:
             api_funcs = [
                 ("API: Root Endpoint", test_root_endpoint, False),
                 ("API: Projects Endpoints", test_projects_endpoints, False),
                 ("API: Graph Endpoint", test_graph_endpoint, False),
-                ("API: Chat POST Endpoint", test_chat_endpoint_post, True),
-                (
-                    "API: Project Chat History Endpoint",
-                    test_project_chat_history_endpoint,
-                    True,
-                ),
             ]
             for name, func, requires_llm in api_funcs:
                 if requires_llm and not server_online and not force_llm:
                     print(f"  ⏭️ [W1] {name} [SKIPPED - vLLM Offline]")
+                    timings.append((name, 0.0, "SKIPPED"))
                     continue
 
                 reset_test_database()
+                t0 = time.time()
                 try:
                     func(client)
-                    print(f"  ✓ [W1] {name} passed.")
+                    dur = time.time() - t0
+                    print(f"  ✓ [W1] {name} passed ({dur:.2f}s).")
                     passed += 1
+                    timings.append((name, dur, "PASSED"))
                 except Exception as e:
-                    print(f"  ❌ [W1] {name} FAILED: {e}")
+                    dur = time.time() - t0
+                    print(f"  ❌ [W1] {name} FAILED ({dur:.2f}s): {e}")
                     failed += 1
                     errors.append((name, str(e)))
+                    timings.append((name, dur, "FAILED"))
                 finally:
                     teardown_test_database()
 
     finally:
         teardown_test_database()
 
-    result_queue.put(("W1", passed, failed, errors))
+    result_queue.put(("W1", passed, failed, errors, timings))
 
 
 def _run_worker_2(result_queue):
-    """Worker 2: Ingestion E2E Workflow with Real ArXiv Paper."""
+    """Worker 2: Ingestion & Conversation Workflows + Chat Endpoints."""
     os.environ["DB_NAME"] = "test-me-mex-w2"
     server_online = llm_gateway.is_server_available()
     force_llm = os.getenv("SKIP_LLM", "0") != "1"
@@ -216,40 +222,88 @@ def _run_worker_2(result_queue):
             test_e2e_ingestion_workflow_real_paper,
             True,
         ),
+        (
+            "E2E Workflow: Path 1 Conversation",
+            test_e2e_conversation_workflow,
+            True,
+        ),
     ]
 
     passed = 0
     failed = 0
     errors = []
+    timings = []
 
     try:
         for name, func, requires_llm in worker_2_tests:
             if requires_llm and not server_online and not force_llm:
                 print(f"  ⏭️ [W2] {name} [SKIPPED - vLLM Offline]")
+                timings.append((name, 0.0, "SKIPPED"))
                 continue
 
             reset_test_database()
+            t0 = time.time()
             try:
                 func()
-                print(f"  ✓ [W2] {name} passed.")
+                dur = time.time() - t0
+                print(f"  ✓ [W2] {name} passed ({dur:.2f}s).")
                 passed += 1
+                timings.append((name, dur, "PASSED"))
             except Exception as e:
+                dur = time.time() - t0
                 import traceback
                 traceback.print_exc()
-                print(f"  ❌ [W2] {name} FAILED: {e}")
+                print(f"  ❌ [W2] {name} FAILED ({dur:.2f}s): {e}")
                 failed += 1
                 errors.append((name, str(e)))
+                timings.append((name, dur, "FAILED"))
             finally:
                 teardown_test_database()
+
+        # Chat API Route tests with TestClient
+        with TestClient(app) as client:
+            api_funcs = [
+                ("API: Chat POST Endpoint", test_chat_endpoint_post, True),
+                ("API: Project Chat History Endpoint", test_project_chat_history_endpoint, True),
+            ]
+            for name, func, requires_llm in api_funcs:
+                if requires_llm and not server_online and not force_llm:
+                    print(f"  ⏭️ [W2] {name} [SKIPPED - vLLM Offline]")
+                    timings.append((name, 0.0, "SKIPPED"))
+                    continue
+
+                reset_test_database()
+                t0 = time.time()
+                try:
+                    func(client)
+                    dur = time.time() - t0
+                    print(f"  ✓ [W2] {name} passed ({dur:.2f}s).")
+                    passed += 1
+                    timings.append((name, dur, "PASSED"))
+                except Exception as e:
+                    dur = time.time() - t0
+                    import traceback
+                    traceback.print_exc()
+                    print(f"  ❌ [W2] {name} FAILED ({dur:.2f}s): {e}")
+                    failed += 1
+                    errors.append((name, str(e)))
+                    timings.append((name, dur, "FAILED"))
+                finally:
+                    teardown_test_database()
+
     finally:
         teardown_test_database()
 
-    result_queue.put(("W2", passed, failed, errors))
+    result_queue.put(("W2", passed, failed, errors, timings))
 
 
 def run_all_tests():
     t_start = time.time()
+    start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t_start))
+    print("=" * 60)
+    print(f"🚀 [COMMAND START] run_tests.py started at {start_time_str}")
     print("=== Running Backend Test Suite (2-Worker Parallel Runner, n=2) ===")
+    print("=" * 60)
 
     force_llm = os.getenv("SKIP_LLM", "0") != "1"
     server_online = llm_gateway.is_server_available()
@@ -278,24 +332,40 @@ def run_all_tests():
     total_passed = 0
     total_failed = 0
     all_errors = []
+    all_timings = []
 
     while not result_queue.empty():
-        w_name, passed, failed, errors = result_queue.get()
+        w_name, passed, failed, errors, timings = result_queue.get()
         total_passed += passed
         total_failed += failed
         all_errors.extend(errors)
+        all_timings.extend(timings)
 
-    t_elapsed = time.time() - t_start
+    t_end = time.time()
+    end_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t_end))
+    t_elapsed = t_end - t_start
+
     print(f"\n========================================================")
-    print(f"TEST RUN COMPLETED in {t_elapsed:.2f} seconds!")
-    print(f"Passed: {total_passed} | Failed: {total_failed}")
+    print(f"⏱️  [COMMAND TIMING SUMMARY]")
+    print(f"    Started:       {start_time_str}")
+    print(f"    Ended:         {end_time_str}")
+    print(f"    Total Elapsed: {t_elapsed:.2f}s ({t_elapsed/60:.2f} mins)")
+    print(f"    Passed:        {total_passed} | Failed: {total_failed}")
+    print(f"========================================================")
+
+    print("\n--- INDIVIDUAL TEST DURATION BREAKDOWN (Slowest First) ---")
+    sorted_timings = sorted(all_timings, key=lambda x: x[1], reverse=True)
+    for name, dur, status in sorted_timings:
+        status_icon = "✓" if status == "PASSED" else ("⏭️" if status == "SKIPPED" else "❌")
+        print(f"  {status_icon} [{dur:6.2f}s] {name}")
+
     if all_errors:
         print(f"\nFailures encountered:")
         for name, err in all_errors:
             print(f"  - {name}: {err}")
         sys.exit(1)
     else:
-        print("🎉 All test assertions passed successfully!")
+        print("\n🎉 All test assertions passed successfully!")
         print(f"========================================================\n")
 
 
