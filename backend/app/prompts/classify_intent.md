@@ -20,14 +20,14 @@ FIELD EXTRACTION RULES (STRICT):
 - If intent is "INGESTION":
   * "doc_type": The target document class ("paper" for research papers/arXiv/PDFs, "blog" for articles/Substack/Medium, "post" for social notes/voice notes/short excerpts). Default to "paper" if ambiguous.
   * "source_url": Extracted URL string if present in the prompt/context, else null.
-  * "raw_text": Extracted user commentary, rationale, summary, or document text payload if present, else null.
-  * NOTE: Both "source_url" AND "raw_text" can and SHOULD be present together if the user provided both a URL and accompanying text/explanation!
+  * "raw_text": The user's preface, notes, personal commentary, or rationale explaining why they are adding this document or what is relevant about it (concise notes, not entire external article pastes). If the user provided no commentary, set to null.
+  * NOTE: Both "source_url" and "raw_text" can and should be present together when the user provides a link accompanied by their own notes or context!
 
 Return JSON format:
 {
   "intent": "CONVERSATION" | "RETRIEVAL" | "INGESTION",
   "doc_type": "paper" | "blog" | "post" | null,
   "source_url": "Extracted URL string (INGESTION ONLY, else null)",
-  "raw_text": "Extracted insight or document text payload (INGESTION ONLY, else null)"
+  "raw_text": "Extracted user preface, commentary, or notes (INGESTION ONLY, else null)"
 }
 

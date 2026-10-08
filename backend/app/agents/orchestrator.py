@@ -187,31 +187,11 @@ class ExecutiveOrchestrator:
             raw_intent = data.get("intent", "CONVERSATION")
 
             if raw_intent == "INGESTION":
-                doc_type = data.get("doc_type") or "paper"
-                source_url = data.get("source_url")
-                raw_text = data.get("raw_text")
-
-                # If doc_type wasn't explicitly provided, infer from source_url or length
-                if source_url:
-                    src_lower = source_url.lower()
-                    if "arxiv.org" in src_lower or ".pdf" in src_lower:
-                        doc_type = "paper"
-                    elif any(
-                        s in src_lower for s in ("twitter.com", "x.com", "reddit.com")
-                    ):
-                        doc_type = "post"
-                    elif any(
-                        s in src_lower for s in ("medium.com", "blog", "substack")
-                    ):
-                        doc_type = "blog"
-                elif raw_text and len(raw_text) < 500:
-                    doc_type = "post"
-
                 return {
                     "intent": "INGESTION",
-                    "doc_type": doc_type,
-                    "source_url": source_url,
-                    "raw_text": raw_text,
+                    "doc_type": data.get("doc_type") or "paper",
+                    "source_url": data.get("source_url"),
+                    "raw_text": data.get("raw_text"),
                 }
 
             # CONVERSATION or RETRIEVAL
@@ -221,7 +201,8 @@ class ExecutiveOrchestrator:
                 "source_url": None,
                 "raw_text": None,
             }
-        except Exception:
+        except Exception as e:
+            print(f"[ExecutiveOrchestrator] classify_intent error: {e}")
             return {
                 "intent": "CONVERSATION",
                 "doc_type": None,

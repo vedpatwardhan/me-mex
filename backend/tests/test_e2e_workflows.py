@@ -108,12 +108,13 @@ def test_e2e_ingestion_workflow_real_paper():
 
     proj_id = "e2e_ingest_proj"
 
-    # User message contains a real paper link and raw text paste to trigger the full INGESTION pipeline
-    user_ingest_message = f"""Please ingest this new research paper into the knowledge graph:
-URL: https://arxiv.org/pdf/2502.18864v2
-
-{ARXIV_PAPER_TEXT}
-"""
+    # Realistic user message containing a paper URL and user preface notes on why it is relevant
+    user_ingest_message = (
+        "Please take a look at this paper and ingest it into the graph: "
+        "https://arxiv.org/pdf/2502.18864v2. "
+        "It covers reasoning with language models, process reward models (PRMs), "
+        "and tree search rollouts for intermediate step verification."
+    )
 
     async def _run():
         events = []
@@ -138,9 +139,9 @@ URL: https://arxiv.org/pdf/2502.18864v2
         docs = db_engine.get_documents()
         assert len(docs) > 0
 
-        # 4. Verify ROOT Node & Intra-Document Concepts created with immutable: True
+        # 4. Verify Root Node & Intra-Document Concepts created with immutable: True
         all_nodes = db_engine.get_nodes(project_id=proj_id)
-        root_nodes = [n for n in all_nodes if n.node_type == "ROOT"]
+        root_nodes = [n for n in all_nodes if n.is_root_node]
         assert len(root_nodes) > 0
         assert root_nodes[0].is_immutable is True
 

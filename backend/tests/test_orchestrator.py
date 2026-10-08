@@ -7,6 +7,7 @@ Aligned with docs/ARCHITECTURE.md Section 2:
 """
 
 from app.agents.orchestrator import orchestrator
+from app.services.llm_gateway import llm_gateway
 
 
 def test_classify_intent_conversation():
@@ -20,6 +21,9 @@ def test_classify_intent_conversation():
 
 def test_classify_intent_retrieval():
     """Verify RETRIEVAL path classification for concept research queries."""
+    if not llm_gateway.is_server_available():
+        print("  ⏭️ test_classify_intent_retrieval [SKIPPED - vLLM Server Offline]")
+        return
     res = orchestrator.classify_intent(
         "Explain latent world models vs pixel world models", chat_history=[]
     )
@@ -31,6 +35,9 @@ def test_classify_intent_retrieval():
 
 def test_classify_intent_ingestion():
     """Verify INGESTION path classification for paper links and text pastes."""
+    if not llm_gateway.is_server_available():
+        print("  ⏭️ test_classify_intent_ingestion [SKIPPED - vLLM Server Offline]")
+        return
     res = orchestrator.classify_intent(
         "https://arxiv.org/abs/2401.12345 paper abstract", chat_history=[]
     )
@@ -40,6 +47,11 @@ def test_classify_intent_ingestion():
 
 def test_classify_intent_with_chat_history():
     """Verify chat_history context influences follow-up intent classification."""
+    if not llm_gateway.is_server_available():
+        print(
+            "  ⏭️ test_classify_intent_with_chat_history [SKIPPED - vLLM Server Offline]"
+        )
+        return
     history = [
         {"role": "user", "text": "What is model predictive control?"},
         {
@@ -58,6 +70,9 @@ def test_classify_intent_with_chat_history():
 
 def test_classify_intent_dual_payload():
     """Verify dual payload extraction when both URL and commentary notes are provided together."""
+    if not llm_gateway.is_server_available():
+        print("  ⏭️ test_classify_intent_dual_payload [SKIPPED - vLLM Server Offline]")
+        return
     res = orchestrator.classify_intent(
         "Include this document https://arxiv.org/abs/2502.18864 because it proposes a novel skeletal loss formulation.",
         chat_history=[],
