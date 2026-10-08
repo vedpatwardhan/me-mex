@@ -330,9 +330,9 @@ class ExecutiveOrchestrator:
         department_communities = self.analytics.partition_department_communities(
             project_id
         )
-        department_findings = []
+
         for dept in active_departments:
-            yield {
+            start_evt = {
                 "event": "persona_traversal_start",
                 "department_id": dept.department_id,
                 "department_name": dept.department_name,
@@ -340,17 +340,28 @@ class ExecutiveOrchestrator:
                 "message": f"Specialist Persona for '{dept.hub_node.title}' traversing adjacent concept edges...",
                 "timestamp": time.time(),
             }
+            self.event_queue.push(project_id, start_evt)
+            yield start_evt
 
+        async def _traverse_dept(dept):
             partition_ids = set(department_communities.get(dept.department_name, []))
-            finding = dept.explore_concept_hub(
+            finding = await asyncio.to_thread(
+                dept.explore_concept_hub,
                 query=query,
                 chat_history=chat_history,
                 project_id=project_id,
                 max_depth=3,
                 partition_node_ids=partition_ids if partition_ids else None,
             )
-            department_findings.append(finding)
+            return dept, finding
 
+        traversal_results = await asyncio.gather(
+            *[_traverse_dept(dept) for dept in active_departments]
+        )
+
+        department_findings = []
+        for dept, finding in traversal_results:
+            department_findings.append(finding)
             evt_active = {
                 "event": "persona_traversal_active",
                 "department_id": dept.department_id,
