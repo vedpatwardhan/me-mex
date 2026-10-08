@@ -171,19 +171,113 @@ class VoiceService {
     });
   }
 
+  private isPrewarmed = false;
+  private isPrewarming = false;
+  private audioCtx: AudioContext | null = null;
+  private speechQueue: string[] = [];
+  private isPlayingQueue = false;
+
+  /** Prewarm STT and TTS models in the background on app start */
+  async prewarm(): Promise<void> {
+    if (this.isPrewarmed || this.isPrewarming) return;
+    this.isPrewarming = true;
+    console.log('[VoiceService] Pre-warming Whisper and Kokoro models in background...');
+    try {
+      await Promise.all([this.initSTT(), this.initTTS()]);
+      this.isPrewarmed = true;
+      console.log('[VoiceService] All voice models pre-warmed and ready.');
+    } catch (err) {
+      console.warn('[VoiceService] Pre-warming error (will retry on demand):', err);
+    } finally {
+      this.isPrewarming = false;
+    }
+  }
+
+  isReady(): boolean {
+    return !!(this.transcriber && this.tts);
+  }
+
+  /** Sanitize text to remove emojis, markdown symbols, and artifacts before TTS */
+  cleanTextForSpeech(text: string): string {
+    if (!text) return '';
+    return text
+      // Strip unicode emojis & pictographs
+      .replace(/[\p{Extended_Pictographic}\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+      // Strip markdown links [label](url) -> label
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      // Strip bold / italic asterisks and underscores
+      .replace(/[*_#`~>]/g, '')
+      // Collapse whitespace
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private getAudioContext(): AudioContext {
+    if (!this.audioCtx || this.audioCtx.state === 'closed') {
+      this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume();
+    }
+    return this.audioCtx;
+  }
+
+  /** Enqueue a sentence chunk to play sequentially as it arrives from a stream */
+  enqueueSpeechChunk(sentence: string, voice: string = 'af_heart') {
+    const clean = this.cleanTextForSpeech(sentence);
+    if (!clean) return;
+    this.speechQueue.push(clean);
+    this.processSpeechQueue(voice);
+  }
+
+  private async processSpeechQueue(voice: string = 'af_heart') {
+    if (this.isPlayingQueue || this.speechQueue.length === 0) return;
+    this.isPlayingQueue = true;
+
+    while (this.speechQueue.length > 0) {
+      const sentence = this.speechQueue.shift();
+      if (!sentence) continue;
+
+      try {
+        if (!this.tts) await this.initTTS();
+        if (this.tts) {
+          const audio = await this.tts.generate(sentence, { voice });
+          const audioCtx = this.getAudioContext();
+          const buffer = audioCtx.createBuffer(1, audio.audio.length, audio.sampling_rate);
+          buffer.getChannelData(0).set(audio.audio);
+
+          await new Promise<void>((resolve) => {
+            const source = audioCtx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioCtx.destination);
+            source.onended = () => resolve();
+            source.start(0);
+          });
+        }
+      } catch (err) {
+        console.error('[VoiceService] Speech chunk error:', err);
+      }
+    }
+
+    this.isPlayingQueue = false;
+  }
+
   /** Convert Response Text to Speech via Kokoro-JS and Play */
   async speakText(text: string, voice: string = 'af_heart'): Promise<void> {
     try {
+      const clean = this.cleanTextForSpeech(text);
+      if (!clean) return;
+
       if (!this.tts) {
         await this.initTTS();
       }
 
       if (this.tts) {
-        console.log('[VoiceService] Synthesizing speech with Kokoro TTS:', text.slice(0, 60));
-        const audio = await this.tts.generate(text, { voice });
+        console.log('[VoiceService] Synthesizing speech with Kokoro TTS:', clean.slice(0, 60));
+        const audio = await this.tts.generate(clean, { voice });
 
         // Play Audio Buffer using Web Audio API
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const audioCtx = this.getAudioContext();
         const buffer = audioCtx.createBuffer(1, audio.audio.length, audio.sampling_rate);
         buffer.getChannelData(0).set(audio.audio);
 
@@ -199,3 +293,4 @@ class VoiceService {
 }
 
 export const voiceService = new VoiceService();
+

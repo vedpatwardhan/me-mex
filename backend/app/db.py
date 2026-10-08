@@ -57,7 +57,9 @@ class GraphMemexDatabase:
                 self.client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=1500)
                 self.client.admin.command("ping")
                 self.use_mongo = True
-                print(f"[Database] Connected to MongoDB at {MONGO_URI}, DB: {settings.DB_NAME}")
+                print(
+                    f"[Database] Connected to MongoDB at {MONGO_URI}, DB: {settings.DB_NAME}"
+                )
             except Exception as e:
                 print(
                     f"[Database] MongoDB unavailable ({e}). Running in-memory fallback mode."

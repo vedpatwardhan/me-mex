@@ -60,8 +60,11 @@ export const LeftRail: React.FC = () => {
       setVoiceListening(false);
       const transcribedText = await voiceService.stopRecordingAndTranscribe();
       if (transcribedText.trim()) {
-        setInputVal(transcribedText);
         sendMessage(transcribedText.trim(), true);
+        setInputVal('');
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
       }
       return;
     }

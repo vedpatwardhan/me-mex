@@ -252,6 +252,7 @@ def _run_worker_2(result_queue):
             except Exception as e:
                 dur = time.time() - t0
                 import traceback
+
                 traceback.print_exc()
                 print(f"  ❌ [W2] {name} FAILED ({dur:.2f}s): {e}")
                 failed += 1
@@ -264,7 +265,11 @@ def _run_worker_2(result_queue):
         with TestClient(app) as client:
             api_funcs = [
                 ("API: Chat POST Endpoint", test_chat_endpoint_post, True),
-                ("API: Project Chat History Endpoint", test_project_chat_history_endpoint, True),
+                (
+                    "API: Project Chat History Endpoint",
+                    test_project_chat_history_endpoint,
+                    True,
+                ),
             ]
             for name, func, requires_llm in api_funcs:
                 if requires_llm and not server_online and not force_llm:
@@ -283,6 +288,7 @@ def _run_worker_2(result_queue):
                 except Exception as e:
                     dur = time.time() - t0
                     import traceback
+
                     traceback.print_exc()
                     print(f"  ❌ [W2] {name} FAILED ({dur:.2f}s): {e}")
                     failed += 1
@@ -356,7 +362,9 @@ def run_all_tests():
     print("\n--- INDIVIDUAL TEST DURATION BREAKDOWN (Slowest First) ---")
     sorted_timings = sorted(all_timings, key=lambda x: x[1], reverse=True)
     for name, dur, status in sorted_timings:
-        status_icon = "✓" if status == "PASSED" else ("⏭️" if status == "SKIPPED" else "❌")
+        status_icon = (
+            "✓" if status == "PASSED" else ("⏭️" if status == "SKIPPED" else "❌")
+        )
         print(f"  {status_icon} [{dur:6.2f}s] {name}")
 
     if all_errors:

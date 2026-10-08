@@ -115,6 +115,57 @@ async def chat_endpoint(req: ChatRequest):
     }
 
 
+@app.post("/api/chat/stream")
+async def chat_stream_endpoint(req: ChatRequest):
+    """Server-Sent Events endpoint streaming tokens and events in real-time."""
+    import json
+    from fastapi.responses import StreamingResponse
+
+    user_msg = ChatMessageRecord(
+        _id=f"msg_user_{uuid.uuid4().hex[:8]}",
+        project_id=req.project_id,
+        sender="user",
+        text=req.query,
+        is_voice=req.is_voice,
+    )
+    db_engine.upsert_message(user_msg)
+
+    async def event_generator():
+        collected_reply = []
+        touched_nodes = []
+        intent = "CONVERSATION"
+
+        async for event in orchestrator.process_user_message(
+            req.query, req.chat_history, project_id=req.project_id
+        ):
+            evt_type = event.get("event")
+            if evt_type == "intent_classified":
+                intent = event.get("intent", "CONVERSATION")
+            elif evt_type == "node_touched":
+                touched_nodes.append(event)
+            elif evt_type == "token_chunk":
+                collected_reply.append(event.get("delta", ""))
+            elif evt_type == "chat_complete":
+                if not collected_reply:
+                    collected_reply.append(event.get("final_answer", ""))
+
+            yield f"data: {json.dumps(event)}\n\n"
+
+        full_reply = "".join(collected_reply) or f"Processed {req.query}."
+        agent_msg = ChatMessageRecord(
+            _id=f"msg_agent_{uuid.uuid4().hex[:8]}",
+            project_id=req.project_id,
+            sender="agent",
+            text=full_reply,
+            grounded_node_ids=[
+                t.get("node_id") for t in touched_nodes if t.get("node_id")
+            ],
+        )
+        db_engine.upsert_message(agent_msg)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
 # --- Graph Nodes & Edges Endpoints ---
 @app.get("/api/graph")
 def get_graph(project_id: str = "global"):

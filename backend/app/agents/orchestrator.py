@@ -285,7 +285,22 @@ class ExecutiveOrchestrator:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": query})
 
-        direct_response = self.llm.generate_chat_completion(messages, max_tokens=1024)
+        # Stream tokens progressively
+        full_tokens = []
+        async for token in self.llm.stream_chat_completion(messages, max_tokens=1024):
+            full_tokens.append(token)
+            yield {
+                "event": "token_chunk",
+                "delta": token,
+                "timestamp": time.time(),
+            }
+
+        direct_response = "".join(full_tokens)
+        if not direct_response:
+            # Fallback to direct synchronous generation if streaming returns empty
+            direct_response = self.llm.generate_chat_completion(
+                messages, max_tokens=1024
+            )
 
         yield {
             "event": "chat_complete",

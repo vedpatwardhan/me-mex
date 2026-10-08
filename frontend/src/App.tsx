@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useMemexStore } from './store/useMemexStore';
+import { voiceService } from './services/voiceService';
 import { Navbar } from './components/Navbar';
 import { LeftRail } from './components/LeftRail';
 import { GraphCanvas } from './components/GraphCanvas';
@@ -11,6 +12,8 @@ export const App: React.FC = () => {
   useEffect(() => {
     fetchGraphData();
     fetchProjects();
+    // Pre-warm Whisper-base.en and Kokoro-82M in the background
+    voiceService.prewarm();
   }, []);
 
   return (

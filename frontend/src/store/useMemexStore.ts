@@ -142,7 +142,7 @@ export const useMemexStore = create<MemexState>((set, get) => ({
         content: m.text,
       }));
 
-      const res = await fetch('/api/chat', {
+      const res = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -152,31 +152,113 @@ export const useMemexStore = create<MemexState>((set, get) => ({
           chat_history: currentHistory,
         })
       });
-      const chatData = await res.json();
 
-      await get().fetchGraphData();
-      const agentText = chatData.reply || 'Processed input successfully.';
-      const agentMsg: ChatMessage = {
-        id: `agent_msg_${Date.now()}`,
-        sender: 'agent',
-        text: agentText,
-        timestamp: new Date().toISOString(),
-        grounded_node_ids: (chatData.touched_nodes || []).map((n: any) => n.node_id)
-      };
-
-      if (isVoice && agentText) {
-        voiceService.speakText(agentText);
+      if (!res.ok || !res.body) {
+        throw new Error(`Chat stream request failed: ${res.statusText}`);
       }
+
+      // Initialize empty agent response bubble in the UI
+      const agentMsgId = `agent_msg_${Date.now()}`;
+      let accumulatedText = '';
+      let sentenceBuffer = '';
+      const touchedNodes: any[] = [];
+
+      const initialAgentMsg: ChatMessage = {
+        id: agentMsgId,
+        sender: 'agent',
+        text: '',
+        timestamp: new Date().toISOString(),
+        grounded_node_ids: [],
+      };
 
       set({
         chatHistory: {
           ...get().chatHistory,
-          [projId]: [...(get().chatHistory[projId] || []), agentMsg]
-        },
+          [projId]: [...(get().chatHistory[projId] || []), initialAgentMsg]
+        }
+      });
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ')) continue;
+          try {
+            const eventData = JSON.parse(trimmed.slice(6));
+            const evtType = eventData.event;
+
+            if (evtType === 'token_chunk') {
+              const delta = eventData.delta || '';
+              accumulatedText += delta;
+              sentenceBuffer += delta;
+
+              // Update agent bubble text live
+              set((state) => ({
+                chatHistory: {
+                  ...state.chatHistory,
+                  [projId]: (state.chatHistory[projId] || []).map((m) =>
+                    m.id === agentMsgId ? { ...m, text: accumulatedText } : m
+                  )
+                }
+              }));
+
+              // If voice enabled, synthesize as soon as a complete sentence finishes
+              if (isVoice) {
+                const sentenceMatch = sentenceBuffer.match(/^([\s\S]*?[.!?\n]+)\s*(.*)$/);
+                if (sentenceMatch) {
+                  const finishedSentence = sentenceMatch[1].trim();
+                  sentenceBuffer = sentenceMatch[2] || '';
+                  if (finishedSentence) {
+                    voiceService.enqueueSpeechChunk(finishedSentence);
+                  }
+                }
+              }
+            } else if (evtType === 'chat_complete') {
+              if (!accumulatedText && eventData.final_answer) {
+                accumulatedText = eventData.final_answer;
+                set((state) => ({
+                  chatHistory: {
+                    ...state.chatHistory,
+                    [projId]: (state.chatHistory[projId] || []).map((m) =>
+                      m.id === agentMsgId ? { ...m, text: accumulatedText } : m
+                    )
+                  }
+                }));
+              }
+            } else if (evtType === 'node_touched') {
+              touchedNodes.push(eventData);
+            }
+          } catch (e) {
+            console.error('Error parsing SSE event:', e);
+          }
+        }
+      }
+
+      // If any trailing speech text remains in the buffer, speak it now
+      if (isVoice && sentenceBuffer.trim()) {
+        voiceService.enqueueSpeechChunk(sentenceBuffer.trim());
+      } else if (isVoice && !accumulatedText) {
+        // Fallback if no tokens arrived
+        voiceService.speakText('Done.');
+      }
+
+      await get().fetchGraphData();
+
+      set({
         thinkingState: {
           isThinking: false,
           currentAction: 'Idle',
-          visitedNodeIds: (chatData.touched_nodes || []).map((n: any) => n.node_id)
+          visitedNodeIds: touchedNodes.map((n: any) => n.node_id).filter(Boolean)
         }
       });
     } catch (err) {
