@@ -1,17 +1,15 @@
 import { pipeline, env } from '@xenova/transformers';
-import { KokoroTTS } from 'kokoro-js';
 
-// Re-enable browser caching now that model assets download cleanly
+// Enable browser caching for Whisper model assets
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
 class VoiceService {
   private transcriber: any = null;
-  private tts: any = null;
   private mediaRecorder: MediaRecorder | null = null;
   private audioChunks: Blob[] = [];
   private isTranscriberLoading = false;
-  private isTTSLoading = false;
+  private isPrewarmed = false;
 
   /** Initialize Whisper-Base English Speech-to-Text Pipeline */
   async initSTT() {
@@ -20,6 +18,7 @@ class VoiceService {
     try {
       console.log('[VoiceService] Initializing Xenova/whisper-base.en pipeline...');
       this.transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base.en');
+      this.isPrewarmed = true;
       console.log('[VoiceService] Whisper-base.en loaded successfully.');
     } catch (err: any) {
       console.error('[VoiceService] Failed to load whisper-base.en:', err);
@@ -28,22 +27,19 @@ class VoiceService {
     }
   }
 
-  /** Initialize Kokoro-82M Text-to-Speech Model */
-  async initTTS() {
-    if (this.tts || this.isTTSLoading) return;
-    this.isTTSLoading = true;
+  /** Prewarm STT model in the background on app start */
+  async prewarm(): Promise<void> {
+    if (this.isPrewarmed || this.isTranscriberLoading) return;
+    console.log('[VoiceService] Pre-warming Whisper STT model in background...');
     try {
-      console.log('[VoiceService] Loading Kokoro-82M TTS model...');
-      this.tts = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-        dtype: 'q8',
-        device: 'wasm',
-      });
-      console.log('[VoiceService] Kokoro TTS loaded successfully.');
+      await this.initSTT();
     } catch (err) {
-      console.error('[VoiceService] Failed to load Kokoro TTS:', err);
-    } finally {
-      this.isTTSLoading = false;
+      console.warn('[VoiceService] STT pre-warm error:', err);
     }
+  }
+
+  isReady(): boolean {
+    return !!this.transcriber;
   }
 
   /** Start Microphone Audio Recording */
@@ -58,29 +54,49 @@ class VoiceService {
         },
       });
       this.audioChunks = [];
-      this.mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : undefined,
-      });
 
+      // AudioContext for live visualizer audio metering
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const checkLevel = () => {
+        if (!this.mediaRecorder || this.mediaRecorder.state !== 'recording') {
+          audioCtx.close();
+          return;
+        }
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / bufferLength;
+        if (onAudioLevel) onAudioLevel(avg);
+        requestAnimationFrame(checkLevel);
+      };
+
+      this.mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data);
         }
       };
 
-      // Request data every 250ms so chunks are flushed reliably
-      this.mediaRecorder.start(250);
-      console.log('[VoiceService] Recording started.');
+      this.mediaRecorder.start(100);
+      checkLevel();
       return true;
     } catch (err) {
-      console.error('[VoiceService] Microphone access denied or failed:', err);
+      console.error('[VoiceService] Failed to start microphone recording:', err);
       return false;
     }
   }
 
-  /** Stop Recording and Transcribe with Whisper Tiny */
+  /** Stop Recording, resample to 16kHz Mono Float32Array, and transcribe via Whisper */
   async stopRecordingAndTranscribe(): Promise<string> {
     return new Promise((resolve) => {
       if (!this.mediaRecorder) {
@@ -90,35 +106,25 @@ class VoiceService {
 
       this.mediaRecorder.onstop = async () => {
         try {
-          const mimeType = this.mediaRecorder?.mimeType || 'audio/webm';
-          console.log(`[VoiceService] Stop recording. Total chunks: ${this.audioChunks.length}, mimeType: ${mimeType}`);
-          const audioBlob = new Blob(this.audioChunks, { type: mimeType });
-          console.log(`[VoiceService] Audio Blob size: ${audioBlob.size} bytes`);
-
-          if (audioBlob.size === 0) {
-            console.warn('[VoiceService] Audio Blob is empty!');
-            resolve('');
-            return;
-          }
-
+          const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
           const arrayBuffer = await audioBlob.arrayBuffer();
 
-          // 1. Decode recorded audio with default/native AudioContext sample rate
-          const defaultCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-          const decodedBuffer = await defaultCtx.decodeAudioData(arrayBuffer);
-          console.log(`[VoiceService] Decoded AudioBuffer duration: ${decodedBuffer.duration}s, sampleRate: ${decodedBuffer.sampleRate}, channels: ${decodedBuffer.numberOfChannels}`);
-          await defaultCtx.close();
+          // Decode using AudioContext to raw PCM
+          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-          // 2. Resample to 16kHz OfflineAudioContext as required by Whisper
+          // Xenova whisper expects 16,000 Hz single-channel Float32Array
+          const targetSampleRate = 16000;
           const offlineCtx = new OfflineAudioContext(
-            decodedBuffer.numberOfChannels,
-            Math.ceil(decodedBuffer.duration * 16000),
-            16000
+            1,
+            Math.ceil(audioBuffer.duration * targetSampleRate),
+            targetSampleRate
           );
-          const bufferSource = offlineCtx.createBufferSource();
-          bufferSource.buffer = decodedBuffer;
-          bufferSource.connect(offlineCtx.destination);
-          bufferSource.start();
+
+          const source = offlineCtx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(offlineCtx.destination);
+          source.start(0);
 
           const resampledBuffer = await offlineCtx.startRendering();
           const channelData = resampledBuffer.getChannelData(0);
@@ -129,15 +135,13 @@ class VoiceService {
             const abs = Math.abs(channelData[i]);
             if (abs > maxVal) maxVal = abs;
           }
-          console.log(`[VoiceService] 16kHz resampled Float32Array samples: ${channelData.length}, Peak volume: ${maxVal.toFixed(4)}`);
+          console.log(`[VoiceService] 16kHz resampled samples: ${channelData.length}, Peak volume: ${maxVal.toFixed(4)}`);
 
-          // Normalize audio buffer to peak 0.75 if peak volume is low, avoiding over-amplification of noise floor
           if (maxVal > 0.001) {
             const scale = Math.min(0.75 / maxVal, 20.0);
             for (let i = 0; i < channelData.length; i++) {
               channelData[i] *= scale;
             }
-            console.log(`[VoiceService] Audio normalized with factor ${scale.toFixed(2)}`);
           }
 
           if (!this.transcriber) {
@@ -152,9 +156,8 @@ class VoiceService {
               condition_on_previous_text: false,
               return_timestamps: false,
             });
-            console.log('[VoiceService] Raw Whisper output:', output);
             const text = typeof output === 'string' ? output : output.text || '';
-            console.log('[VoiceService] Transcription:', text);
+            console.log('[VoiceService] Transcription result:', text);
             resolve(text.trim());
           } else {
             resolve('');
@@ -166,131 +169,9 @@ class VoiceService {
       };
 
       this.mediaRecorder.stop();
-      // Stop all mic tracks
       this.mediaRecorder.stream.getTracks().forEach((track) => track.stop());
     });
-  }
-
-  private isPrewarmed = false;
-  private isPrewarming = false;
-  private audioCtx: AudioContext | null = null;
-  private speechQueue: string[] = [];
-  private isPlayingQueue = false;
-
-  /** Prewarm STT and TTS models in the background on app start */
-  async prewarm(): Promise<void> {
-    if (this.isPrewarmed || this.isPrewarming) return;
-    this.isPrewarming = true;
-    console.log('[VoiceService] Pre-warming Whisper and Kokoro models in background...');
-    try {
-      await Promise.all([this.initSTT(), this.initTTS()]);
-      this.isPrewarmed = true;
-      console.log('[VoiceService] All voice models pre-warmed and ready.');
-    } catch (err) {
-      console.warn('[VoiceService] Pre-warming error (will retry on demand):', err);
-    } finally {
-      this.isPrewarming = false;
-    }
-  }
-
-  isReady(): boolean {
-    return !!(this.transcriber && this.tts);
-  }
-
-  /** Sanitize text to remove emojis, markdown symbols, and artifacts before TTS */
-  cleanTextForSpeech(text: string): string {
-    if (!text) return '';
-    return text
-      // Strip unicode emojis & pictographs
-      .replace(/[\p{Extended_Pictographic}\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
-      // Strip markdown links [label](url) -> label
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      // Strip bold / italic asterisks and underscores
-      .replace(/[*_#`~>]/g, '')
-      // Collapse whitespace
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  private getAudioContext(): AudioContext {
-    if (!this.audioCtx || this.audioCtx.state === 'closed') {
-      this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    if (this.audioCtx.state === 'suspended') {
-      this.audioCtx.resume();
-    }
-    return this.audioCtx;
-  }
-
-  /** Enqueue a sentence chunk to play sequentially as it arrives from a stream */
-  enqueueSpeechChunk(sentence: string, voice: string = 'af_heart') {
-    const clean = this.cleanTextForSpeech(sentence);
-    if (!clean) return;
-    this.speechQueue.push(clean);
-    this.processSpeechQueue(voice);
-  }
-
-  private async processSpeechQueue(voice: string = 'af_heart') {
-    if (this.isPlayingQueue || this.speechQueue.length === 0) return;
-    this.isPlayingQueue = true;
-
-    while (this.speechQueue.length > 0) {
-      const sentence = this.speechQueue.shift();
-      if (!sentence) continue;
-
-      try {
-        if (!this.tts) await this.initTTS();
-        if (this.tts) {
-          const audio = await this.tts.generate(sentence, { voice });
-          const audioCtx = this.getAudioContext();
-          const buffer = audioCtx.createBuffer(1, audio.audio.length, audio.sampling_rate);
-          buffer.getChannelData(0).set(audio.audio);
-
-          await new Promise<void>((resolve) => {
-            const source = audioCtx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(audioCtx.destination);
-            source.onended = () => resolve();
-            source.start(0);
-          });
-        }
-      } catch (err) {
-        console.error('[VoiceService] Speech chunk error:', err);
-      }
-    }
-
-    this.isPlayingQueue = false;
-  }
-
-  /** Convert Response Text to Speech via Kokoro-JS and Play */
-  async speakText(text: string, voice: string = 'af_heart'): Promise<void> {
-    try {
-      const clean = this.cleanTextForSpeech(text);
-      if (!clean) return;
-
-      if (!this.tts) {
-        await this.initTTS();
-      }
-
-      if (this.tts) {
-        console.log('[VoiceService] Synthesizing speech with Kokoro TTS:', clean.slice(0, 60));
-        const audio = await this.tts.generate(clean, { voice });
-
-        // Play Audio Buffer using Web Audio API
-        const audioCtx = this.getAudioContext();
-        const buffer = audioCtx.createBuffer(1, audio.audio.length, audio.sampling_rate);
-        buffer.getChannelData(0).set(audio.audio);
-
-        const source = audioCtx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(audioCtx.destination);
-        source.start(0);
-      }
-    } catch (err) {
-      console.error('[VoiceService] Kokoro TTS playback failed:', err);
-    }
   }
 }
 
 export const voiceService = new VoiceService();
-

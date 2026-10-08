@@ -160,7 +160,6 @@ export const useMemexStore = create<MemexState>((set, get) => ({
       // Initialize empty agent response bubble in the UI
       const agentMsgId = `agent_msg_${Date.now()}`;
       let accumulatedText = '';
-      let sentenceBuffer = '';
       const touchedNodes: any[] = [];
 
       const initialAgentMsg: ChatMessage = {
@@ -200,7 +199,6 @@ export const useMemexStore = create<MemexState>((set, get) => ({
             if (evtType === 'token_chunk') {
               const delta = eventData.delta || '';
               accumulatedText += delta;
-              sentenceBuffer += delta;
 
               // Update agent bubble text live
               set((state) => ({
@@ -211,18 +209,6 @@ export const useMemexStore = create<MemexState>((set, get) => ({
                   )
                 }
               }));
-
-              // If voice enabled, synthesize as soon as a complete sentence finishes
-              if (isVoice) {
-                const sentenceMatch = sentenceBuffer.match(/^([\s\S]*?[.!?\n]+)\s*(.*)$/);
-                if (sentenceMatch) {
-                  const finishedSentence = sentenceMatch[1].trim();
-                  sentenceBuffer = sentenceMatch[2] || '';
-                  if (finishedSentence) {
-                    voiceService.enqueueSpeechChunk(finishedSentence);
-                  }
-                }
-              }
             } else if (evtType === 'chat_complete') {
               if (!accumulatedText && eventData.final_answer) {
                 accumulatedText = eventData.final_answer;
@@ -244,13 +230,6 @@ export const useMemexStore = create<MemexState>((set, get) => ({
         }
       }
 
-      // If any trailing speech text remains in the buffer, speak it now
-      if (isVoice && sentenceBuffer.trim()) {
-        voiceService.enqueueSpeechChunk(sentenceBuffer.trim());
-      } else if (isVoice && !accumulatedText) {
-        // Fallback if no tokens arrived
-        voiceService.speakText('Done.');
-      }
 
       await get().fetchGraphData();
 

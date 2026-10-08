@@ -60,10 +60,9 @@ export const LeftRail: React.FC = () => {
       setVoiceListening(false);
       const transcribedText = await voiceService.stopRecordingAndTranscribe();
       if (transcribedText.trim()) {
-        sendMessage(transcribedText.trim(), true);
-        setInputVal('');
+        setInputVal((prev) => (prev ? `${prev} ${transcribedText.trim()}` : transcribedText.trim()));
         if (textareaRef.current) {
-          textareaRef.current.style.height = 'auto';
+          textareaRef.current.focus();
         }
       }
       return;

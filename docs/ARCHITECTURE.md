@@ -182,6 +182,11 @@ The SPA features a persistent canvas workspace and four view modes:
 - Backend streams clean `department_id` and `department_name` attributes over SSE.
 - Frontend dynamically maps `department_id` string hashes to a high-contrast visual palette array (`['#38bdf8', '#fbbf24', '#c084fc', '#34d399', '#f87171', '#f43f5e', '#a855f7', '#06b6d4']`), rendering live node traversal glows.
 
+### Speech-to-Text (STT) Voice Dictation
+- **In-Browser Whisper Model**: Speech is captured via `MediaRecorder` (Opus) and transcribed 100% locally using `@xenova/transformers` (`Xenova/whisper-base.en`) running on WebAssembly/WebGPU.
+- **Editable Draft Workflow**: Stopping voice recording places the transcribed text directly into the chat input textarea without auto-sending. Users can review, adjust technical terms, and fix typos before manually submitting via `Enter` or the `Send` button.
+- **Clean Input Reset**: Submitting the form resets the textarea immediately for the next interaction.
+
 ---
 
 ## 6. API Endpoint Specification & FastMCP Tools
