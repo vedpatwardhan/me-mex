@@ -71,7 +71,7 @@ class GraphMemexDatabase:
         self._seed_initial_data()
 
     def _seed_initial_data(self):
-        """Seed initial nodes, edges, and default projects if empty."""
+        """Seed default global project workspace if empty. Graph nodes and edges start at zero."""
         if not self.get_projects():
             global_proj = ProjectWorkspace(
                 _id="global",
@@ -79,69 +79,6 @@ class GraphMemexDatabase:
                 description="Master superset database across all paradigms and literature.",
             )
             self.upsert_project(global_proj)
-        if not self.get_nodes():
-            n1 = GraphNode(
-                _id="concept_world_models",
-                title="World Models",
-                description="# World Models\nGeneral paradigm of generative world models in robotics.",
-                metadata={"domain_tags": ["world_models"]},
-            )
-            n2 = GraphNode(
-                _id="concept_pixel_world_models",
-                title="Pixel-Space World Models",
-                description="# Pixel-Space World Models\nGenerates future raw RGB frames directly (e.g. World Models 2018).",
-                metadata={
-                    "domain_tags": ["pixel_space"],
-                    "status": "HISTORICAL_SUPERSEDED",
-                },
-                passage_ids=["pass_pixel_01"],
-            )
-            n3 = GraphNode(
-                _id="concept_latent_world_models",
-                title="Latent-Space World Models",
-                description="# Latent-Space World Models\nGenerates representations in latent space for 100x faster planning (e.g. LeWM, JEPA).",
-                metadata={"domain_tags": ["latent_space"], "status": "PRIMARY_ACTIVE"},
-                passage_ids=["pass_latent_01"],
-            )
-            n4 = GraphNode(
-                _id="concept_action_mpc",
-                title="Action Planning via MPC",
-                description="# Action Planning via MPC\nTrajectory optimization over world model rollouts.",
-                metadata={"domain_tags": ["planning", "mpc"]},
-            )
-
-            for n in [n1, n2, n3, n4]:
-                self.upsert_node(n)
-
-            e1 = GraphEdge(
-                _id="edge_pixel_to_mpc",
-                source_id="concept_pixel_world_models",
-                target_id="concept_action_mpc",
-                is_directional=True,
-                description="Historical MPC rollout over raw pixel predictions.",
-                weight=0.3,
-                status="HISTORICAL_SUPERSEDED",
-            )
-            e2 = GraphEdge(
-                _id="edge_latent_to_mpc",
-                source_id="concept_latent_world_models",
-                target_id="concept_action_mpc",
-                is_directional=True,
-                description="Primary SOTA 100x speedup for MPC action planning in latent space.",
-                weight=1.0,
-                status="PRIMARY_ACTIVE",
-            )
-            e3 = GraphEdge(
-                _id="edge_pixel_parallel_latent",
-                source_id="concept_pixel_world_models",
-                target_id="concept_latent_world_models",
-                is_directional=False,
-                description="Parallel generative world model paradigms operating on raw pixels vs latent embeddings.",
-                weight=1.0,
-                status="PRIMARY_ACTIVE",
-            )
-            for e in [e1, e2, e3]:
-                self.upsert_edge(e)
 
     def upsert_node(self, node: GraphNode):
         if self.use_mongo:

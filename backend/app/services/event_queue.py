@@ -31,6 +31,29 @@ class EphemeralEventQueue:
         if len(self.queues[project_id]) > self.default_limit:
             self.queues[project_id] = self.queues[project_id][-self.default_limit :]
 
+        # --- Smart Backend Terminal Event Logger ---
+        if event_type != "token_chunk":
+            detail_msg = event_data.get("message") or ""
+            extra = []
+            if "intent" in event_data:
+                extra.append(f"intent={event_data['intent']}")
+            if "doc_type" in event_data and event_data["doc_type"]:
+                extra.append(f"doc_type={event_data['doc_type']}")
+            if "source_url" in event_data and event_data["source_url"]:
+                extra.append(f"url={event_data['source_url']}")
+            if "node_title" in event_data:
+                extra.append(f"node='{event_data['node_title']}'")
+            if "tool_name" in event_data:
+                extra.append(f"tool={event_data['tool_name']}")
+            if "error" in event_data:
+                extra.append(f"error={event_data['error']}")
+
+            extra_str = f" [{', '.join(extra)}]" if extra else ""
+            msg_str = f" - {detail_msg}" if detail_msg else ""
+            print(
+                f"📡 [EVENT:{project_id}] {event_type}{extra_str}{msg_str}", flush=True
+            )
+
     def get_events(
         self, project_id: str = "global", limit: int = 15
     ) -> List[ProjectEventRecord]:

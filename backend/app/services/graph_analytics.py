@@ -84,7 +84,7 @@ class GraphAnalyticsWorker:
             nx_graph.add_node(n.id)
 
         for e in edges:
-            nx_graph.add_edge(e.source_id, e.target_id, weight=e.weight)
+            nx_graph.add_edge(e.source_id, e.target_id, weight=1.0)
 
         if len(nx_graph) == 0:
             return {}
