@@ -15,15 +15,19 @@ Categories:
 - "INGESTION": Input containing URLs (e.g. arXiv, YouTube, blogs), raw document text, paper abstracts, research notes, or explicit instructions to ingest/store content into the knowledge base.
 
 FIELD EXTRACTION RULES (STRICT):
-- The "source_url" and "raw_text" fields are ONLY applicable when intent is "INGESTION".
-- If intent is "CONVERSATION" or "RETRIEVAL", set "source_url" and "raw_text" to null.
+- If intent is "CONVERSATION" or "RETRIEVAL":
+  * Set "doc_type", "source_url", and "raw_text" strictly to null.
 - If intent is "INGESTION":
-  * "source_url": Extracted URL string if a URL is present in the prompt/context, else null.
-  * "raw_text": Extracted insight or document text payload if text is present, else null.
+  * "doc_type": The target document class ("paper" for research papers/arXiv/PDFs, "blog" for articles/Substack/Medium, "post" for social notes/voice notes/short excerpts). Default to "paper" if ambiguous.
+  * "source_url": Extracted URL string if present in the prompt/context, else null.
+  * "raw_text": Extracted user commentary, rationale, summary, or document text payload if present, else null.
+  * NOTE: Both "source_url" AND "raw_text" can and SHOULD be present together if the user provided both a URL and accompanying text/explanation!
 
 Return JSON format:
 {
   "intent": "CONVERSATION" | "RETRIEVAL" | "INGESTION",
+  "doc_type": "paper" | "blog" | "post" | null,
   "source_url": "Extracted URL string (INGESTION ONLY, else null)",
   "raw_text": "Extracted insight or document text payload (INGESTION ONLY, else null)"
 }
+

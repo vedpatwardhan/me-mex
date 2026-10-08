@@ -1,5 +1,6 @@
 import React from 'react';
 import { useMemexStore } from '../store/useMemexStore';
+import { isRootNode, getRootSubType, isImmutableConcept } from '../types';
 import {
   X,
   ExternalLink,
@@ -24,40 +25,51 @@ export const RightDrawer: React.FC = () => {
 
   if (!selectedNode) return null;
 
-  const isImmutable = selectedNode.node_type === 'ROOT' || selectedNode.is_immutable;
+  const isRoot = isRootNode(selectedNode);
+  const rootType = isRoot ? getRootSubType(selectedNode) : null;
+  const isImmutable = isImmutableConcept(selectedNode);
   const umbrellaHubId = selectedNode.metadata?.sub_of_hub;
 
+
   const getNodeTypeBadge = () => {
-    switch (selectedNode.node_type) {
-      case 'ROOT':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-slate-900 text-slate-300 border border-slate-700 shadow-sm">Document Root</span>;
-      case 'CONCEPT':
-      case 'concept':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-amber-950/70 text-amber-400 border border-amber-500/40 shadow-sm">Atomic Concept Hub</span>;
-      case 'paper':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-sky-950/70 text-sky-400 border border-sky-500/40 shadow-sm">Research Paper</span>;
-      case 'blog':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-emerald-950/70 text-emerald-400 border border-emerald-500/40 shadow-sm">Blog Article</span>;
-      case 'video':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-red-950/70 text-red-400 border border-red-500/40 shadow-sm">Video Transcript</span>;
-      case 'post':
-        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-purple-950/70 text-purple-400 border border-purple-500/40 shadow-sm">Social / Voice Post</span>;
-      default:
-        return null;
+    if (isRoot) {
+      if (rootType === 'paper') {
+        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-sky-950/70 text-sky-400 border border-sky-500/40 shadow-sm">Research Paper Root</span>;
+      }
+      if (rootType === 'blog') {
+        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-emerald-950/70 text-emerald-400 border border-emerald-500/40 shadow-sm">Blog Article Root</span>;
+      }
+      if (rootType === 'post') {
+        return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-purple-950/70 text-purple-400 border border-purple-500/40 shadow-sm">Social / Voice Post Root</span>;
+      }
+      return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-slate-900 text-slate-300 border border-slate-700 shadow-sm">Document Root</span>;
     }
+
+    // Concept Nodes
+    if (isImmutable) {
+      return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-sky-950/70 text-sky-300 border border-sky-500/40 shadow-sm">Immutable Concept</span>;
+    }
+    return <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-amber-950/70 text-amber-400 border border-amber-500/40 shadow-sm">Mutable Concept</span>;
   };
 
   const getMutabilityBadge = () => {
-    if (isImmutable) {
+    if (isRoot) {
       return (
         <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-slate-900 text-slate-400 border border-slate-700 flex items-center gap-1">
-          <Lock className="w-3 h-3 text-slate-400" /> Immutable Node
+          <Lock className="w-3 h-3 text-slate-400" /> Grounded Source
+        </span>
+      );
+    }
+    if (isImmutable) {
+      return (
+        <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-sky-950/80 text-sky-300 border border-sky-500/40 flex items-center gap-1">
+          <Lock className="w-3 h-3 text-sky-400" /> Direct Root Extraction
         </span>
       );
     }
     return (
-      <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-        <Edit3 className="w-3 h-3 text-emerald-400" /> Mutable Concept Hub
+      <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-amber-950/80 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+        <Edit3 className="w-3 h-3 text-amber-400" /> Persona Synthesized
       </span>
     );
   };

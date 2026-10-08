@@ -13,6 +13,9 @@ def test_classify_intent_conversation():
     """Verify CONVERSATION path classification for greetings and basic prompts."""
     res = orchestrator.classify_intent("Hello, good morning!", chat_history=[])
     assert res["intent"] == "CONVERSATION"
+    assert res["doc_type"] is None
+    assert res["source_url"] is None
+    assert res["raw_text"] is None
 
 
 def test_classify_intent_retrieval():
@@ -21,6 +24,9 @@ def test_classify_intent_retrieval():
         "Explain latent world models vs pixel world models", chat_history=[]
     )
     assert res["intent"] == "RETRIEVAL"
+    assert res["doc_type"] is None
+    assert res["source_url"] is None
+    assert res["raw_text"] is None
 
 
 def test_classify_intent_ingestion():
@@ -29,6 +35,7 @@ def test_classify_intent_ingestion():
         "https://arxiv.org/abs/2401.12345 paper abstract", chat_history=[]
     )
     assert res["intent"] == "INGESTION"
+    assert res["doc_type"] in ("paper", "blog", "post")
 
 
 def test_classify_intent_with_chat_history():
@@ -44,6 +51,21 @@ def test_classify_intent_with_chat_history():
         "Compare this with diffusion policies", chat_history=history
     )
     assert res["intent"] == "RETRIEVAL"
+    assert res["doc_type"] is None
+    assert res["source_url"] is None
+    assert res["raw_text"] is None
+
+
+def test_classify_intent_dual_payload():
+    """Verify dual payload extraction when both URL and commentary notes are provided together."""
+    res = orchestrator.classify_intent(
+        "Include this document https://arxiv.org/abs/2502.18864 because it proposes a novel skeletal loss formulation.",
+        chat_history=[],
+    )
+    assert res["intent"] == "INGESTION"
+    assert res["doc_type"] == "paper"
+    assert res["source_url"] is not None
+    assert "arxiv.org" in res["source_url"]
 
 
 def test_consolidate_extracted_concepts():

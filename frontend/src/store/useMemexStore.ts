@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { AgentThinkingState, ChatMessage, GraphEdge, GraphNode, NodeType, ProjectWorkspace } from '../types';
+import { AgentThinkingState, ChatMessage, GraphEdge, GraphNode, NodeType, NodeTypeFilter, ProjectWorkspace } from '../types';
 import { voiceService } from '../services/voiceService';
 
 interface MemexState {
@@ -12,7 +12,7 @@ interface MemexState {
   selectedNodeId: string | null;
   hoveredNodeId: string | null;
   searchQuery: string;
-  selectedNodeTypeFilter: NodeType | 'all';
+  selectedNodeTypeFilter: NodeTypeFilter;
   isVoiceListening: boolean;
   isLoading: boolean;
 
@@ -21,7 +21,7 @@ interface MemexState {
   setSelectedNodeId: (id: string | null) => void;
   setHoveredNodeId: (id: string | null) => void;
   setSearchQuery: (query: string) => void;
-  setSelectedNodeTypeFilter: (filter: NodeType | 'all') => void;
+  setSelectedNodeTypeFilter: (filter: NodeTypeFilter) => void;
   setVoiceListening: (listening: boolean) => void;
 
   // API Async Actions

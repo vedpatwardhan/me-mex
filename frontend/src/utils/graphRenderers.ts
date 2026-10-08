@@ -1,8 +1,9 @@
-import { GraphNode } from '../types';
+import { GraphNode, isRootNode, getRootSubType, isImmutableConcept } from '../types';
 
 export const createGlowTextureCache = (): Map<string, HTMLCanvasElement> => {
   const cache = new Map<string, HTMLCanvasElement>();
-  const colors = ['#38bdf8', '#fbbf24', '#c084fc', '#34d399', '#f87171', '#64748b'];
+  // Sky Blue (Paper), Emerald (Blog), Purple (Post), Cyan (Immutable Concept), Amber (Mutable Concept), Slate (Generic Root)
+  const colors = ['#38bdf8', '#34d399', '#c084fc', '#0ea5e9', '#fbbf24', '#94a3b8'];
 
   colors.forEach((color) => {
     const size = 64;
@@ -35,13 +36,20 @@ export const drawMeMexNode = (
 ) => {
   const x = node.x || 0;
   const y = node.y || 0;
-  const isRoot = node.node_type === 'ROOT' || node.is_immutable;
-  const isSubConcept = !!node.metadata?.sub_of_hub;
+  const isRoot = isRootNode(node);
+  const rootType = isRoot ? getRootSubType(node) : null;
+  const isImmutable = isImmutableConcept(node);
   const radius = isRoot ? 12 : isSelected ? 10 : isHovered ? 8.5 : 6.5;
 
-  let baseColor = '#fbbf24'; // Core Hub Amber
-  if (isRoot) baseColor = '#38bdf8'; // Sky Blue
-  else if (isSubConcept) baseColor = '#34d399'; // Emerald
+  let baseColor = '#fbbf24'; // Mutable Concept (Amber)
+  if (isRoot) {
+    if (rootType === 'paper') baseColor = '#38bdf8'; // Sky Blue
+    else if (rootType === 'blog') baseColor = '#34d399'; // Emerald
+    else if (rootType === 'post') baseColor = '#c084fc'; // Purple
+    else baseColor = '#94a3b8'; // Slate generic
+  } else if (isImmutable) {
+    baseColor = '#0ea5e9'; // Cyan for Immutable Concept (Directly from Root)
+  }
 
   // 1. Draw cached offscreen radial glow for active state
   if (isSelected || isHovered || isTraversed) {
@@ -75,12 +83,9 @@ export const drawMeMexNode = (
     ctx.fill();
     ctx.lineWidth = isSelected ? 2.5 / globalScale : 1.2 / globalScale;
     ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.3)';
-    if (isSubConcept) {
-      ctx.setLineDash([2, 2]);
-    }
     ctx.stroke();
-    ctx.setLineDash([]);
   }
+
 
   // 3. Level-of-Detail (LOD) Typography
   if (globalScale > 1.1 || isSelected || isHovered || isRoot) {

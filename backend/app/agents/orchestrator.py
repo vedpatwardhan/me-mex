@@ -185,14 +185,46 @@ class ExecutiveOrchestrator:
             )
             data = json.loads(res)
             raw_intent = data.get("intent", "CONVERSATION")
+
+            if raw_intent == "INGESTION":
+                doc_type = data.get("doc_type") or "paper"
+                source_url = data.get("source_url")
+                raw_text = data.get("raw_text")
+
+                # If doc_type wasn't explicitly provided, infer from source_url or length
+                if source_url:
+                    src_lower = source_url.lower()
+                    if "arxiv.org" in src_lower or ".pdf" in src_lower:
+                        doc_type = "paper"
+                    elif any(
+                        s in src_lower for s in ("twitter.com", "x.com", "reddit.com")
+                    ):
+                        doc_type = "post"
+                    elif any(
+                        s in src_lower for s in ("medium.com", "blog", "substack")
+                    ):
+                        doc_type = "blog"
+                elif raw_text and len(raw_text) < 500:
+                    doc_type = "post"
+
+                return {
+                    "intent": "INGESTION",
+                    "doc_type": doc_type,
+                    "source_url": source_url,
+                    "raw_text": raw_text,
+                }
+
+            # CONVERSATION or RETRIEVAL
             return {
                 "intent": raw_intent,
-                "source_url": data.get("source_url"),
-                "raw_text": data.get("raw_text"),
+                "doc_type": None,
+                "source_url": None,
+                "raw_text": None,
             }
         except Exception:
             return {
                 "intent": "CONVERSATION",
+                "doc_type": None,
                 "source_url": None,
                 "raw_text": None,
             }
@@ -411,21 +443,29 @@ class ExecutiveOrchestrator:
         source_url = target_info.get("source_url")
         raw_payload = target_info.get("raw_text")
 
-        # Step 1: Document Fetching & Scraping
-        full_content = raw_payload
+        # Step 1: Document Fetching & Content Assembly
+        fetched_content = ""
         title = None
 
         if source_url:
             doc_res = self.tools.fetch_document(source_url)
             fetched_content = doc_res.get("content", "")
-            if fetched_content and doc_res.get("status") == "SUCCESS":
-                full_content = fetched_content
-                for line in full_content.splitlines():
+            if fetched_content:
+                for line in fetched_content.splitlines():
                     if line.startswith("# "):
                         title = line[2:].strip()
                         break
-            elif not full_content and fetched_content:
-                full_content = fetched_content
+
+        # Combine both fetched content and user commentary if both exist
+        if fetched_content and raw_payload:
+            full_content = (
+                f"### User Context & Notes\n{raw_payload.strip()}\n\n"
+                f"### Document Content\n{fetched_content.strip()}"
+            )
+        elif fetched_content:
+            full_content = fetched_content
+        else:
+            full_content = raw_payload or ""
 
         if not title:
             first_line = (
@@ -509,18 +549,48 @@ class ExecutiveOrchestrator:
         if project_id and project_id != "global":
             proj_list.append(project_id)
 
+        # Determine specific Document Root subtype (paper, blog, post, or ROOT)
+        doc_type = (
+            target_info.get("doc_type")
+            or consolidated_result.get("doc_type")
+            or "paper"
+        )
+        if not target_info.get("doc_type"):
+            if source_url:
+                src_lower = source_url.lower()
+                if "arxiv.org" in src_lower or ".pdf" in src_lower:
+                    doc_type = "paper"
+                elif (
+                    "twitter.com" in src_lower
+                    or "x.com" in src_lower
+                    or "reddit.com" in src_lower
+                ):
+                    doc_type = "post"
+                elif (
+                    "medium.com" in src_lower
+                    or "blog" in src_lower
+                    or "substack" in src_lower
+                ):
+                    doc_type = "blog"
+            elif not source_url and len(full_content or "") < 1000:
+                doc_type = "post"
+
         # Create Root Node & Immutable Intra-Document Concept Nodes in MongoDB
         root_node_id = f"root_{doc_id}"
         root_node = GraphNode(
             _id=root_node_id,
-            node_type="ROOT",
+            node_type=doc_type,
             title=title,
             description=consolidated_result.get(
                 "doc_description", f"Document summary for {title}."
             ),
             passage_ids=passage_ids,
             project_ids=proj_list,
-            metadata={"immutable": True, "source_url": source_url},
+            metadata={
+                "immutable": True,
+                "source_url": source_url,
+                "doc_type": doc_type,
+            },
         )
         self.db.upsert_node(root_node)
 

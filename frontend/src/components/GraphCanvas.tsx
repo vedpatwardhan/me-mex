@@ -1,7 +1,7 @@
 import React, { useRef, useCallback, useMemo, useEffect } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { useMemexStore } from '../store/useMemexStore';
-import { NodeType } from '../types';
+import { NodeType, isRootNode, getRootSubType, isConceptNode, isImmutableConcept } from '../types';
 import { createGlowTextureCache, drawMeMexNode } from '../utils/graphRenderers';
 import { prewarmForceSimulation } from '../utils/physicsPipeline';
 import { Search, Filter, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
@@ -34,7 +34,22 @@ export const GraphCanvas: React.FC = () => {
         !searchQuery ||
         n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (n.content && n.content.toLowerCase().includes(searchQuery.toLowerCase()));
-      const matchesType = selectedNodeTypeFilter === 'all' || n.node_type === selectedNodeTypeFilter;
+
+      let matchesType = true;
+      if (selectedNodeTypeFilter === 'all') {
+        matchesType = true;
+      } else if (selectedNodeTypeFilter === 'paper') {
+        matchesType = isRootNode(n) && getRootSubType(n) === 'paper';
+      } else if (selectedNodeTypeFilter === 'blog') {
+        matchesType = isRootNode(n) && getRootSubType(n) === 'blog';
+      } else if (selectedNodeTypeFilter === 'post') {
+        matchesType = isRootNode(n) && getRootSubType(n) === 'post';
+      } else if (selectedNodeTypeFilter === 'immutable_concept') {
+        matchesType = isConceptNode(n) && isImmutableConcept(n);
+      } else if (selectedNodeTypeFilter === 'mutable_concept') {
+        matchesType = isConceptNode(n) && !isImmutableConcept(n);
+      }
+
       return matchesSearch && matchesType;
     });
 
@@ -103,16 +118,16 @@ export const GraphCanvas: React.FC = () => {
           <Filter className="w-3.5 h-3.5 text-slate-400 mx-1" />
 
           {[
-            { id: 'all', label: 'All' },
-            { id: 'ROOT', label: 'Roots', color: 'text-slate-300' },
-            { id: 'CONCEPT', label: 'Hubs', color: 'text-amber-400' },
+            { id: 'all', label: 'All', color: 'text-slate-300' },
             { id: 'paper', label: 'Papers', color: 'text-sky-400' },
             { id: 'blog', label: 'Blogs', color: 'text-emerald-400' },
             { id: 'post', label: 'Posts', color: 'text-purple-400' },
+            { id: 'immutable_concept', label: 'Immutable Concepts', color: 'text-sky-300' },
+            { id: 'mutable_concept', label: 'Mutable Concepts', color: 'text-amber-400' },
           ].map((item) => (
             <button
               key={item.id}
-              onClick={() => setSelectedNodeTypeFilter(item.id as NodeType | 'all')}
+              onClick={() => setSelectedNodeTypeFilter(item.id as any)}
               className={`px-3 py-1 text-[11px] font-bold rounded-lg transition-all ${
                 selectedNodeTypeFilter === item.id
                   ? 'bg-[#1e293b] text-slate-100 border border-white/20 shadow-sm'
@@ -164,18 +179,26 @@ export const GraphCanvas: React.FC = () => {
       />
 
       {/* Canvas Legend Bar */}
-      <div className="absolute bottom-4 left-4 z-20 flex items-center gap-3 bg-[#121824]/90 backdrop-blur-md border border-white/10 px-3.5 py-2 rounded-xl shadow-xl text-[11px] font-medium">
-        <div className="flex items-center gap-2">
+      <div className="absolute bottom-4 left-4 z-20 flex items-center gap-4 bg-[#121824]/90 backdrop-blur-md border border-white/10 px-3.5 py-2 rounded-xl shadow-xl text-[11px] font-medium">
+        <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-[#38bdf8] shadow-sm" />
-          <span className="text-slate-300">Document Root (Immutable)</span>
+          <span className="text-slate-300">Paper Root</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#fbbf24] shadow-sm" />
-          <span className="text-slate-300">Domain Hub (Mutable)</span>
-        </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-[#34d399] shadow-sm" />
-          <span className="text-slate-300">Sub-Concept</span>
+          <span className="text-slate-300">Blog Root</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#c084fc] shadow-sm" />
+          <span className="text-slate-300">Post Root</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#0ea5e9] shadow-sm" />
+          <span className="text-slate-300">Immutable Concept</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#fbbf24] shadow-sm" />
+          <span className="text-slate-300">Mutable Concept</span>
         </div>
       </div>
 

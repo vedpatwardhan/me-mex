@@ -7,6 +7,14 @@ export type NodeType =
   | 'post'
   | 'concept';
 
+export type NodeTypeFilter =
+  | 'all'
+  | 'paper'
+  | 'blog'
+  | 'post'
+  | 'immutable_concept'
+  | 'mutable_concept';
+
 export interface GraphNode {
   id: string;
   node_type: NodeType;
@@ -23,6 +31,40 @@ export interface GraphNode {
   vx?: number;
   vy?: number;
 }
+
+export const isRootNode = (node: GraphNode): boolean => {
+  const t = (node.node_type || '').toLowerCase();
+  return (
+    t === 'root' ||
+    t === 'paper' ||
+    t === 'blog' ||
+    t === 'post' ||
+    t === 'video' ||
+    node.id.startsWith('root_')
+  );
+};
+
+export const getRootSubType = (node: GraphNode): 'paper' | 'blog' | 'post' | 'root' => {
+  const t = (node.node_type || '').toLowerCase();
+  if (t === 'paper' || node.metadata?.doc_type === 'paper') return 'paper';
+  if (t === 'blog' || node.metadata?.doc_type === 'blog') return 'blog';
+  if (t === 'post' || node.metadata?.doc_type === 'post') return 'post';
+  return 'root';
+};
+
+export const isConceptNode = (node: GraphNode): boolean => {
+  return !isRootNode(node);
+};
+
+export const isImmutableConcept = (node: GraphNode): boolean => {
+  if (isRootNode(node)) return true;
+  return !!(
+    node.metadata?.immutable === true ||
+    node.is_immutable === true ||
+    node.metadata?.root_node_id
+  );
+};
+
 
 export interface GraphEdge {
   id: string;
