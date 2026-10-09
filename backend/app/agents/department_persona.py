@@ -144,7 +144,9 @@ class DepartmentPersonaAgent:
                 ]
             except Exception as e:
                 print(f"[{self.department_name}] Subgraph expansion error: {e}")
-                next_frontier = []
+                raise RuntimeError(
+                    f"[{self.department_name}] Subgraph expansion failed: {e}"
+                ) from e
 
             for nid in next_frontier:
                 visited_node_ids.add(nid)
@@ -263,12 +265,9 @@ Identify any MUTABLE concept nodes with degree >= {degree_threshold} that combin
             candidate_ids = data_discover.get("candidate_concept_ids", [])
         except Exception as e:
             print(f"[{self.department_name}] Reorg discovery error: {e}")
-            # Fallback heuristic: check degree threshold directly on mutable nodes
-            candidate_ids = [
-                n.id
-                for n in explored_nodes
-                if not n.is_immutable and degree_map.get(n.id, 0) >= degree_threshold
-            ]
+            raise RuntimeError(
+                f"[{self.department_name}] Concept reorganization discovery failed: {e}"
+            ) from e
 
         reorg_commands: List[Dict[str, Any]] = []
 
@@ -320,6 +319,9 @@ Formulate 3-4 focused sub-concepts to cluster around '{target_node.id}'.
                 print(
                     f"[{self.department_name}] Step 2 Sub-concept formulation error for {target_node.id}: {e}"
                 )
+                raise RuntimeError(
+                    f"[{self.department_name}] Step 2 Sub-concept formulation failed for {target_node.id}: {e}"
+                ) from e
 
             if not sub_concepts:
                 continue
@@ -359,6 +361,9 @@ Assign EVERY direct neighbor node to exactly ONE sub-concept alias.
                 print(
                     f"[{self.department_name}] Step 3 Neighbor edge re-wiring error for {target_node.id}: {e}"
                 )
+                raise RuntimeError(
+                    f"[{self.department_name}] Step 3 Neighbor edge re-wiring failed for {target_node.id}: {e}"
+                ) from e
 
             reorg_commands.append(
                 {
@@ -447,11 +452,6 @@ Assign EVERY direct neighbor node to exactly ONE sub-concept alias.
             }
         except Exception as e:
             print(f"[{self.department_name}] Persona ingestion error: {e}")
-            return {
-                "department_id": self.department_id,
-                "department_name": self.department_name,
-                "hub_node_id": self.hub_node.id,
-                "traversed_node_ids": [n.id for n in explored_nodes],
-                "subgraph_nodes": [],
-                "commands": [],
-            }
+            raise RuntimeError(
+                f"[{self.department_name}] Persona cross-linking ingestion failed: {e}"
+            ) from e

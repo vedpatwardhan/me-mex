@@ -41,6 +41,13 @@ def test_department_persona_shared_exploration():
 
 def test_department_persona_root_node_traversal_blocking():
     """Verify traversal visits Root Nodes for context but blocks expanding further hops through them."""
+    from app.services.llm_gateway import llm_gateway
+
+    if not llm_gateway.is_server_available():
+        print(
+            "  ⏭️ test_department_persona_root_node_traversal_blocking [SKIPPED - vLLM Server Offline]"
+        )
+        return
     hub_a = GraphNode(
         _id="concept_hub_a",
         node_type="CONCEPT",

@@ -48,18 +48,22 @@ class ExecutiveOrchestrator:
         self.ingestion_engine = graph_ingestion_engine
 
     def _chunk_text(
-        self, text: str, chunk_size: Optional[int] = None, target_chunks: int = 12
+        self,
+        text: str,
+        chunk_size: Optional[int] = None,
+        min_chunk_size: int = 1500,
+        target_chunks: int = 8,
+        max_chunk_size: int = 12000,
     ) -> List[str]:
-        """Splits raw document text into cohesive passage chunks adaptively targeting 10-14 chunks (max 7500 chars)."""
+        """Splits raw document text into cohesive passage chunks with min 1500 chars, dynamically scaling up to stay within 7-10 chunks."""
         if not text:
             return []
 
-        # If chunk_size is not explicitly specified, calculate adaptively based on document length
+        # If chunk_size is not explicitly specified, calculate adaptively targeting 7-10 chunks
         if chunk_size is None:
             total_len = len(text)
-            # Target ~12 chunks bounded between 3000 chars (short docs) and 7500 chars (large papers)
-            calculated_size = (total_len + target_chunks - 1) // target_chunks
-            chunk_size = max(3000, min(7500, calculated_size))
+            calculated_size = max(min_chunk_size, (total_len + target_chunks - 1) // target_chunks)
+            chunk_size = min(max_chunk_size, calculated_size)
 
         paragraphs = text.split("\n\n")
         chunks = []
@@ -73,6 +77,20 @@ class ExecutiveOrchestrator:
                 curr = p
         if curr.strip():
             chunks.append(curr.strip())
+
+        # Enforce strict 7-10 upper bound: if greedy paragraph packaging produced > 10 chunks,
+        # iteratively merge the smallest adjacent pairs until len(chunks) <= 10
+        while len(chunks) > 10:
+            min_idx = 0
+            min_combined_len = len(chunks[0]) + len(chunks[1])
+            for i in range(1, len(chunks) - 1):
+                comb = len(chunks[i]) + len(chunks[i + 1])
+                if comb < min_combined_len:
+                    min_combined_len = comb
+                    min_idx = i
+            chunks[min_idx] = chunks[min_idx] + "\n\n" + chunks[min_idx + 1]
+            chunks.pop(min_idx + 1)
+
         return chunks if chunks else [text[:chunk_size]]
 
     def _extract_concepts_from_passage(
@@ -97,7 +115,7 @@ class ExecutiveOrchestrator:
             res = self.llm.generate_chat_completion(
                 messages,
                 temperature=0.2,
-                max_tokens=512,
+                max_tokens=1536,
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )
@@ -106,13 +124,13 @@ class ExecutiveOrchestrator:
                 "concepts": data.get("concepts", []),
                 "relations": data.get("relations", []),
             }
-        except Exception:
-            return {
-                "concepts": [
-                    {"idx": 0, "title": doc_title, "description": passage_text}
-                ],
-                "relations": [],
-            }
+        except Exception as e:
+            print(
+                f"[ExecutiveOrchestrator] Passage concept extraction failed for '{doc_title}': {e}"
+            )
+            raise RuntimeError(
+                f"Passage concept extraction failed for '{doc_title}': {e}"
+            ) from e
 
     def consolidate_extracted_concepts(
         self,
@@ -154,7 +172,7 @@ class ExecutiveOrchestrator:
             f"User Query Context: {query}\n\n"
             f"Raw Passage Concept Extractions ({len(lean_concepts)} items):\n"
             f"{json.dumps(lean_concepts, indent=2)}\n\n"
-            f"Raw Passage Relations ({len(lean_relations)} items):\n"
+            f"Raw Concept Relations ({len(lean_relations)} items):\n"
             f"{json.dumps(lean_relations, indent=2)}"
         )
         messages.append({"role": "user", "content": payload_content})
@@ -163,7 +181,7 @@ class ExecutiveOrchestrator:
             res = self.llm.generate_chat_completion(
                 messages,
                 temperature=0.2,
-                max_tokens=4096,
+                max_tokens=1536,
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )
@@ -178,7 +196,9 @@ class ExecutiveOrchestrator:
                 "relations": data.get("relations", []),
             }
         except Exception as e:
-            print(f"[ExecutiveOrchestrator] Concept consolidation LLM pass error: {e}")
+            print(
+                f"\n[ExecutiveOrchestrator] !!! CONCEPT CONSOLIDATION FAILURE !!!\n  Error: {e}\n"
+            )
             # Strict fail-fast: do not dump raw concepts or compensate with hacky fallbacks
             raise RuntimeError(
                 f"Failed to consolidate concepts for '{doc_title}': {e}"
@@ -235,12 +255,7 @@ class ExecutiveOrchestrator:
             }
         except Exception as e:
             print(f"[ExecutiveOrchestrator] classify_intent error: {e}")
-            return {
-                "intent": "CONVERSATION",
-                "doc_type": None,
-                "source_url": None,
-                "raw_text": None,
-            }
+            raise RuntimeError(f"User intent classification failed: {e}") from e
 
     async def process_user_message(
         self,
@@ -555,7 +570,7 @@ class ExecutiveOrchestrator:
         )
         self.db.upsert_document(doc_rec)
 
-        # Store Out-of-Graph Passage Records with dynamic adaptive chunking (targeting 10-14 passages)
+        # Store Out-of-Graph Passage Records with dynamic adaptive chunking (targeting 7-10 passages)
         passage_chunks = self._chunk_text(full_content)
         passage_ids = []
         for idx, chunk_str in enumerate(passage_chunks):
@@ -600,14 +615,35 @@ class ExecutiveOrchestrator:
             self.event_queue.push(project_id, evt_prog)
             return p_id, extraction, evt_prog
 
-        extractions = await asyncio.gather(
-            *[
-                _extract_chunk(p_id, chunk_str, idx)
-                for idx, (p_id, chunk_str) in enumerate(
-                    zip(passage_ids, passage_chunks)
-                )
-            ]
-        )
+        try:
+            extractions = await asyncio.gather(
+                *[
+                    _extract_chunk(p_id, chunk_str, idx)
+                    for idx, (p_id, chunk_str) in enumerate(
+                        zip(passage_ids, passage_chunks)
+                    )
+                ]
+            )
+        except Exception as e:
+            err_msg = f"Document ingestion aborted: Concept extraction from passages failed for '{title}'. Details: {str(e)}"
+            print(f"[ExecutiveOrchestrator] {err_msg}")
+            evt_fail = {
+                "event": "extraction_failed",
+                "doc_id": doc_id,
+                "doc_title": title,
+                "error": str(e),
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, evt_fail)
+            yield evt_fail
+            async for conv_event in self.execute_conversation_flow(
+                f"I attempted to ingest '{title}' from {source_url}, but the concept extraction process failed with an error: {str(e)}. No nodes or edges were added to the graph.",
+                chat_history,
+                project_id=project_id,
+            ):
+                yield conv_event
+            return
+
         for p_id, extraction, evt_prog in extractions:
             yield evt_prog
             for c in extraction.get("concepts", []):

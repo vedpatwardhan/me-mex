@@ -12,6 +12,9 @@ from app.services.llm_gateway import llm_gateway
 
 def test_classify_intent_conversation():
     """Verify CONVERSATION path classification for greetings and basic prompts."""
+    if not llm_gateway.is_server_available():
+        print("  ⏭️ test_classify_intent_conversation [SKIPPED - vLLM Server Offline]")
+        return
     res = orchestrator.classify_intent("Hello, good morning!", chat_history=[])
     assert res["intent"] == "CONVERSATION"
     assert res["doc_type"] is None

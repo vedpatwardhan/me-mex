@@ -183,10 +183,13 @@ class LLMGateway:
                     return strip_emojis(parsed["final_response"])
                 return strip_emojis(raw_content.strip())
             else:
-                raise ConnectionError(
+                err_detail = (
                     f"vLLM Server returned HTTP {resp.status_code}: {resp.text}"
                 )
+                print(f"[LLMGateway ERROR] {err_detail}")
+                raise ConnectionError(err_detail)
         except Exception as e:
+            print(f"[LLMGateway EXCEPTION] LLM completion request failed: {e}")
             raise ConnectionError(f"vLLM Server unreachable or error ({e})")
 
     async def stream_chat_completion(

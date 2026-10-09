@@ -29,7 +29,7 @@ class Settings:
     LLM_MODEL_NAME: str = os.getenv(
         "LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512"
     )
-    LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "90.0"))
+    LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "180.0"))
 
 
 settings = Settings()
