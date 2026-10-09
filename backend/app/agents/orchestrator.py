@@ -47,10 +47,20 @@ class ExecutiveOrchestrator:
         self.max_k_hubs = max_k_hubs
         self.ingestion_engine = graph_ingestion_engine
 
-    def _chunk_text(self, text: str, chunk_size: int = 1500) -> List[str]:
-        """Splits raw document text into fixed ~500 token (~1500 character) passage chunks."""
+    def _chunk_text(
+        self, text: str, chunk_size: Optional[int] = None, target_chunks: int = 12
+    ) -> List[str]:
+        """Splits raw document text into cohesive passage chunks adaptively targeting 10-14 chunks (max 7500 chars)."""
         if not text:
             return []
+
+        # If chunk_size is not explicitly specified, calculate adaptively based on document length
+        if chunk_size is None:
+            total_len = len(text)
+            # Target ~12 chunks bounded between 3000 chars (short docs) and 7500 chars (large papers)
+            calculated_size = (total_len + target_chunks - 1) // target_chunks
+            chunk_size = max(3000, min(7500, calculated_size))
+
         paragraphs = text.split("\n\n")
         chunks = []
         curr = ""
@@ -112,7 +122,7 @@ class ExecutiveOrchestrator:
         query: str,
         chat_history: List[Dict[str, str]],
     ) -> Dict[str, Any]:
-        """Consolidates raw passage concepts into document-specific canonical concepts."""
+        """Consolidates raw passage concepts into document-specific canonical concepts in a single lean pass."""
         if not raw_extracted_concepts:
             return {"concepts": [], "relations": []}
 
@@ -121,12 +131,31 @@ class ExecutiveOrchestrator:
         if chat_history:
             messages.extend(chat_history[-4:])
 
+        # Clean/project raw concept payloads to eliminate prompt bloat while preserving all semantic information
+        lean_concepts = [
+            {
+                "title": c.get("title", ""),
+                "description": c.get("description", ""),
+                "passage_ids": c.get("passage_ids", []),
+            }
+            for c in raw_extracted_concepts
+        ]
+
+        lean_relations = [
+            {
+                "source": r.get("source", ""),
+                "target": r.get("target", ""),
+                "description": r.get("description", ""),
+            }
+            for r in extracted_relations
+        ]
+
         payload_content = (
             f"User Query Context: {query}\n\n"
-            f"Raw Passage Concept Extractions ({len(raw_extracted_concepts)} items):\n"
-            f"{json.dumps(raw_extracted_concepts, indent=2)}\n\n"
-            f"Raw Passage Relations ({len(extracted_relations)} items):\n"
-            f"{json.dumps(extracted_relations, indent=2)}"
+            f"Raw Passage Concept Extractions ({len(lean_concepts)} items):\n"
+            f"{json.dumps(lean_concepts, indent=2)}\n\n"
+            f"Raw Passage Relations ({len(lean_relations)} items):\n"
+            f"{json.dumps(lean_relations, indent=2)}"
         )
         messages.append({"role": "user", "content": payload_content})
 
@@ -134,7 +163,7 @@ class ExecutiveOrchestrator:
             res = self.llm.generate_chat_completion(
                 messages,
                 temperature=0.2,
-                max_tokens=2048,
+                max_tokens=4096,
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )
@@ -150,12 +179,10 @@ class ExecutiveOrchestrator:
             }
         except Exception as e:
             print(f"[ExecutiveOrchestrator] Concept consolidation LLM pass error: {e}")
-            return {
-                "doc_description": f"Consolidated knowledge document for '{doc_title}'.",
-                "doc_type": "paper",
-                "concepts": raw_extracted_concepts,
-                "relations": extracted_relations,
-            }
+            # Strict fail-fast: do not dump raw concepts or compensate with hacky fallbacks
+            raise RuntimeError(
+                f"Failed to consolidate concepts for '{doc_title}': {e}"
+            ) from e
 
     def classify_intent(
         self, query: str, chat_history: List[Dict[str, str]]
@@ -528,8 +555,8 @@ class ExecutiveOrchestrator:
         )
         self.db.upsert_document(doc_rec)
 
-        # Store Out-of-Graph Passage Records
-        passage_chunks = self._chunk_text(full_content, chunk_size=1500)
+        # Store Out-of-Graph Passage Records with dynamic adaptive chunking (targeting 10-14 passages)
+        passage_chunks = self._chunk_text(full_content)
         passage_ids = []
         for idx, chunk_str in enumerate(passage_chunks):
             p_id = f"pass_{uuid.uuid4().hex[:8]}"
@@ -614,9 +641,30 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, evt_consol_start)
         yield evt_consol_start
 
-        consolidated_result = self.consolidate_extracted_concepts(
-            raw_extracted_concepts, extracted_relations, title, query, chat_history
-        )
+        try:
+            consolidated_result = self.consolidate_extracted_concepts(
+                raw_extracted_concepts, extracted_relations, title, query, chat_history
+            )
+        except Exception as e:
+            err_msg = f"Document ingestion aborted: Concept consolidation failed for '{title}'. Details: {str(e)}"
+            print(f"[ExecutiveOrchestrator] {err_msg}")
+            evt_fail = {
+                "event": "consolidation_failed",
+                "doc_id": doc_id,
+                "doc_title": title,
+                "error": str(e),
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, evt_fail)
+            yield evt_fail
+            async for conv_event in self.execute_conversation_flow(
+                f"I attempted to ingest '{title}' from {source_url}, but the concept consolidation process failed with an error: {str(e)}. No nodes or edges were added to the graph.",
+                chat_history,
+                project_id=project_id,
+            ):
+                yield conv_event
+            return
+
         consolidated_concepts = consolidated_result.get("concepts", [])
 
         evt_consol_complete = {

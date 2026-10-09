@@ -60,24 +60,27 @@ export const drawMeMexNode = (
     }
   }
 
-  // 2. Draw Node Shape
-  ctx.beginPath();
+  // 2. Draw Node Shape (All nodes are circular)
   if (isRoot) {
-    // Pill geometry for Document Roots
-    const width = radius * 2.6;
-    const height = radius * 1.5;
-    if (ctx.roundRect) {
-      ctx.roundRect(x - width / 2, y - height / 2, width, height, 4);
-    } else {
-      ctx.rect(x - width / 2, y - height / 2, width, height);
-    }
+    // Document Root Node: Circular node with distinct dark core, high-contrast border and outer orbit ring
+    // Outer subtle orbit ring
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 3 / globalScale, 0, 2 * Math.PI, false);
+    ctx.strokeStyle = `${baseColor}44`;
+    ctx.lineWidth = 1 / globalScale;
+    ctx.stroke();
+
+    // Main Root Circle
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, 2 * Math.PI, false);
     ctx.fillStyle = '#0f172a';
     ctx.fill();
-    ctx.lineWidth = isSelected ? 2.5 / globalScale : 1.5 / globalScale;
+    ctx.lineWidth = isSelected ? 2.8 / globalScale : 1.8 / globalScale;
     ctx.strokeStyle = baseColor;
     ctx.stroke();
   } else {
     // Spherical Disc for Concepts
+    ctx.beginPath();
     ctx.arc(x, y, radius, 0, 2 * Math.PI, false);
     ctx.fillStyle = baseColor;
     ctx.fill();

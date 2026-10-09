@@ -176,7 +176,14 @@ def get_graph(project_id: str = "global"):
     return {
         "project_id": project_id,
         "nodes": [n.model_dump() for n in nodes],
-        "edges": [e.model_dump() for e in edges],
+        "edges": [
+            {
+                **e.model_dump(),
+                "source": e.source_id,
+                "target": e.target_id,
+            }
+            for e in edges
+        ],
     }
 
 

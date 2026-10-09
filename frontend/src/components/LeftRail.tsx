@@ -195,7 +195,34 @@ export const LeftRail: React.FC = () => {
                   : 'bg-[#121824] text-slate-200 border border-white/10 rounded-tl-none space-y-3'
               }`}
             >
-              <div className="whitespace-pre-wrap select-text">{msg.text}</div>
+              {/* Streaming Activity Events (shown while generating or completed) */}
+              {msg.streaming_events && msg.streaming_events.length > 0 && (
+                <div className="bg-slate-900/80 border border-white/5 rounded-xl p-2.5 space-y-1.5 font-mono text-[10.5px]">
+                  <div className="flex items-center gap-1.5 text-cyan-400 font-semibold mb-1">
+                    <Activity className="w-3.5 h-3.5 animate-spin" />
+                    <span>Pipeline Progress:</span>
+                  </div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                    {msg.streaming_events.map((evtText, idx) => (
+                      <div key={idx} className="flex items-start gap-1.5 text-slate-300">
+                        <span className="text-cyan-500/70 select-none">▸</span>
+                        <span className="leading-tight">{evtText}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {msg.text ? (
+                <div className="whitespace-pre-wrap select-text">{msg.text}</div>
+              ) : (
+                msg.streaming_events && msg.streaming_events.length > 0 ? null : (
+                  <div className="flex items-center gap-2 text-slate-400 font-mono text-xs">
+                    <Activity className="w-3.5 h-3.5 animate-spin text-purple-400" />
+                    <span>Analyzing knowledge network...</span>
+                  </div>
+                )
+              )}
 
               {/* Grounded Node Chips */}
               {msg.grounded_node_ids && msg.grounded_node_ids.length > 0 && (

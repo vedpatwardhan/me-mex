@@ -68,7 +68,13 @@ export const useMemexStore = create<MemexState>((set, get) => ({
     try {
       const res = await fetch(`/api/graph?project_id=${get().activeProjectId}`);
       const data = await res.json();
-      set({ nodes: data.nodes || [], edges: data.edges || [] });
+      const rawEdges = data.edges || [];
+      const normalizedEdges = rawEdges.map((e: any) => ({
+        ...e,
+        source: e.source ?? e.source_id ?? e.source_node_id,
+        target: e.target ?? e.target_id ?? e.target_node_id,
+      }));
+      set({ nodes: data.nodes || [], edges: normalizedEdges });
     } catch (err) {
       console.error('Failed to fetch graph:', err);
     } finally {
@@ -178,6 +184,7 @@ export const useMemexStore = create<MemexState>((set, get) => ({
       // Initialize empty agent response bubble in the UI
       const agentMsgId = `agent_msg_${Date.now()}`;
       let accumulatedText = '';
+      const accumulatedEvents: string[] = [];
       const touchedNodes: any[] = [];
 
       const initialAgentMsg: ChatMessage = {
@@ -186,6 +193,7 @@ export const useMemexStore = create<MemexState>((set, get) => ({
         text: '',
         timestamp: new Date().toISOString(),
         grounded_node_ids: [],
+        streaming_events: [],
       };
 
       set({
@@ -213,6 +221,52 @@ export const useMemexStore = create<MemexState>((set, get) => ({
           try {
             const eventData = JSON.parse(trimmed.slice(6));
             const evtType = eventData.event;
+
+            // Map and collect human-readable event descriptions for real-time chat display
+            let logMsg = '';
+            if (evtType === 'orchestrator_tool_call') {
+              logMsg = `Executing tool: ${eventData.tool_name || 'action'}...`;
+            } else if (evtType === 'tool_complete') {
+              logMsg = eventData.message || 'Tool call completed.';
+            } else if (evtType === 'passages_chunked') {
+              logMsg = `Document chunked into ${eventData.total_chunks || 'multiple'} passages.`;
+            } else if (evtType === 'passage_extraction_progress') {
+              logMsg = `Extracting concepts: passage ${eventData.current_chunk}/${eventData.total_chunks}...`;
+            } else if (evtType === 'passages_extracted') {
+              logMsg = `Passage extractions complete: ${eventData.total_raw_concepts} raw concepts found.`;
+            } else if (evtType === 'consolidation_start') {
+              logMsg = `Consolidating concepts into canonical knowledge nodes...`;
+            } else if (evtType === 'consolidation_complete') {
+              logMsg = `Consolidated into ${eventData.canonical_concepts_count} canonical concepts.`;
+            } else if (evtType === 'consolidation_failed') {
+              logMsg = `Consolidation error: ${eventData.error || 'Failed'}`;
+            } else if (evtType === 'root_node_created') {
+              logMsg = `Created Document Root Node: "${eventData.title || ''}".`;
+            } else if (evtType === 'intra_concepts_created') {
+              logMsg = `Created ${eventData.count} intra-document concept nodes.`;
+            } else if (evtType === 'hubs_calculated') {
+              logMsg = `Identified ${eventData.count || 0} active community hubs for cross-linking.`;
+            } else if (evtType === 'persona_traversal_start') {
+              logMsg = eventData.message || `Specialist persona exploring sub-graph...`;
+            } else if (evtType === 'ingestion_completed') {
+              logMsg = eventData.message || `Document ingestion completed.`;
+            }
+
+            if (logMsg && !accumulatedEvents.includes(logMsg)) {
+              accumulatedEvents.push(logMsg);
+              set((state) => ({
+                chatHistory: {
+                  ...state.chatHistory,
+                  [projId]: (state.chatHistory[projId] || []).map((m) =>
+                    m.id === agentMsgId ? { ...m, streaming_events: [...accumulatedEvents] } : m
+                  )
+                },
+                thinkingState: {
+                  ...state.thinkingState,
+                  currentAction: logMsg
+                }
+              }));
+            }
 
             if (evtType === 'token_chunk') {
               const delta = eventData.delta || '';

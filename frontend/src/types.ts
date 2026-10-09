@@ -96,6 +96,7 @@ export interface ChatMessage {
   is_voice?: boolean;
   timestamp: string;
   grounded_node_ids?: string[];
+  streaming_events?: string[];
   report?: {
     id: string;
     title: string;
