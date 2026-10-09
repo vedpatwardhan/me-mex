@@ -103,6 +103,14 @@ def test_department_persona_root_node_traversal_blocking():
 
 def test_department_persona_mutually_exclusive_partitioning():
     """Verify DepartmentPersonaAgent.explore_concept_hub strictly obeys partition_node_ids boundaries."""
+    from app.services.llm_gateway import llm_gateway
+
+    if not llm_gateway.is_server_available():
+        print(
+            "  ⏭️ test_department_persona_mutually_exclusive_partitioning [SKIPPED - vLLM Server Offline]"
+        )
+        return
+
     hub_a = GraphNode(
         _id="hub_a",
         node_type="CONCEPT",

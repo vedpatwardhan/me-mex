@@ -8,8 +8,10 @@ def test_rustworkx_graph_construction():
     graph, idx_to_node_id, node_id_to_idx = graph_analytics.build_rustworkx_graph(
         "global"
     )
-    assert len(graph) == 4
+    # 4 baseline concepts + 1 primordial Universal Genesis concept ('Everything')
+    assert len(graph) == 5
     assert "concept_action_mpc" in node_id_to_idx
+    assert "concept_genesis" in node_id_to_idx
 
 
 def test_hub_centrality_calculation():

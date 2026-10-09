@@ -144,7 +144,7 @@ class DepartmentPersonaAgent:
                 ]
             except Exception as e:
                 print(f"[{self.department_name}] Subgraph expansion error: {e}")
-                next_frontier = list(candidate_neighbors.keys())[:2]
+                next_frontier = []
 
             for nid in next_frontier:
                 visited_node_ids.add(nid)

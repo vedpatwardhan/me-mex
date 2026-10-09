@@ -32,12 +32,20 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                       2. Memory Storage & Topology                                     │
 └────────────────────────────────────────────────────────────────────────────────────────┘
+ - Universal Genesis Concept Node (`concept_genesis` / "Everything"):
+     - Primordial universal mutable knowledge anchor seeded in every empty workspace.
+     - Guarantees cold-start hub availability: on first ingestion, "Persona Specialist: Everything" acts as the initial hub. Subsequent concepts attach to it and subdivide via `SPLIT_CONCEPT` as degree grows.
+ - Strict Hub Criteria:
+     - Root nodes and Immutable Concept nodes are **100% excluded** from candidate hubs.
+     - Full graph topology (including immutable evidence edges) contributes to centrality calculation, but candidate hubs are strictly mutable concept nodes (`k <= 5`, $s_i \ge 0.3 \times s_{\max}$).
  - Zero Passage Clutter: Passages are NOT graph nodes. The active network contains:
      1. ROOT Nodes (Immutable)            : Base node for a paper, blog, transcript, or X post, shortly summarizing everything in that document.
      2. CONCEPT Nodes                     : Self-evolving atomic concepts.
         - Intra-Document Concepts (Immutable) : Factual concepts extracted directly from document text.
         - Domain & Intermediate Nodes (Mutable): Persona-created domain hub & bridge concepts.
      3. QUALITATIVE RELATION EDGES        : Typed structural edges (`SUBSET_OF`, `SUPERSET_OF`, `RELEVANT_TO`, `BUILDS_UPON`, `SUPERSEDES`, `PARALLEL_TO`, `CONTRASTS_WITH`) with contextual edge descriptions.
+ - Local Raw Markdown Archive: Extracted documents automatically archive their full raw markdown to `backend/temp_downloads/` with metadata headers for inspection.
+ - Comprehensive Telemetry: Real-time lifecycle events emitted for document fetching, chunking, extraction progress, consolidation, root creation, intra-concept creation, hub calculation, and partitioning.
  - First-Class Timestamps: Nodes and edges carry explicit creation/update timestamps (`created_at`, `updated_at`), enabling persona agents to reason about temporal progression and historical context naturally. Optional frontend toggles visualize timeline progression using color-coded time windows.
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐

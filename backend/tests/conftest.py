@@ -61,6 +61,21 @@ def reset_test_database():
     )
     db_engine.upsert_project(global_proj)
 
+    # Seed primordial Universal Genesis Concept Node ('Everything')
+    genesis_node = GraphNode(
+        _id="concept_genesis",
+        node_type="CONCEPT",
+        title="Everything",
+        description="# Everything\nPrimordial universal knowledge anchor. High-level root concept connecting all domain paradigms and foundational literature.",
+        metadata={
+            "immutable": False,
+            "is_genesis": True,
+            "status": "PRIMARY_ACTIVE",
+        },
+        project_ids=["global"],
+    )
+    db_engine.upsert_node(genesis_node)
+
     # Seed baseline test nodes
     n1 = GraphNode(
         _id="concept_world_models",

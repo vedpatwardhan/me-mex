@@ -118,14 +118,18 @@ All nodes and edges store explicit unix timestamps (`created_at`, `updated_at`).
 
 The graph network enforces a strict **Hierarchy of Mutability**:
 
-1. **Root Nodes (`ROOT`) — IMMUTABLE**
-   - Base node for a paper, blog, transcript, or X post, summarizing the document. Cannot be modified or deleted.
-2. **Intra-Document Concepts (`node_type="concept"`, Extracted) — IMMUTABLE**
+1. **Universal Genesis Concept Node (`concept_genesis` / "Everything") — MUTABLE**
+   - Primordial universal mutable knowledge anchor initialized automatically in every empty workspace.
+   - Solves the hub cold-start paradox: provides the initial "Persona Specialist: Everything" anchor for the first document's intra-document concepts to attach to, later subdividing organically via `SPLIT_CONCEPT` as degree exceeds threshold.
+2. **Root Nodes (`ROOT`) — IMMUTABLE**
+   - Base node for a paper, blog, transcript, or X post, summarizing the document. Cannot be modified or deleted. Strictly excluded from being hubs.
+3. **Intra-Document Concepts (`node_type="concept"`, Extracted) — IMMUTABLE**
    - Concept nodes directly originating from and connected to a Root Node during ingestion. Preserves factual ground truth.
-   - Personas **cannot** modify (`EDIT_CONCEPT`), restructure (`SPLIT_CONCEPT`), or delete (`DELETE_CONCEPT`) these nodes; they can **only link** from them.
-3. **Persona Domain Hubs & Intermediate Concepts — MUTABLE**
+   - Personas **cannot** modify, restructure, or delete these nodes; they can **only link** from them. Strictly excluded from being hubs.
+4. **Persona Domain Hubs & Intermediate Concepts — MUTABLE**
    - Concept nodes created deeper in the graph by personas during ingestion for linking, synthesizing, or grouping concepts across documents.
    - Personas **can** create, edit/generalize (`EDIT_CONCEPT`), or restructure/split (`SPLIT_CONCEPT`) these nodes as new documents arrive.
+   - Hub Centrality dynamically identifies top mutable hubs ($k \le 5$, relative score threshold $s_i \ge 0.3 \times s_{\max}$). All Root and Immutable Concept nodes are 100% excluded from candidate hubs.
 
 ```json
 {

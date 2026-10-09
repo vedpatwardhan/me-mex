@@ -129,17 +129,25 @@ def test_e2e_ingestion_workflow_real_paper():
         assert len(intent_evts) > 0
         assert intent_evts[0]["intent"] == "INGESTION"
 
-        # 2. Verify completion telemetry event emitted
+        # 2. Verify document_fetched event and local debug markdown storage
+        fetch_evts = [e for e in events if e.get("event") == "document_fetched"]
+        assert len(fetch_evts) > 0
+        debug_path = fetch_evts[0].get("debug_file_path")
+        assert debug_path and os.path.exists(
+            debug_path
+        ), f"Debug file {debug_path} must exist"
+
+        # 3. Verify completion telemetry event emitted
         comp_evts = [
             e for e in events if e.get("event") in ["ingestion_completed", "error"]
         ]
         assert len(comp_evts) > 0
 
-        # 3. Verify Document and Passages stored in DB
+        # 4. Verify Document and Passages stored in DB
         docs = db_engine.get_documents()
         assert len(docs) > 0
 
-        # 4. Verify Root Node & Intra-Document Concepts created with immutable: True
+        # 5. Verify Root Node & Intra-Document Concepts created with immutable: True
         all_nodes = db_engine.get_nodes(project_id=proj_id)
         root_nodes = [n for n in all_nodes if n.is_root_node]
         assert len(root_nodes) > 0

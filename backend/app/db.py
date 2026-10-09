@@ -71,7 +71,7 @@ class GraphMemexDatabase:
         self._seed_initial_data()
 
     def _seed_initial_data(self):
-        """Seed default global project workspace if empty. Graph nodes and edges start at zero."""
+        """Seed default global project workspace and primordial Universal Genesis Concept Node ('Everything')."""
         if not self.get_projects():
             global_proj = ProjectWorkspace(
                 _id="global",
@@ -79,6 +79,25 @@ class GraphMemexDatabase:
                 description="Master superset database across all paradigms and literature.",
             )
             self.upsert_project(global_proj)
+
+        if not self.get_nodes():
+            genesis_node = GraphNode(
+                _id="concept_genesis",
+                node_type="concept",
+                title="Everything",
+                description=(
+                    "# Everything\nPrimordial universal knowledge anchor. High-level "
+                    "root concept connecting all domain paradigms and foundational "
+                    "literature."
+                ),
+                metadata={
+                    "immutable": False,
+                    "is_genesis": True,
+                    "status": "PRIMARY_ACTIVE",
+                },
+                project_ids=["global"],
+            )
+            self.upsert_node(genesis_node)
 
     def upsert_node(self, node: GraphNode):
         if self.use_mongo:

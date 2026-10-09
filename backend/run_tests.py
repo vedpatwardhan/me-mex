@@ -56,6 +56,10 @@ from tests.test_conversation import (
     test_conversation_flow_continuity,
     test_external_event_understanding,
 )
+from tests.test_search_tools import (
+    test_fetch_document_debug_markdown_persistence,
+    test_fetch_document_failure_handling,
+)
 from tests.test_e2e_workflows import (
     test_e2e_conversation_workflow,
     test_e2e_retrieval_workflow,
@@ -115,9 +119,19 @@ def _run_worker_1(result_queue):
             False,
         ),
         (
+            "Tools: Document Fetch Markdown Persistence",
+            test_fetch_document_debug_markdown_persistence,
+            False,
+        ),
+        (
+            "Tools: Document Fetch Failure Handling",
+            test_fetch_document_failure_handling,
+            False,
+        ),
+        (
             "Persona: Mutually Exclusive Sub-Graph Partitioning",
             test_department_persona_mutually_exclusive_partitioning,
-            False,
+            True,
         ),
         (
             "Orchestrator: Consolidate Extracted Concepts",

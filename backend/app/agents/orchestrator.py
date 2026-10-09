@@ -38,7 +38,7 @@ from app.services.graph_ingestion_engine import graph_ingestion_engine
 class ExecutiveOrchestrator:
     """Executive Orchestrator agent acting as central intent classifier and lifecycle coordinator."""
 
-    def __init__(self, max_k_hubs: int = 8):
+    def __init__(self, max_k_hubs: int = 5):
         self.db = db_engine
         self.analytics = graph_analytics
         self.llm = llm_gateway
@@ -436,11 +436,44 @@ class ExecutiveOrchestrator:
         if source_url:
             doc_res = self.tools.fetch_document(source_url)
             fetched_content = doc_res.get("content", "")
+            debug_file_path = doc_res.get("debug_file_path", "")
+            fetch_status = doc_res.get("status", "SUCCESS")
+            error_msg = doc_res.get(
+                "error", "Document could not be retrieved from URL."
+            )
+
             if fetched_content:
                 for line in fetched_content.splitlines():
                     if line.startswith("# "):
                         title = line[2:].strip()
                         break
+
+            evt_fetched = {
+                "event": "document_fetched",
+                "source_url": source_url,
+                "title": title or "Fetched Document",
+                "char_count": len(fetched_content),
+                "debug_file_path": debug_file_path,
+                "status": fetch_status,
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, evt_fetched)
+            yield evt_fetched
+
+            # If download failed and there is no user raw text payload to ingest, abort ingestion immediately and transition to conversation
+            if (fetch_status == "ERROR" or not fetched_content) and not raw_payload:
+                print(
+                    f"[ExecutiveOrchestrator] Document download failed for {source_url}. Aborting ingestion flow and initiating conversation response."
+                )
+                fail_query = (
+                    f"I attempted to ingest the document at '{source_url}', but downloading and extracting content failed ({error_msg}). "
+                    f"Inform the user clearly that the document could not be retrieved from this URL and suggest checking the URL or providing the text directly."
+                )
+                async for event in self.execute_conversation_flow(
+                    fail_query, chat_history, project_id=project_id
+                ):
+                    yield event
+                return
 
         # Combine both fetched content and user commentary if both exist
         if fetched_content and raw_payload:
@@ -452,6 +485,18 @@ class ExecutiveOrchestrator:
             full_content = fetched_content
         else:
             full_content = raw_payload or ""
+
+        if not full_content.strip():
+            print(
+                "[ExecutiveOrchestrator] Ingestion aborted: No content available to ingest."
+            )
+            async for event in self.execute_conversation_flow(
+                "No content or document was provided for ingestion. Inform the user to provide a valid document URL or text.",
+                chat_history,
+                project_id=project_id,
+            ):
+                yield event
+            return
 
         if not title:
             first_line = (
@@ -494,11 +539,21 @@ class ExecutiveOrchestrator:
             self.db.upsert_passage(p_rec)
             passage_ids.append(p_id)
 
+        evt_chunks = {
+            "event": "passages_chunked",
+            "doc_id": doc_id,
+            "doc_title": title,
+            "chunk_count": len(passage_chunks),
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, evt_chunks)
+        yield evt_chunks
+
         # Extract Raw Passage Concepts concurrently across all chunks & Consolidate into Intra-Document Concepts
         raw_extracted_concepts: List[Dict[str, Any]] = []
         extracted_relations: List[Dict[str, Any]] = []
 
-        async def _extract_chunk(p_id: str, chunk_str: str):
+        async def _extract_chunk(p_id: str, chunk_str: str, chunk_idx: int):
             extraction = await asyncio.to_thread(
                 self._extract_concepts_from_passage,
                 chunk_str,
@@ -506,15 +561,28 @@ class ExecutiveOrchestrator:
                 query,
                 chat_history,
             )
-            return p_id, extraction
+            c_count = len(extraction.get("concepts", []))
+            evt_prog = {
+                "event": "passage_extraction_progress",
+                "doc_id": doc_id,
+                "chunk_index": chunk_idx + 1,
+                "total_chunks": len(passage_chunks),
+                "concepts_extracted": c_count,
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, evt_prog)
+            return p_id, extraction, evt_prog
 
         extractions = await asyncio.gather(
             *[
-                _extract_chunk(p_id, chunk_str)
-                for p_id, chunk_str in zip(passage_ids, passage_chunks)
+                _extract_chunk(p_id, chunk_str, idx)
+                for idx, (p_id, chunk_str) in enumerate(
+                    zip(passage_ids, passage_chunks)
+                )
             ]
         )
-        for p_id, extraction in extractions:
+        for p_id, extraction, evt_prog in extractions:
+            yield evt_prog
             for c in extraction.get("concepts", []):
                 raw_extracted_concepts.append(
                     {
@@ -526,10 +594,41 @@ class ExecutiveOrchestrator:
                 )
             extracted_relations.extend(extraction.get("relations", []))
 
+        evt_extracted = {
+            "event": "passages_extracted",
+            "doc_id": doc_id,
+            "total_raw_concepts": len(raw_extracted_concepts),
+            "total_raw_relations": len(extracted_relations),
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, evt_extracted)
+        yield evt_extracted
+
+        evt_consol_start = {
+            "event": "consolidation_start",
+            "doc_id": doc_id,
+            "doc_title": title,
+            "raw_concept_count": len(raw_extracted_concepts),
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, evt_consol_start)
+        yield evt_consol_start
+
         consolidated_result = self.consolidate_extracted_concepts(
             raw_extracted_concepts, extracted_relations, title, query, chat_history
         )
         consolidated_concepts = consolidated_result.get("concepts", [])
+
+        evt_consol_complete = {
+            "event": "consolidation_complete",
+            "doc_id": doc_id,
+            "doc_title": title,
+            "canonical_concepts_count": len(consolidated_concepts),
+            "canonical_relations_count": len(consolidated_result.get("relations", [])),
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, evt_consol_complete)
+        yield evt_consol_complete
 
         proj_list = ["global"]
         if project_id and project_id != "global":
@@ -561,6 +660,17 @@ class ExecutiveOrchestrator:
         )
         self.db.upsert_node(root_node)
 
+        evt_root_created = {
+            "event": "root_node_created",
+            "root_node_id": root_node_id,
+            "node_type": doc_type,
+            "title": title,
+            "source_url": source_url,
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, evt_root_created)
+        yield evt_root_created
+
         intra_doc_nodes = []
         for c in consolidated_concepts:
             c_id = f"concept_{uuid.uuid4().hex[:8]}"
@@ -586,10 +696,32 @@ class ExecutiveOrchestrator:
             )
             self.db.upsert_edge(rel_edge)
 
+        evt_intra_created = {
+            "event": "intra_concepts_created",
+            "root_node_id": root_node_id,
+            "count": len(intra_doc_nodes),
+            "edges_count": len(intra_doc_nodes),
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, evt_intra_created)
+        yield evt_intra_created
+
         # Step 2: Sub-Graph Traversal, Relevance Eval, Multi-Hub Linking & Concept Reorganization
         top_hubs = self.analytics.get_top_concept_hubs(
             project_id=project_id, max_k=self.max_k_hubs
         )
+        evt_hubs = {
+            "event": "hubs_calculated",
+            "hubs": [
+                {"id": h[0].id, "title": h[0].title, "score": round(h[1], 4)}
+                for h in top_hubs
+            ],
+            "count": len(top_hubs),
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, evt_hubs)
+        yield evt_hubs
+
         active_departments = [
             DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
         ]
@@ -598,6 +730,16 @@ class ExecutiveOrchestrator:
         department_communities = self.analytics.partition_department_communities(
             project_id
         )
+        evt_parts = {
+            "event": "partitions_calculated",
+            "partitions": {
+                dept_name: list(node_ids)
+                for dept_name, node_ids in department_communities.items()
+            },
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, evt_parts)
+        yield evt_parts
 
         for dept in active_departments:
             yield {

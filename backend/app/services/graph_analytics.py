@@ -126,7 +126,7 @@ class GraphAnalyticsWorker:
         relative_threshold: float = 0.30,
     ) -> List[Tuple[GraphNode, float]]:
         """Identify mutable domain concept hub nodes dynamically using eigenvector/degree centrality with relative thresholding."""
-        # Filter candidate concept hubs BEFORE calculation: excludes Root Nodes & Immutable Intra-Document Concepts
+        # Filter candidate concept hubs: strictly Mutable Concepts (excludes Root Nodes & Immutable Intra-Document Concepts)
         all_nodes = db_engine.get_nodes(project_id)
         mutable_concept_hubs = [
             n
@@ -134,15 +134,9 @@ class GraphAnalyticsWorker:
             if n.node_type.lower() == "concept" and not n.is_immutable
         ]
 
-        # If no mutable concept hubs exist, return empty straightaway without building graph/computing centrality
+        # If no mutable concept hubs exist, return empty (never fallback to immutable concept nodes or root nodes)
         if not mutable_concept_hubs:
-            # Fallback to any concept nodes if no mutable hubs exist yet
-            fallback_concepts = [
-                n for n in all_nodes if n.node_type.lower() == "concept"
-            ]
-            if not fallback_concepts:
-                return []
-            return [(n, 1.0) for n in fallback_concepts[:max_k]]
+            return []
 
         centralities = GraphAnalyticsWorker.calculate_hub_centrality(project_id)
 

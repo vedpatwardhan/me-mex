@@ -112,24 +112,64 @@ class SearchTools:
                 extracted = trafilatura.extract(
                     html_text, include_links=True, output_format="markdown"
                 )
-                if extracted:
+                if extracted and extracted.strip():
+                    debug_file_path = SearchTools._save_debug_markdown(url, extracted)
                     return {
                         "url": url,
                         "content": extracted,
+                        "debug_file_path": debug_file_path,
                         "status": "SUCCESS",
                     }
+
+            print(
+                f"[SearchTools] Document extraction failed: No text extracted from {url}"
+            )
             return {
                 "url": url,
-                "content": f"# Extracted Document from {url}\nDocument text extraction completed.",
-                "status": "FALLBACK",
+                "content": "",
+                "debug_file_path": "",
+                "status": "ERROR",
+                "error": f"Failed to extract document content from {url}",
             }
         except Exception as e:
-            print(f"[SearchTools] Document extraction failed: {e}")
+            print(f"[SearchTools] Document extraction exception: {e}")
             return {
                 "url": url,
-                "content": f"# Document Content: {url}\nExtraction completed.",
-                "status": "FALLBACK_ERROR",
+                "content": "",
+                "debug_file_path": "",
+                "status": "ERROR",
+                "error": str(e),
             }
+
+    @staticmethod
+    def _save_debug_markdown(url: str, markdown_content: str) -> str:
+        """Save raw extracted markdown to backend/temp_downloads/ with metadata headers for inspection."""
+        try:
+            import datetime
+            from pathlib import Path
+
+            download_dir = (
+                Path(__file__).resolve().parent.parent.parent / "temp_downloads"
+            )
+            download_dir.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Create a clean slug from URL
+            slug = re.sub(r"[^a-zA-Z0-9_\-]+", "_", url).strip("_")[:60]
+            filename = f"{timestamp}_{slug}.md"
+            filepath = download_dir / filename
+
+            header = (
+                f"<!-- Source URL: {url} -->\n"
+                f"<!-- Downloaded At: {datetime.datetime.now().isoformat()} -->\n"
+                f"<!-- Character Count: {len(markdown_content)} -->\n\n"
+            )
+            filepath.write_text(header + markdown_content, encoding="utf-8")
+            print(f"[SearchTools] Saved raw debug markdown to: {filepath}")
+            return str(filepath)
+        except Exception as e:
+            print(f"[SearchTools] Warning: Failed to save debug markdown: {e}")
+            return ""
 
 
 search_tools = SearchTools()
