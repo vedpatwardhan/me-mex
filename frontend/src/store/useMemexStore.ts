@@ -27,39 +27,13 @@ interface MemexState {
   // API Async Actions
   fetchGraphData: () => Promise<void>;
   fetchProjects: () => Promise<void>;
+  fetchChatHistory: () => Promise<void>;
+  clearChatHistory: () => Promise<void>;
   sendMessage: (text: string, isVoice?: boolean) => Promise<void>;
   createProjectWorkspace: (name: string, description: string) => Promise<void>;
 }
 
-const initialDefaultChat: Record<string, ChatMessage[]> = {
-  global: [
-    {
-      id: 'msg_1',
-      sender: 'agent',
-      text: 'Welcome to Graph-Memex Master Superset. State an insight, paste arXiv URLs/DOIs, or ask for cross-paradigm discoveries.',
-      timestamp: new Date().toISOString(),
-      grounded_node_ids: ['node_1', 'node_2']
-    }
-  ],
-  proj_vla: [
-    {
-      id: 'msg_vla_1',
-      sender: 'agent',
-      text: 'Project: VLA Policies & Flow Steering workspace initialized. Ask to synthesize action denoiser trajectories or generate a project report.',
-      timestamp: new Date().toISOString(),
-      grounded_node_ids: ['node_5', 'node_6']
-    }
-  ],
-  proj_skeletal: [
-    {
-      id: 'msg_skel_1',
-      sender: 'agent',
-      text: 'Project: Skeletal Priors & Kinematics workspace initialized. Discuss joint limit loss terms or PhysCtrl MPC integration.',
-      timestamp: new Date().toISOString(),
-      grounded_node_ids: ['node_3', 'node_4']
-    }
-  ]
-};
+const initialDefaultChat: Record<string, ChatMessage[]> = {};
 
 export const useMemexStore = create<MemexState>((set, get) => ({
   activeProjectId: 'global',
@@ -81,7 +55,7 @@ export const useMemexStore = create<MemexState>((set, get) => ({
 
   setActiveProjectId: async (activeProjectId) => {
     set({ activeProjectId });
-    await get().fetchGraphData();
+    await Promise.all([get().fetchGraphData(), get().fetchChatHistory()]);
   },
   setSelectedNodeId: (selectedNodeId) => set({ selectedNodeId }),
   setHoveredNodeId: (hoveredNodeId) => set({ hoveredNodeId }),
@@ -109,6 +83,50 @@ export const useMemexStore = create<MemexState>((set, get) => ({
       set({ projects: data || [] });
     } catch (err) {
       console.error('Failed to fetch projects:', err);
+    }
+  },
+
+  fetchChatHistory: async () => {
+    const projId = get().activeProjectId;
+    try {
+      const res = await fetch(`/api/projects/${projId}/chat`);
+      if (res.ok) {
+        const msgs = await res.json();
+        set({
+          chatHistory: {
+            ...get().chatHistory,
+            [projId]: (msgs || []).map((m: any) => ({
+              id: m._id || m.id || `msg_${Date.now()}`,
+              sender: m.sender || 'agent',
+              text: m.text || '',
+              is_voice: m.is_voice || false,
+              timestamp: m.created_at ? new Date(m.created_at * 1000).toISOString() : new Date().toISOString(),
+              grounded_node_ids: m.grounded_node_ids || []
+            }))
+          }
+        });
+      }
+    } catch (err) {
+      console.error(`Failed to fetch chat history for ${projId}:`, err);
+    }
+  },
+
+  clearChatHistory: async () => {
+    const projId = get().activeProjectId;
+    try {
+      const res = await fetch(`/api/projects/${projId}/chat`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        set({
+          chatHistory: {
+            ...get().chatHistory,
+            [projId]: []
+          }
+        });
+      }
+    } catch (err) {
+      console.error(`Failed to clear chat history for ${projId}:`, err);
     }
   },
 

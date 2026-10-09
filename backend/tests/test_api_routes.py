@@ -80,3 +80,30 @@ def test_project_chat_history_endpoint(test_client: TestClient):
     messages = res.json()
     assert len(messages) >= 2  # user message + agent reply
     assert messages[0]["project_id"] == "proj_chat_test"
+
+
+def test_clear_project_chat_endpoint(test_client: TestClient):
+    """Test DELETE /api/projects/{project_id}/chat endpoint."""
+    chat_payload = {
+        "query": "Message to be cleared",
+        "project_id": "proj_clear_test",
+        "is_voice": False,
+    }
+    test_client.post("/api/chat", json=chat_payload)
+
+    # Verify messages exist
+    res_before = test_client.get("/api/projects/proj_clear_test/chat")
+    assert res_before.status_code == 200
+    assert len(res_before.json()) >= 1
+
+    # Delete messages
+    del_res = test_client.delete("/api/projects/proj_clear_test/chat")
+    assert del_res.status_code == 200
+    del_data = del_res.json()
+    assert del_data["status"] == "success"
+    assert del_data["deleted_count"] >= 1
+
+    # Verify history is now empty
+    res_after = test_client.get("/api/projects/proj_clear_test/chat")
+    assert res_after.status_code == 200
+    assert len(res_after.json()) == 0

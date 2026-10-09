@@ -7,11 +7,12 @@ import { GraphCanvas } from './components/GraphCanvas';
 import { RightDrawer } from './components/RightDrawer';
 
 export const App: React.FC = () => {
-  const { fetchGraphData, fetchProjects } = useMemexStore();
+  const { fetchGraphData, fetchProjects, fetchChatHistory } = useMemexStore();
 
   useEffect(() => {
     fetchGraphData();
     fetchProjects();
+    fetchChatHistory();
     // Pre-warm Whisper-base.en and Kokoro-82M in the background
     voiceService.prewarm();
   }, []);

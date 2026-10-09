@@ -211,6 +211,17 @@ def get_project_chat(project_id: str):
     return [m.model_dump(by_alias=True) for m in messages]
 
 
+@app.delete("/api/projects/{project_id}/chat")
+def clear_project_chat(project_id: str):
+    """Clear chat history for a specific project workspace."""
+    deleted_count = db_engine.clear_chat_history(project_id)
+    return {
+        "status": "success",
+        "project_id": project_id,
+        "deleted_count": deleted_count,
+    }
+
+
 @app.post("/api/projects")
 def create_project(project: ProjectWorkspace):
     db_engine.upsert_project(project)

@@ -278,6 +278,20 @@ class GraphMemexDatabase:
             msgs = [m for m in self.mem_messages.values() if m.project_id == project_id]
             return sorted(msgs, key=lambda m: m.created_at)
 
+    def clear_chat_history(self, project_id: str = "global") -> int:
+        """Clear all chat messages scoped to a specific project workspace."""
+        if self.use_mongo:
+            res = self.db.chat_messages.delete_many({"project_id": project_id})
+            return res.deleted_count
+        else:
+            before = len(self.mem_messages)
+            self.mem_messages = {
+                mid: msg
+                for mid, msg in self.mem_messages.items()
+                if msg.project_id != project_id
+            }
+            return before - len(self.mem_messages)
+
 
 # Global Database Singleton
 db_engine = GraphMemexDatabase()

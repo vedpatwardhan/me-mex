@@ -11,7 +11,10 @@ import {
   Activity,
   FileText,
   Tag,
-  Radio
+  Radio,
+  Copy,
+  Check,
+  Trash2
 } from 'lucide-react';
 
 export const LeftRail: React.FC = () => {
@@ -24,10 +27,12 @@ export const LeftRail: React.FC = () => {
     setSelectedNodeId,
     setVoiceListening,
     isVoiceListening,
-    isLoading
+    isLoading,
+    clearChatHistory
   } = useMemexStore();
 
   const [inputVal, setInputVal] = useState('');
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -37,6 +42,14 @@ export const LeftRail: React.FC = () => {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, thinkingState]);
+
+  const handleCopy = (msgId: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedMsgId(msgId);
+    setTimeout(() => {
+      setCopiedMsgId((prev) => (prev === msgId ? null : prev));
+    }, 2000);
+  };
 
   const handleSend = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -84,9 +97,26 @@ export const LeftRail: React.FC = () => {
             {activeProjectId === 'global' ? 'Global Master Chat' : activeProject?.name || activeProjectId}
           </span>
         </div>
-        <span className="text-[11px] font-mono text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-full border border-slate-700/60 font-medium">
-          {messages.length} messages
-        </span>
+        <div className="flex items-center gap-2">
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Clear chat history for ${activeProjectId === 'global' ? 'Global Master Chat' : activeProject?.name || activeProjectId}?`)) {
+                  clearChatHistory();
+                }
+              }}
+              className="text-[11px] font-mono text-slate-400 hover:text-red-300 hover:bg-red-950/40 px-2 py-1 rounded-lg border border-transparent hover:border-red-500/30 transition-colors flex items-center gap-1"
+              title="Clear project chat history"
+            >
+              <Trash2 className="w-3 h-3 text-slate-400 hover:text-red-400" />
+              <span>Clear</span>
+            </button>
+          )}
+          <span className="text-[11px] font-mono text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-full border border-slate-700/60 font-medium">
+            {messages.length} messages
+          </span>
+        </div>
       </div>
 
       {/* Agent Thinking & Traversal Live Indicator Bar */}
@@ -113,26 +143,48 @@ export const LeftRail: React.FC = () => {
             key={msg.id}
             className={`flex flex-col space-y-1.5 ${
               msg.sender === 'user' ? 'items-end' : 'items-start'
-            }`}
+            } group`}
           >
-            {/* Sender Label */}
-            <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400 px-1">
-              {msg.sender === 'user' ? (
-                <>
-                  <span className="font-medium text-slate-300">User</span>
-                  <User className="w-3.5 h-3.5 text-emerald-400" />
-                  {msg.is_voice && (
-                    <span className="text-[9px] text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-500/30 font-bold flex items-center gap-1">
-                      <Radio className="w-2.5 h-2.5 animate-pulse" /> VOICE
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Bot className="w-3.5 h-3.5 text-cyan-400" />
-                  <span className="text-cyan-400 font-bold">Memex Agent</span>
-                </>
-              )}
+            {/* Sender Label & Actions Header */}
+            <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400 px-1 w-full justify-between">
+              <div className="flex items-center gap-1.5">
+                {msg.sender === 'user' ? (
+                  <>
+                    <User className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="font-medium text-slate-300">User</span>
+                    {msg.is_voice && (
+                      <span className="text-[9px] text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-500/30 font-bold flex items-center gap-1">
+                        <Radio className="w-2.5 h-2.5 animate-pulse" /> VOICE
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Bot className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="text-cyan-400 font-bold">Memex Agent</span>
+                  </>
+                )}
+              </div>
+
+              {/* Copy Message Button */}
+              <button
+                type="button"
+                onClick={() => handleCopy(msg.id, msg.text)}
+                className="opacity-60 group-hover:opacity-100 hover:text-slate-200 hover:bg-white/10 p-1 rounded-md transition-all text-slate-400 flex items-center gap-1 text-[10px]"
+                title="Copy message text"
+              >
+                {copiedMsgId === msg.id ? (
+                  <>
+                    <Check className="w-3 h-3 text-emerald-400" />
+                    <span className="text-emerald-400 font-mono text-[9px]">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3" />
+                    <span className="hidden group-hover:inline font-mono text-[9px]">Copy</span>
+                  </>
+                )}
+              </button>
             </div>
 
             {/* Message Bubble Content */}
@@ -143,7 +195,7 @@ export const LeftRail: React.FC = () => {
                   : 'bg-[#121824] text-slate-200 border border-white/10 rounded-tl-none space-y-3'
               }`}
             >
-              <div>{msg.text}</div>
+              <div className="whitespace-pre-wrap select-text">{msg.text}</div>
 
               {/* Grounded Node Chips */}
               {msg.grounded_node_ids && msg.grounded_node_ids.length > 0 && (
@@ -185,26 +237,26 @@ export const LeftRail: React.FC = () => {
       {/* Spacious Unified Input Bar (Bottom) */}
       <div className="p-4 bg-[#090d16]/95 border-t border-white/10">
         <form onSubmit={handleSend} className="space-y-2">
-          <div className="relative flex flex-col bg-[#121824] rounded-2xl border border-slate-700/80 focus-within:border-cyan-400/80 focus-within:ring-1 focus-within:ring-cyan-400/80 shadow-2xl transition-all p-2.5">
-            {/* Multi-line Textarea Input */}
+          <div className="relative flex flex-col bg-[#121824] rounded-2xl border border-slate-700/80 focus-within:border-cyan-400/80 focus-within:ring-1 focus-within:ring-cyan-400/80 shadow-2xl transition-all p-3">
+            {/* Multi-line Taller Textarea Input */}
             <textarea
               ref={textareaRef}
-              rows={2}
+              rows={4}
               placeholder="Ask a question, paste URL/arXiv DOI, state an insight, or ask for a report..."
               value={inputVal}
               onChange={(e) => setInputVal(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isLoading}
-              className="w-full bg-transparent text-slate-200 px-2 py-1 text-xs focus:outline-none placeholder-slate-500 font-medium leading-relaxed resize-none font-sans"
+              className="w-full min-h-[96px] max-h-[220px] bg-transparent text-slate-200 px-2 py-1 text-xs focus:outline-none placeholder-slate-500 font-medium leading-relaxed resize-y font-sans"
             />
 
             {/* Action Buttons Row */}
-            <div className="flex items-center justify-between pt-2 border-t border-white/5">
-              <div className="flex items-center gap-1">
+            <div className="flex items-center justify-between pt-2.5 border-t border-white/5">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => alert('Select PDF or Markdown file to attach...')}
-                  className="p-2 text-slate-400 hover:text-slate-200 hover:bg-white/5 rounded-lg transition-colors flex items-center gap-1 text-[11px] font-medium"
+                  className="p-2 text-slate-400 hover:text-slate-200 hover:bg-white/5 rounded-lg transition-colors flex items-center gap-1.5 text-[11px] font-medium"
                   title="Attach File or URL"
                 >
                   <Paperclip className="w-3.5 h-3.5" />
@@ -214,7 +266,7 @@ export const LeftRail: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleVoiceRecord}
-                  className={`p-2 rounded-lg transition-all flex items-center gap-1 text-[11px] font-semibold ${
+                  className={`p-2 rounded-lg transition-all flex items-center gap-1.5 text-[11px] font-semibold ${
                     isVoiceListening
                       ? 'text-red-400 bg-red-500/20 border border-red-500/50 animate-pulse'
                       : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10'
@@ -230,7 +282,7 @@ export const LeftRail: React.FC = () => {
               <button
                 type="submit"
                 disabled={!inputVal.trim() || isLoading}
-                className="px-4 py-1.5 bg-gradient-to-r from-cyan-500 via-teal-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md disabled:opacity-40 flex items-center gap-1.5"
+                className="px-4 py-2 bg-gradient-to-r from-cyan-500 via-teal-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md disabled:opacity-40 flex items-center gap-1.5"
               >
                 <span>Send</span>
                 <Send className="w-3.5 h-3.5" />

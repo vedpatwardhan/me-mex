@@ -71,6 +71,7 @@ from tests.test_api_routes import (
     test_graph_endpoint,
     test_chat_endpoint_post,
     test_project_chat_history_endpoint,
+    test_clear_project_chat_endpoint,
 )
 from fastapi.testclient import TestClient
 from main import app
@@ -282,6 +283,11 @@ def _run_worker_2(result_queue):
                 (
                     "API: Project Chat History Endpoint",
                     test_project_chat_history_endpoint,
+                    True,
+                ),
+                (
+                    "API: Clear Project Chat Endpoint",
+                    test_clear_project_chat_endpoint,
                     True,
                 ),
             ]
