@@ -4,7 +4,7 @@ Master End-to-End Workflow Integration Test Suite: Me-Mex
 Aligned with docs/ARCHITECTURE.md Section 2:
 - Path 1: CONVERSATION E2E (Direct Execution -> Conversation Response)
 - Path 2: RETRIEVAL E2E (Partitioned Hub Traversal -> Relevance Evaluation -> Enriched Response)
-- Path 3: INGESTION E2E (ArXiv 2502.18864v2 Document Fetching -> Passage Storage -> Ingestion Linking -> 3-Step Concept Hub Reorganization -> Final Summary)
+- Path 3: INGESTION E2E (ArXiv 2605.11550 Document Fetching -> Passage Storage -> Ingestion Linking -> 3-Step Concept Hub Reorganization -> Final Summary)
 """
 
 import asyncio
@@ -26,7 +26,7 @@ from app.services.graph_ingestion_engine import graph_ingestion_engine
 from app.services.llm_gateway import llm_gateway
 from app.services.event_queue import event_queue
 
-# --- Real Paper Data (ArXiv 2502.18864v2) ---
+# --- Real Paper Data (ArXiv 2605.11550) ---
 ARXIV_PAPER_TITLE = "Reasoning with Language Models: Search and Process Verification"
 ARXIV_PAPER_TEXT = """# Reasoning with Language Models: Search and Process Verification
 
@@ -99,7 +99,7 @@ def test_e2e_retrieval_workflow():
 
 
 def test_e2e_ingestion_workflow_real_paper():
-    """Path 3: INGESTION E2E Workflow verification via process_user_message using ArXiv 2502.18864v2."""
+    """Path 3: INGESTION E2E Workflow verification via process_user_message using ArXiv 2605.11550."""
     if not llm_gateway.is_server_available():
         print(
             "  ⏭️ test_e2e_ingestion_workflow_real_paper [SKIPPED - vLLM Server Offline]"
@@ -111,7 +111,7 @@ def test_e2e_ingestion_workflow_real_paper():
     # Realistic user message containing a paper URL and user preface notes on why it is relevant
     user_ingest_message = (
         "Please take a look at this paper and ingest it into the graph: "
-        "https://arxiv.org/pdf/2502.18864v2. "
+        "https://arxiv.org/pdf/2605.11550. "
         "It covers reasoning with language models, process reward models (PRMs), "
         "and tree search rollouts for intermediate step verification."
     )
@@ -159,4 +159,4 @@ def test_e2e_ingestion_workflow_real_paper():
         assert len(intra_nodes) > 0
 
     asyncio.run(_run())
-    print("  ✓ Path 3: INGESTION E2E Workflow (ArXiv 2502.18864v2) passed.")
+    print("  ✓ Path 3: INGESTION E2E Workflow (ArXiv 2605.11550) passed.")

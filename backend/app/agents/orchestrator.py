@@ -62,7 +62,9 @@ class ExecutiveOrchestrator:
         # If chunk_size is not explicitly specified, calculate adaptively targeting 7-10 chunks
         if chunk_size is None:
             total_len = len(text)
-            calculated_size = max(min_chunk_size, (total_len + target_chunks - 1) // target_chunks)
+            calculated_size = max(
+                min_chunk_size, (total_len + target_chunks - 1) // target_chunks
+            )
             chunk_size = min(max_chunk_size, calculated_size)
 
         paragraphs = text.split("\n\n")
@@ -78,16 +80,18 @@ class ExecutiveOrchestrator:
         if curr.strip():
             chunks.append(curr.strip())
 
-        # Enforce strict 7-10 upper bound: if greedy paragraph packaging produced > 10 chunks,
-        # iteratively merge the smallest adjacent pairs until len(chunks) <= 10
+        # Enforce strict 7-10 upper bound without exceeding max_chunk_size
         while len(chunks) > 10:
-            min_idx = 0
-            min_combined_len = len(chunks[0]) + len(chunks[1])
-            for i in range(1, len(chunks) - 1):
+            min_idx = -1
+            min_combined_len = float("inf")
+            for i in range(len(chunks) - 1):
                 comb = len(chunks[i]) + len(chunks[i + 1])
-                if comb < min_combined_len:
+                if comb <= max_chunk_size and comb < min_combined_len:
                     min_combined_len = comb
                     min_idx = i
+            if min_idx == -1:
+                # Cannot merge further without exceeding max_chunk_size
+                break
             chunks[min_idx] = chunks[min_idx] + "\n\n" + chunks[min_idx + 1]
             chunks.pop(min_idx + 1)
 
@@ -591,29 +595,31 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, evt_chunks)
         yield evt_chunks
 
-        # Extract Raw Passage Concepts concurrently across all chunks & Consolidate into Intra-Document Concepts
+        # Extract Raw Passage Concepts across chunks with bounded concurrency & Consolidate into Intra-Document Concepts
         raw_extracted_concepts: List[Dict[str, Any]] = []
         extracted_relations: List[Dict[str, Any]] = []
+        extraction_sem = asyncio.Semaphore(2)
 
         async def _extract_chunk(p_id: str, chunk_str: str, chunk_idx: int):
-            extraction = await asyncio.to_thread(
-                self._extract_concepts_from_passage,
-                chunk_str,
-                title,
-                query,
-                chat_history,
-            )
-            c_count = len(extraction.get("concepts", []))
-            evt_prog = {
-                "event": "passage_extraction_progress",
-                "doc_id": doc_id,
-                "chunk_index": chunk_idx + 1,
-                "total_chunks": len(passage_chunks),
-                "concepts_extracted": c_count,
-                "timestamp": time.time(),
-            }
-            self.event_queue.push(project_id, evt_prog)
-            return p_id, extraction, evt_prog
+            async with extraction_sem:
+                extraction = await asyncio.to_thread(
+                    self._extract_concepts_from_passage,
+                    chunk_str,
+                    title,
+                    query,
+                    chat_history,
+                )
+                c_count = len(extraction.get("concepts", []))
+                evt_prog = {
+                    "event": "passage_extraction_progress",
+                    "doc_id": doc_id,
+                    "chunk_index": chunk_idx + 1,
+                    "total_chunks": len(passage_chunks),
+                    "concepts_extracted": c_count,
+                    "timestamp": time.time(),
+                }
+                self.event_queue.push(project_id, evt_prog)
+                return p_id, extraction, evt_prog
 
         try:
             extractions = await asyncio.gather(

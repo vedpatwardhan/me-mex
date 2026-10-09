@@ -42,7 +42,7 @@ def test_classify_intent_ingestion():
         print("  ⏭️ test_classify_intent_ingestion [SKIPPED - vLLM Server Offline]")
         return
     res = orchestrator.classify_intent(
-        "https://arxiv.org/abs/2401.12345 paper abstract", chat_history=[]
+        "https://arxiv.org/pdf/2605.11550 paper abstract", chat_history=[]
     )
     assert res["intent"] == "INGESTION"
     assert res["doc_type"] in ("paper", "blog", "post")
@@ -77,7 +77,7 @@ def test_classify_intent_dual_payload():
         print("  ⏭️ test_classify_intent_dual_payload [SKIPPED - vLLM Server Offline]")
         return
     res = orchestrator.classify_intent(
-        "Include this document https://arxiv.org/abs/2502.18864 because it proposes a novel skeletal loss formulation.",
+        "Include this document https://arxiv.org/abs/2605.11550 because it proposes a novel skeletal loss formulation.",
         chat_history=[],
     )
     assert res["intent"] == "INGESTION"

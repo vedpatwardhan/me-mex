@@ -5,7 +5,7 @@ Aligned with docs/ARCHITECTURE.md Section 7:
 - Executes test suite across max 2 parallel worker processes (-n 2 compliant).
 - Isolates MongoDB databases into 'test-me-mex-w1' and 'test-me-mex-w2'.
 - Worker 1 executes Fast Unit Tests (DB, Analytics, Intent, Immutability, Routes) + Path 1 & Path 2 Workflows.
-- Worker 2 executes Path 3 Real Paper Ingestion Workflow (ArXiv 2502.18864v2) concurrently.
+- Worker 2 executes Path 3 Real Paper Ingestion Workflow (ArXiv 2605.11550) concurrently.
 - Completes entire backend test suite in < 60 seconds.
 """
 
@@ -57,7 +57,8 @@ from tests.test_conversation import (
     test_external_event_understanding,
 )
 from tests.test_search_tools import (
-    test_fetch_document_debug_markdown_persistence,
+    test_fetch_document_pdf_url,
+    test_fetch_document_html_blog_url,
     test_fetch_document_failure_handling,
 )
 from tests.test_e2e_workflows import (
@@ -120,8 +121,13 @@ def _run_worker_1(result_queue):
             False,
         ),
         (
-            "Tools: Document Fetch Markdown Persistence",
-            test_fetch_document_debug_markdown_persistence,
+            "Tools: Document Fetch PDF URL",
+            test_fetch_document_pdf_url,
+            False,
+        ),
+        (
+            "Tools: Document Fetch HTML Blog URL",
+            test_fetch_document_html_blog_url,
             False,
         ),
         (
@@ -233,7 +239,7 @@ def _run_worker_2(result_queue):
 
     worker_2_tests = [
         (
-            "E2E Workflow: Path 3 Real Paper Ingestion (ArXiv 2502.18864v2)",
+            "E2E Workflow: Path 3 Real Paper Ingestion (ArXiv 2605.11550)",
             test_e2e_ingestion_workflow_real_paper,
             True,
         ),

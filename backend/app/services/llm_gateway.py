@@ -156,38 +156,60 @@ class LLMGateway:
             payload["guided_json"] = guided_json
 
         try:
-            resp = self.client.post(url, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                choice = data["choices"][0]
-                msg_obj = choice.get("message", {})
+            # Enable stream=True under the hood so vLLM immediately yields tokens as Server-Sent Events.
+            # This continuously streams bytes across Cloudflare / reverse proxy tunnels, preventing
+            # the Cloudflare Error 524 (100-second idle socket timeout) on large generations.
+            payload["stream"] = True
+            collected_chunks: List[str] = []
+            collected_reasoning: List[str] = []
 
-                # Extract explicit vLLM reasoning fields if provided
-                vllm_reasoning = (
-                    msg_obj.get("reasoning_content") or msg_obj.get("reasoning") or ""
+            with self.client.stream("POST", url, json=payload) as resp:
+                if resp.status_code != 200:
+                    err_bytes = resp.read()
+                    err_detail = f"vLLM Server returned HTTP {resp.status_code}: {err_bytes.decode('utf-8', errors='ignore')}"
+                    print(f"[LLMGateway ERROR] {err_detail}")
+                    raise ConnectionError(err_detail)
+
+                for line in resp.iter_lines():
+                    line = line.strip()
+                    if not line or line == "data: [DONE]":
+                        continue
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        try:
+                            chunk = json.loads(data_str)
+                            choices = chunk.get("choices", [])
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta", {})
+                            c_piece = delta.get("content")
+                            if c_piece:
+                                collected_chunks.append(c_piece)
+                            r_piece = delta.get("reasoning_content") or delta.get(
+                                "reasoning"
+                            )
+                            if r_piece:
+                                collected_reasoning.append(r_piece)
+                        except json.JSONDecodeError:
+                            continue
+
+            raw_content = "".join(collected_chunks)
+            vllm_reasoning = "".join(collected_reasoning)
+
+            if vllm_reasoning:
+                print(
+                    f"[LLMGateway] vLLM Dedicated Reasoning Tokens Generated: {len(vllm_reasoning)} chars"
                 )
-                raw_content = msg_obj.get("content", "")
-
-                if vllm_reasoning:
-                    print(
-                        f"[LLMGateway] vLLM Dedicated Reasoning Tokens Generated: {len(vllm_reasoning)} chars"
-                    )
-                    return strip_emojis(raw_content.strip())
-
-                if enable_reasoning:
-                    parsed = self.parse_reasoning_output(raw_content)
-                    if parsed["thinking"]:
-                        print(
-                            f"[LLMGateway] Parsed [THINK] Reasoning Tokens: {len(parsed['thinking'])} chars"
-                        )
-                    return strip_emojis(parsed["final_response"])
                 return strip_emojis(raw_content.strip())
-            else:
-                err_detail = (
-                    f"vLLM Server returned HTTP {resp.status_code}: {resp.text}"
-                )
-                print(f"[LLMGateway ERROR] {err_detail}")
-                raise ConnectionError(err_detail)
+
+            if enable_reasoning:
+                parsed = self.parse_reasoning_output(raw_content)
+                if parsed["thinking"]:
+                    print(
+                        f"[LLMGateway] Parsed [THINK] Reasoning Tokens: {len(parsed['thinking'])} chars"
+                    )
+                return strip_emojis(parsed["final_response"])
+            return strip_emojis(raw_content.strip())
         except Exception as e:
             print(f"[LLMGateway EXCEPTION] LLM completion request failed: {e}")
             raise ConnectionError(f"vLLM Server unreachable or error ({e})")

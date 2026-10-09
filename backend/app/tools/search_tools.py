@@ -62,30 +62,116 @@ class SearchTools:
                 )
             return results
         except Exception as e:
-            print(f"[SearchTools] ArXiv search failed: {e}. Returning mock result.")
-            return [
-                {
-                    "title": f"ArXiv Paper: {query.capitalize()} Dynamics in Robotics",
-                    "summary": "Recent advances in generative world models demonstrate 100x speedup when executing model predictive control in latent state spaces.",
-                    "authors": ["Yann LeCun", "Danijar Hafner"],
-                    "pdf_url": "https://arxiv.org/abs/2301.00001",
-                    "published": "2026-01-15",
+            print(f"[SearchTools] ArXiv search failed for query '{query}': {e}")
+            raise RuntimeError(f"ArXiv search query failed for '{query}': {e}") from e
+
+    @staticmethod
+    def _extract_pdf_content(content_bytes: bytes, url: str) -> Dict[str, Any]:
+        """Extract full document text from binary PDF stream using pypdf into clean markdown."""
+        try:
+            import pypdf
+
+            reader = pypdf.PdfReader(io.BytesIO(content_bytes))
+            title = ""
+            if reader.metadata and reader.metadata.title:
+                title = reader.metadata.title.strip()
+
+            pages_text = []
+            for idx, page in enumerate(reader.pages):
+                p_text = page.extract_text() or ""
+                if p_text.strip():
+                    pages_text.append(p_text.strip())
+
+            if not pages_text:
+                return {
+                    "url": url,
+                    "content": "",
+                    "debug_file_path": "",
+                    "status": "ERROR",
+                    "error": f"No text content could be extracted from PDF: {url}",
                 }
-            ]
+
+            full_body = "\n\n".join(pages_text)
+
+            # Determine clean title if not in metadata
+            if not title:
+                for line in full_body.splitlines()[:10]:
+                    cleaned_line = line.strip()
+                    if (
+                        cleaned_line
+                        and len(cleaned_line) > 3
+                        and not cleaned_line.isdigit()
+                    ):
+                        title = cleaned_line
+                        break
+                if not title:
+                    title = "PDF Document"
+
+            markdown_output = f"# {title}\n\n{full_body}"
+            debug_file_path = SearchTools._save_debug_markdown(url, markdown_output)
+            print(
+                f"[SearchTools] PDF successfully extracted ({len(markdown_output)} chars, {len(reader.pages)} pages) from {url}"
+            )
+            return {
+                "url": url,
+                "content": markdown_output,
+                "debug_file_path": debug_file_path,
+                "status": "SUCCESS",
+            }
+        except Exception as e:
+            print(f"[SearchTools] PDF extraction failed: {e}")
+            return {
+                "url": url,
+                "content": "",
+                "debug_file_path": "",
+                "status": "ERROR",
+                "error": f"Failed to extract PDF: {str(e)}",
+            }
+
+    @staticmethod
+    def _extract_html_content(html_text: str, url: str) -> Dict[str, Any]:
+        """Extract clean article/blog markdown from HTML text using trafilatura."""
+        try:
+            extracted = trafilatura.extract(
+                html_text, include_links=True, output_format="markdown"
+            )
+            if extracted and extracted.strip():
+                debug_file_path = SearchTools._save_debug_markdown(url, extracted)
+                print(
+                    f"[SearchTools] HTML article successfully extracted ({len(extracted)} chars) from {url}"
+                )
+                return {
+                    "url": url,
+                    "content": extracted,
+                    "debug_file_path": debug_file_path,
+                    "status": "SUCCESS",
+                }
+
+            print(
+                f"[SearchTools] Document extraction failed: No text extracted from HTML at {url}"
+            )
+            return {
+                "url": url,
+                "content": "",
+                "debug_file_path": "",
+                "status": "ERROR",
+                "error": f"Failed to extract article content from {url}",
+            }
+        except Exception as e:
+            print(f"[SearchTools] HTML extraction exception: {e}")
+            return {
+                "url": url,
+                "content": "",
+                "debug_file_path": "",
+                "status": "ERROR",
+                "error": str(e),
+            }
 
     @staticmethod
     def fetch_document(url: str) -> Dict[str, Any]:
-        """Fetch document (PDF, web page, blog, or X post) from URL and extract full Markdown content without synthetic formatting hacks."""
+        """Fetch document (PDF, web page, blog, or article) from URL and extract full Markdown content dynamically."""
         print(f"[SearchTools] Extracting document from URL: {url}")
         target_url = url.strip()
-
-        # Convert arXiv URLs (abstract or PDF) to direct arXiv HTML paper URL
-        if "arxiv.org/abs/" in target_url:
-            target_url = target_url.replace("arxiv.org/abs/", "arxiv.org/html/")
-        elif "arxiv.org/pdf/" in target_url:
-            target_url = target_url.replace(
-                "arxiv.org/pdf/", "arxiv.org/html/"
-            ).replace(".pdf", "")
 
         headers = {
             "User-Agent": (
@@ -96,41 +182,31 @@ class SearchTools:
         }
 
         try:
-            # First try trafilatura native fetch
-            downloaded = trafilatura.fetch_url(target_url)
-            html_text = downloaded
-
-            # Fallback to httpx GET with browser headers if native fetch returned None or 403
-            if not html_text:
-                resp = httpx.get(
-                    target_url, headers=headers, follow_redirects=True, timeout=15.0
-                )
-                if resp.status_code == 200:
-                    html_text = resp.text
-
-            if html_text:
-                extracted = trafilatura.extract(
-                    html_text, include_links=True, output_format="markdown"
-                )
-                if extracted and extracted.strip():
-                    debug_file_path = SearchTools._save_debug_markdown(url, extracted)
-                    return {
-                        "url": url,
-                        "content": extracted,
-                        "debug_file_path": debug_file_path,
-                        "status": "SUCCESS",
-                    }
-
-            print(
-                f"[SearchTools] Document extraction failed: No text extracted from {url}"
+            resp = httpx.get(
+                target_url, headers=headers, follow_redirects=True, timeout=25.0
             )
-            return {
-                "url": url,
-                "content": "",
-                "debug_file_path": "",
-                "status": "ERROR",
-                "error": f"Failed to extract document content from {url}",
-            }
+            if resp.status_code != 200:
+                return {
+                    "url": url,
+                    "content": "",
+                    "debug_file_path": "",
+                    "status": "ERROR",
+                    "error": f"HTTP {resp.status_code} while fetching {url}",
+                }
+
+            content_type = resp.headers.get("content-type", "").lower()
+            is_pdf = (
+                "application/pdf" in content_type
+                or resp.content.startswith(b"%PDF")
+                or target_url.lower().endswith(".pdf")
+                or "arxiv.org/pdf/" in target_url.lower()
+            )
+
+            if is_pdf:
+                return SearchTools._extract_pdf_content(resp.content, url)
+            else:
+                return SearchTools._extract_html_content(resp.text, url)
+
         except Exception as e:
             print(f"[SearchTools] Document extraction exception: {e}")
             return {
