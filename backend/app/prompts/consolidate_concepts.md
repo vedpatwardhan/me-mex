@@ -15,8 +15,8 @@ Your task:
    - Infer a `doc_type` for the document ("paper", "blog", "video", "post").
 
 2. CONSOLIDATE CONCEPTS:
-   - Group raw concepts that refer to the same underlying idea, component, or methodology under a single canonical title.
-   - Synthesize individual passage descriptions into a comprehensive, unified markdown description containing ALL details, nuances, and data points from every matching passage.
+   - Group raw concepts that refer to the same underlying idea, component, or methodology under a single canonical title (target 6 to 10 canonical concepts).
+   - Synthesize individual passage descriptions into a concise, information-dense 1-2 sentence markdown description capturing the core technical substance.
    - Aggregate all originating `passage_ids` lists for each consolidated concept into a unified `passage_ids` list.
 
 3. CONSOLIDATE RELATIONS:

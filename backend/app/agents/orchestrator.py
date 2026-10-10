@@ -185,7 +185,7 @@ class ExecutiveOrchestrator:
             res = self.llm.generate_chat_completion(
                 messages,
                 temperature=0.2,
-                max_tokens=1536,
+                max_tokens=4096,
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )
@@ -642,6 +642,13 @@ class ExecutiveOrchestrator:
             }
             self.event_queue.push(project_id, evt_fail)
             yield evt_fail
+            evt_err = {
+                "event": "error",
+                "error": err_msg,
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, evt_err)
+            yield evt_err
             async for conv_event in self.execute_conversation_flow(
                 f"I attempted to ingest '{title}' from {source_url}, but the concept extraction process failed with an error: {str(e)}. No nodes or edges were added to the graph.",
                 chat_history,
@@ -699,6 +706,13 @@ class ExecutiveOrchestrator:
             }
             self.event_queue.push(project_id, evt_fail)
             yield evt_fail
+            evt_err = {
+                "event": "error",
+                "error": err_msg,
+                "timestamp": time.time(),
+            }
+            self.event_queue.push(project_id, evt_err)
+            yield evt_err
             async for conv_event in self.execute_conversation_flow(
                 f"I attempted to ingest '{title}' from {source_url}, but the concept consolidation process failed with an error: {str(e)}. No nodes or edges were added to the graph.",
                 chat_history,
