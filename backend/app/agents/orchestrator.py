@@ -287,7 +287,6 @@ class ExecutiveOrchestrator:
                 async for event in self.execute_conversation_flow(
                     query, chat_history, project_id=project_id
                 ):
-                    self.event_queue.push(project_id, event)
                     yield event
             elif intent == "INGESTION":
                 async for event in self.execute_ingestion_flow(
@@ -296,7 +295,6 @@ class ExecutiveOrchestrator:
                     target_info=intent_result,
                     project_id=project_id,
                 ):
-                    self.event_queue.push(project_id, event)
                     yield event
             else:
                 async for event in self.execute_retrieval_flow(
@@ -304,7 +302,6 @@ class ExecutiveOrchestrator:
                     chat_history=chat_history,
                     project_id=project_id,
                 ):
-                    self.event_queue.push(project_id, event)
                     yield event
         except Exception as e:
             err_evt = {
@@ -338,11 +335,13 @@ class ExecutiveOrchestrator:
                 f"[ExecutiveOrchestrator WARNING] Failed to render conversation phase header: {log_err}"
             )
 
-        yield {
+        start_evt = {
             "event": "conversation_start",
             "message": "Executive Orchestrator responding directly via conversational mode...",
             "timestamp": time.time(),
         }
+        self.event_queue.push(project_id, start_evt)
+        yield start_evt
 
         recent_events = self.event_queue.get_events(project_id=project_id, limit=15)
         events_summary = ""
@@ -381,11 +380,13 @@ class ExecutiveOrchestrator:
                 messages, max_tokens=1024
             )
 
-        yield {
+        complete_evt = {
             "event": "chat_complete",
             "final_answer": direct_response,
             "timestamp": time.time(),
         }
+        self.event_queue.push(project_id, complete_evt)
+        yield complete_evt
 
     async def execute_retrieval_flow(
         self,
@@ -407,11 +408,13 @@ class ExecutiveOrchestrator:
                 f"[ExecutiveOrchestrator WARNING] Failed to render retrieval phase header: {log_err}"
             )
 
-        yield {
+        hub_discover_evt = {
             "event": "persona_traversal_start",
             "message": f"Executive Orchestrator identifying dynamic concept hubs in project '{project_id}' for query: '{query}'",
             "timestamp": time.time(),
         }
+        self.event_queue.push(project_id, hub_discover_evt)
+        yield hub_discover_evt
 
         # Discover top concept hubs via rustworkx unweighted centrality
         top_hubs = self.analytics.get_top_concept_hubs(
@@ -422,11 +425,13 @@ class ExecutiveOrchestrator:
         ]
 
         if not active_departments:
-            yield {
+            no_dept_evt = {
                 "event": "no_personas_active",
                 "message": "No active concept hubs found in database yet. Falling back to direct conversation.",
                 "timestamp": time.time(),
             }
+            self.event_queue.push(project_id, no_dept_evt)
+            yield no_dept_evt
             async for event in self.execute_conversation_flow(
                 query, chat_history, project_id=project_id
             ):
@@ -485,6 +490,7 @@ class ExecutiveOrchestrator:
             "timestamp": time.time(),
         }
         self.event_queue.push(project_id, retrieval_summary_evt)
+        yield retrieval_summary_evt
 
         # Final Step: Culminate in conversation response stream
         async for event in self.execute_conversation_flow(
@@ -723,6 +729,9 @@ class ExecutiveOrchestrator:
         evt_extracted = {
             "event": "passages_extracted",
             "doc_id": doc_id,
+            "doc_title": title,
+            "raw_concept_count": len(raw_extracted_concepts),
+            "raw_relation_count": len(extracted_relations),
             "total_raw_concepts": len(raw_extracted_concepts),
             "total_raw_relations": len(extracted_relations),
             "timestamp": time.time(),

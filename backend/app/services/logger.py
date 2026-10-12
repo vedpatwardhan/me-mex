@@ -158,8 +158,10 @@ class RichLogger:
                 )
 
         elif event_type == "orchestrator_tool_call":
-            tool = event_data.get("tool", "")
-            title = event_data.get("doc_title", "")
+            tool = event_data.get("tool_name") or event_data.get("tool", "")
+            title = event_data.get("doc_title") or event_data.get("args", {}).get(
+                "title", ""
+            )
             console.print(
                 f"{proj_badge}   ├─ 🛠️  [bold blue]Tool Invocation[/bold blue]: [cyan]{tool}[/cyan] for '{title}'"
             )
