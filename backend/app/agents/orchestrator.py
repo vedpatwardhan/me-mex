@@ -518,6 +518,7 @@ class ExecutiveOrchestrator:
 
         # Step 1: Document Fetching & Content Assembly
         fetched_content = ""
+        debug_file_path = ""
         title = None
 
         if source_url:
@@ -612,7 +613,7 @@ class ExecutiveOrchestrator:
         doc_rec = DocumentRecord(
             _id=doc_id,
             title=title,
-            file_path=f"me-mex/data/documents/{doc_id}.txt",
+            file_path=debug_file_path,
             source_url=source_url,
         )
         self.db.upsert_document(doc_rec)

@@ -72,8 +72,7 @@ async def test_e2e_ingestion_workflow_real_paper():
     user_ingest_message = (
         "Please take a look at this paper and ingest it into the graph: "
         "https://arxiv.org/pdf/2605.11550. "
-        "It covers reasoning with language models, process reward models (PRMs), "
-        "and tree search rollouts for intermediate step verification."
+        "It covers world action interactive models."
     )
 
     events = []
