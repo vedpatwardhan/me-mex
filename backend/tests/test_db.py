@@ -1,5 +1,8 @@
+import pytest
 from app.db import db_engine
 from app.models import ProjectWorkspace, GraphNode, GraphEdge, ChatMessageRecord
+
+pytestmark = pytest.mark.xdist_group(name="worker1")
 
 
 def test_project_workspace_crud():

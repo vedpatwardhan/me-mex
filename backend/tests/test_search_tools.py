@@ -1,5 +1,8 @@
+import pytest
 from pathlib import Path
 from app.tools.search_tools import search_tools
+
+pytestmark = pytest.mark.xdist_group(name="worker1")
 
 
 def test_fetch_document_pdf_url():

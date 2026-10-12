@@ -1,6 +1,9 @@
+import pytest
 from app.services.graph_analytics import graph_analytics
 from app.db import db_engine
 from app.models import GraphNode, GraphEdge
+
+pytestmark = pytest.mark.xdist_group(name="worker1")
 
 
 def test_rustworkx_graph_construction():

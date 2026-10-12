@@ -9,11 +9,14 @@ Aligned with docs/ARCHITECTURE.md Section 3 & Section 4:
 """
 
 import time
+import pytest
 from app.agents.orchestrator import orchestrator
 from app.services.graph_ingestion_engine import graph_ingestion_engine
 from app.agents.department_persona import DepartmentPersonaAgent
 from app.models import GraphNode, GraphEdge
 from app.db import db_engine
+
+pytestmark = pytest.mark.xdist_group(name="worker1")
 
 
 def test_independent_ingestion_linking():

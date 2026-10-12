@@ -1,6 +1,8 @@
+import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.mark.xdist_group(name="worker1")
 def test_root_endpoint(test_client: TestClient):
     """Test GET / returns system online status."""
     res = test_client.get("/")
@@ -10,6 +12,7 @@ def test_root_endpoint(test_client: TestClient):
     assert "nodes_count" in data
 
 
+@pytest.mark.xdist_group(name="worker1")
 def test_projects_endpoints(test_client: TestClient):
     """Test GET /api/projects and POST /api/projects."""
     # Fetch projects
@@ -38,6 +41,7 @@ def test_projects_endpoints(test_client: TestClient):
     )
 
 
+@pytest.mark.xdist_group(name="worker1")
 def test_graph_endpoint(test_client: TestClient):
     """Test GET /api/graph with project_id filtering."""
     res = test_client.get("/api/graph?project_id=global")
@@ -48,6 +52,8 @@ def test_graph_endpoint(test_client: TestClient):
     assert len(data["nodes"]) >= 4
 
 
+@pytest.mark.xdist_group(name="worker2")
+@pytest.mark.vllm
 def test_chat_endpoint_post(test_client: TestClient):
     """Test POST /api/chat endpoint execution and response schema."""
     chat_payload = {
@@ -64,6 +70,8 @@ def test_chat_endpoint_post(test_client: TestClient):
     assert "touched_nodes" in data
 
 
+@pytest.mark.xdist_group(name="worker2")
+@pytest.mark.vllm
 def test_project_chat_history_endpoint(test_client: TestClient):
     """Test GET /api/projects/{project_id}/chat endpoint."""
     # Send a chat message first
@@ -82,6 +90,8 @@ def test_project_chat_history_endpoint(test_client: TestClient):
     assert messages[0]["project_id"] == "proj_chat_test"
 
 
+@pytest.mark.xdist_group(name="worker2")
+@pytest.mark.vllm
 def test_clear_project_chat_endpoint(test_client: TestClient):
     """Test DELETE /api/projects/{project_id}/chat endpoint."""
     chat_payload = {

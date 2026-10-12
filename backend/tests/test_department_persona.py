@@ -7,9 +7,12 @@ Aligned with docs/ARCHITECTURE.md Section 4:
 - Validates independent passage-grounded concept node reorganization (`reorganize_concept_hub`).
 """
 
+import pytest
 from app.agents.department_persona import DepartmentPersonaAgent
 from app.db import db_engine
 from app.models import GraphNode, GraphEdge
+
+pytestmark = pytest.mark.xdist_group(name="worker1")
 
 
 def test_department_persona_shared_exploration():
@@ -108,6 +111,7 @@ def test_department_persona_root_node_traversal_blocking():
     assert "concept_e_unreachable" not in traversed
 
 
+@pytest.mark.vllm
 def test_department_persona_mutually_exclusive_partitioning():
     """Verify DepartmentPersonaAgent.explore_concept_hub strictly obeys partition_node_ids boundaries."""
     from app.services.llm_gateway import llm_gateway

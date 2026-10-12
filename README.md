@@ -89,15 +89,22 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 - **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating Direct Conversation, Ingestion, and Persona Retrieval flows with `chat_history` context-aware intent classification.
 - **`app/api/sse.py`**: FastAPI SSE endpoint (`/api/sse/chat`) streaming live persona traversal telemetry.
 - **`main.py`**: REST API endpoints for unified chat (`POST /api/chat`), project workspaces (`GET/POST /api/projects`), project chat history (`GET /api/projects/{id}/chat`), and graph querying (`GET /api/graph?project_id=...`).
-- **`tests/` & `run_tests.py`**: Pytest test suite and runner passing all database, project scoping, analytics, retrieval stream, concept merging, and API checks.
+- **`tests/`**: Pytest test suite with `-n 2` parallel worker isolation, passing all database, project scoping, analytics, retrieval stream, concept merging, and API checks.
 
 ---
 
 ## 🧪 Running Backend Unit & Integration Tests
 
-Run the test suite using the project virtualenv:
+Run the test suite using the project virtualenv via `pytest` (pre-configured in `backend/pytest.ini` with 2 parallel workers and worker-isolated databases):
 
 ```bash
-# Run backend test suite (max 2 parallel workers per project rule)
-me-mex/.venv/bin/python3.14 me-mex/backend/run_tests.py
+# Navigate to the backend directory
+cd me-mex/backend
+
+# Run full backend test suite via pytest
+python -m pytest tests
+
+# Run specific test modules or targeted paths:
+python -m pytest tests/test_search_tools.py
+python -m pytest tests/test_e2e_workflows.py -k "test_e2e_ingestion_workflow_real_paper"
 ```

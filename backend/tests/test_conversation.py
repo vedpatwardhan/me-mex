@@ -6,9 +6,12 @@ backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
+import pytest
 from app.services.event_queue import event_queue
 from app.agents.orchestrator import orchestrator
 from app.services.llm_gateway import llm_gateway
+
+pytestmark = [pytest.mark.xdist_group(name="worker1"), pytest.mark.vllm]
 
 
 def test_conversation_flow_continuity():
