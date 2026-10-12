@@ -242,3 +242,50 @@ def test_chunk_text_safe_token_ceiling():
     chunks = orchestrator._chunk_text(doc_text)
     assert 5 <= len(chunks) <= 30
     assert all(len(c) <= 45000 for c in chunks)
+
+
+def test_extract_markdown_title():
+    """Verify document title is extracted from the first true markdown header, ignoring comments and notes."""
+    # 1. Simple header
+    md1 = "# Attention Is All You Need\n\nVaswani et al."
+    assert orchestrator._extract_markdown_title(md1) == "Attention Is All You Need"
+
+    # 2. Markdown with comments and subheader
+    md2 = "<!-- Downloaded At: 2026-10-12 -->\n\n## Deep World Models\n\nBody text"
+    assert orchestrator._extract_markdown_title(md2) == "Deep World Models"
+
+    # 3. Combined user notes and document content
+    md3 = (
+        "### User Context & Notes\n"
+        "Here are my private notes.\n\n"
+        "### Document Content\n"
+        "# Accelerating Scientific Discovery with Co-Scientist\n\n"
+        "Abstract..."
+    )
+    assert (
+        orchestrator._extract_markdown_title(md3)
+        == "Accelerating Scientific Discovery with Co-Scientist"
+    )
+
+    # 4. Empty or header-less markdown
+    assert orchestrator._extract_markdown_title("") is None
+    assert (
+        orchestrator._extract_markdown_title("Just plain paragraph without headers")
+        is None
+    )
+
+
+def test_search_tools_is_misleading_filename():
+    """Verify search_tools rejects local filenames, drafts, and bracketed tags as titles."""
+    from app.tools.search_tools import search_tools
+
+    assert search_tools._is_misleading_filename("[CoS] Nature revision AAP") is True
+    assert search_tools._is_misleading_filename("main.pdf") is True
+    assert search_tools._is_misleading_filename("paper_draft_v2.docx") is True
+    assert search_tools._is_misleading_filename("untitled.tex") is True
+    assert (
+        search_tools._is_misleading_filename(
+            "The DAWN of World-Action Interactive Models"
+        )
+        is False
+    )

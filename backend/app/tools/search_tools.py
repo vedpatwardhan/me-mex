@@ -75,6 +75,40 @@ class SearchTools:
             raise RuntimeError(f"ArXiv search query failed for '{query}': {e}") from e
 
     @staticmethod
+    def _is_misleading_filename(title_candidate: str) -> bool:
+        """Checks if a title candidate looks like a local file name, draft label, or revision tag."""
+        if not title_candidate:
+            return True
+        t_clean = title_candidate.strip().lower()
+        if any(
+            t_clean.endswith(ext)
+            for ext in (".pdf", ".docx", ".doc", ".tex", ".txt", ".rtf", ".pptx")
+        ):
+            return True
+        if (
+            title_candidate.startswith("[")
+            or title_candidate.startswith("{")
+            or "/" in title_candidate
+            or "\\" in title_candidate
+        ):
+            return True
+        if any(
+            marker in t_clean
+            for marker in (
+                "draft",
+                "revision",
+                "manuscript",
+                "untitled",
+                "_v1",
+                "_v2",
+                "_v3",
+                "submission",
+            )
+        ):
+            return True
+        return False
+
+    @staticmethod
     def _extract_pdf_content(content_bytes: bytes, url: str) -> Dict[str, Any]:
         """Extract full document text from binary PDF stream using pypdf into clean markdown."""
         try:
@@ -82,8 +116,28 @@ class SearchTools:
 
             reader = pypdf.PdfReader(io.BytesIO(content_bytes))
             title = ""
-            if reader.metadata and reader.metadata.title:
-                title = reader.metadata.title.strip()
+
+            # 1. If ArXiv URL, retrieve official canonical paper title via ArXiv API
+            arxiv_match = re.search(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", url)
+            if arxiv_match:
+                arxiv_id = arxiv_match.group(1)
+                try:
+                    client = arxiv.Client()
+                    search = arxiv.Search(id_list=[arxiv_id])
+                    for res in client.results(search):
+                        if res.title:
+                            title = res.title.replace("\n", " ").strip()
+                            break
+                except Exception as arxiv_err:
+                    logger.warning(
+                        f"[SearchTools] ArXiv paper title lookup error: {arxiv_err}"
+                    )
+
+            # 2. Check metadata title only if not misleading filename or draft tag
+            if not title and reader.metadata and reader.metadata.title:
+                meta_candidate = reader.metadata.title.strip()
+                if not SearchTools._is_misleading_filename(meta_candidate):
+                    title = meta_candidate
 
             pages_text = []
             for idx, page in enumerate(reader.pages):
@@ -102,14 +156,16 @@ class SearchTools:
 
             full_body = "\n\n".join(pages_text)
 
-            # Determine clean title if not in metadata
+            # 3. Determine clean title from the first page text if still not found
             if not title:
-                for line in full_body.splitlines()[:10]:
+                first_page = pages_text[0] if pages_text else full_body
+                for line in first_page.splitlines()[:15]:
                     cleaned_line = line.strip()
                     if (
                         cleaned_line
                         and len(cleaned_line) > 3
                         and not cleaned_line.isdigit()
+                        and not cleaned_line.lower().startswith("arxiv:")
                     ):
                         title = cleaned_line
                         break
@@ -145,6 +201,19 @@ class SearchTools:
                 html_text, include_links=True, output_format="markdown"
             )
             if extracted and extracted.strip():
+                # If markdown does not begin with a heading, prepend metadata title as # header
+                if not any(
+                    extracted.strip().startswith(h) for h in ("# ", "## ", "### ")
+                ):
+                    try:
+                        meta = trafilatura.extract_metadata(html_text)
+                        if meta and meta.title and meta.title.strip():
+                            extracted = f"# {meta.title.strip()}\n\n{extracted.strip()}"
+                    except Exception as meta_err:
+                        logger.warning(
+                            f"[SearchTools] HTML metadata title extraction failed: {meta_err}"
+                        )
+
                 debug_file_path = SearchTools._save_debug_markdown(url, extracted)
                 return {
                     "url": url,

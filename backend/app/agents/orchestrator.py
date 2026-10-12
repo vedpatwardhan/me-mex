@@ -45,7 +45,41 @@ class ExecutiveOrchestrator:
         self.tools = search_tools
         self.event_queue = event_queue
         self.max_k_hubs = max_k_hubs
-        self.ingestion_engine = graph_ingestion_engine
+
+    @staticmethod
+    def _extract_markdown_title(text: str) -> Optional[str]:
+        """Extracts the document title from the first markdown heading (# , ## , ### ) in the text, ignoring comments and synthetic headers."""
+        if not text:
+            return None
+        import re
+
+        in_comment = False
+        for line in text.splitlines():
+            line_str = line.strip()
+            if not line_str:
+                continue
+            if line_str.startswith("<!--"):
+                if not line_str.endswith("-->"):
+                    in_comment = True
+                continue
+            if in_comment:
+                if "-->" in line_str:
+                    in_comment = False
+                continue
+            match = re.match(r"^#{1,6}\s+(.+)$", line_str)
+            if match:
+                candidate = match.group(1).strip()
+                candidate = re.sub(r"[*_`]", "", candidate).strip()
+                if candidate.lower() in (
+                    "user context & notes",
+                    "document content",
+                    "user context",
+                    "notes",
+                ):
+                    continue
+                if len(candidate) >= 2:
+                    return candidate
+        return None
 
     def _chunk_text(
         self,
@@ -594,11 +628,7 @@ class ExecutiveOrchestrator:
                 "error", "Document could not be retrieved from URL."
             )
 
-            if fetched_content:
-                for line in fetched_content.splitlines():
-                    if line.startswith("# "):
-                        title = line[2:].strip()
-                        break
+            title = self._extract_markdown_title(fetched_content)
 
             evt_fetched = {
                 "event": "document_fetched",
@@ -651,6 +681,9 @@ class ExecutiveOrchestrator:
             ):
                 yield event
             return
+
+        if not title:
+            title = self._extract_markdown_title(full_content)
 
         if not title:
             first_line = (
