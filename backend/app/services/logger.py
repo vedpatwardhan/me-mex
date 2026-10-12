@@ -23,8 +23,22 @@ _THEME = Theme(
     }
 )
 
-# Standard console for output
-console = Console(theme=_THEME, force_terminal=None)
+
+def _get_active_terminal_stream():
+    """Acquires direct terminal file descriptor /dev/tty to bypass pytest/xdist pipes, falling back to sys.stderr."""
+    try:
+        if os.path.exists("/dev/tty"):
+            return open("/dev/tty", "w", buffering=1, encoding="utf-8")
+    except Exception as e:
+        # Fall back to standard error when /dev/tty is unavailable (e.g. non-interactive environments)
+        sys.stderr.write(
+            f"[RichLogger WARNING] /dev/tty unavailable ({e}), using sys.stderr\n"
+        )
+    return sys.stderr
+
+
+# Standard console for output, forced to terminal mode for guaranteed color and instant flushing
+console = Console(file=_get_active_terminal_stream(), theme=_THEME, force_terminal=True)
 
 
 class RichLogger:
@@ -161,8 +175,15 @@ class RichLogger:
             idx = event_data.get("chunk_index", 0)
             total = event_data.get("total_chunks", 0)
             c_count = event_data.get("concepts_extracted", 0)
+            c_titles = event_data.get("concept_titles", [])
+            titles_str = ""
+            if c_titles:
+                titles_formatted = ", ".join(
+                    f"[bold cyan]'{t}'[/bold cyan]" for t in c_titles
+                )
+                titles_str = f": {titles_formatted}"
             console.print(
-                f"{proj_badge}   │   • [dim]Chunk [{idx}/{total}][/dim]: extracted [bold green]+{c_count} concepts[/bold green]"
+                f"{proj_badge}   │   • [dim]Chunk [{idx}/{total}][/dim]: extracted [bold green]+{c_count} concepts[/bold green]{titles_str}"
             )
 
         elif event_type == "passages_extracted":
@@ -184,9 +205,17 @@ class RichLogger:
             c_count = event_data.get("canonical_concepts_count", 0)
             r_count = event_data.get("canonical_relations_count", 0)
             title = event_data.get("doc_title", "")
+            canonical_concepts = event_data.get("canonical_concepts", [])
             console.print(
                 f"{proj_badge}   ├─ 🎯 [bold magenta]Consolidation Complete[/bold magenta]: synthesized [bold]{c_count} canonical concepts[/bold] & [bold]{r_count} qualitative relations[/bold]"
             )
+            if canonical_concepts:
+                concepts_str = ", ".join(
+                    f"[bold cyan]'{c}'[/bold cyan]" for c in canonical_concepts
+                )
+                console.print(
+                    f"{proj_badge}   │   • [magenta]Canonical Concepts Synthesized:[/magenta] {concepts_str}"
+                )
 
         elif event_type == "root_node_created":
             title = event_data.get("title", "")

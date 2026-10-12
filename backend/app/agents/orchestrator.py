@@ -654,12 +654,18 @@ class ExecutiveOrchestrator:
                     chat_history,
                 )
                 c_count = len(extraction.get("concepts", []))
+                c_titles = [
+                    c.get("title", "")
+                    for c in extraction.get("concepts", [])
+                    if c.get("title")
+                ]
                 evt_prog = {
                     "event": "passage_extraction_progress",
                     "doc_id": doc_id,
                     "chunk_index": chunk_idx + 1,
                     "total_chunks": len(passage_chunks),
                     "concepts_extracted": c_count,
+                    "concept_titles": c_titles,
                     "timestamp": time.time(),
                 }
                 self.event_queue.push(project_id, evt_prog)
@@ -766,6 +772,9 @@ class ExecutiveOrchestrator:
             return
 
         consolidated_concepts = consolidated_result.get("concepts", [])
+        canonical_titles = [
+            c.get("title", "") for c in consolidated_concepts if c.get("title")
+        ]
 
         evt_consol_complete = {
             "event": "consolidation_complete",
@@ -773,6 +782,7 @@ class ExecutiveOrchestrator:
             "doc_title": title,
             "canonical_concepts_count": len(consolidated_concepts),
             "canonical_relations_count": len(consolidated_result.get("relations", [])),
+            "canonical_concepts": canonical_titles,
             "timestamp": time.time(),
         }
         self.event_queue.push(project_id, evt_consol_complete)
