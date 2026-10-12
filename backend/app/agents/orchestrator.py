@@ -116,16 +116,19 @@ class ExecutiveOrchestrator:
             }
         )
         try:
+            t0 = time.time()
             res = self.llm.generate_chat_completion(
                 messages,
                 temperature=0.2,
-                max_tokens=768,
+                max_tokens=1536,
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )
+            duration = round(time.time() - t0, 2)
             data = json.loads(res)
             return {
                 "concepts": data.get("concepts", []),
+                "duration_seconds": duration,
             }
         except Exception as e:
             print(
@@ -169,6 +172,7 @@ class ExecutiveOrchestrator:
         messages.append({"role": "user", "content": payload_content})
 
         try:
+            t0 = time.time()
             res = self.llm.generate_chat_completion(
                 messages,
                 temperature=0.2,
@@ -176,6 +180,7 @@ class ExecutiveOrchestrator:
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )
+            duration = round(time.time() - t0, 2)
             data = json.loads(res)
             return {
                 "doc_description": data.get(
@@ -184,6 +189,7 @@ class ExecutiveOrchestrator:
                 ),
                 "doc_type": data.get("doc_type", "paper"),
                 "concepts": data.get("concepts", []),
+                "duration_seconds": duration,
             }
         except Exception as e:
             print(
@@ -213,6 +219,7 @@ class ExecutiveOrchestrator:
         messages.append({"role": "user", "content": query})
 
         try:
+            t0 = time.time()
             res = self.llm.generate_chat_completion(
                 messages,
                 temperature=0.0,
@@ -220,6 +227,7 @@ class ExecutiveOrchestrator:
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )
+            duration = round(time.time() - t0, 2)
             data = json.loads(res)
             raw_intent = data.get("intent", "CONVERSATION")
 
@@ -234,6 +242,7 @@ class ExecutiveOrchestrator:
                     "doc_type": doc_type,
                     "source_url": data.get("source_url"),
                     "raw_text": data.get("raw_text"),
+                    "duration_seconds": duration,
                 }
 
             # CONVERSATION or RETRIEVAL
@@ -242,6 +251,7 @@ class ExecutiveOrchestrator:
                 "doc_type": None,
                 "source_url": None,
                 "raw_text": None,
+                "duration_seconds": duration,
             }
         except Exception as e:
             print(f"[ExecutiveOrchestrator] classify_intent error: {e}")
@@ -259,10 +269,14 @@ class ExecutiveOrchestrator:
         try:
             intent_result = self.classify_intent(query, chat_history)
             intent = intent_result["intent"]
+            intent_duration = intent_result.get("duration_seconds")
 
             intent_evt = {
                 "event": "intent_classified",
                 "intent": intent,
+                "doc_type": intent_result.get("doc_type"),
+                "source_url": intent_result.get("source_url"),
+                "duration_seconds": intent_duration,
                 "message": f"Executive Orchestrator evaluated user input intent: '{intent}'",
                 "timestamp": time.time(),
             }
@@ -650,6 +664,7 @@ class ExecutiveOrchestrator:
                     for c in extraction.get("concepts", [])
                     if c.get("title")
                 ]
+                duration = extraction.get("duration_seconds")
                 evt_prog = {
                     "event": "passage_extraction_progress",
                     "doc_id": doc_id,
@@ -657,6 +672,7 @@ class ExecutiveOrchestrator:
                     "total_chunks": len(passage_chunks),
                     "concepts_extracted": c_count,
                     "concept_titles": c_titles,
+                    "duration_seconds": duration,
                     "timestamp": time.time(),
                 }
                 self.event_queue.push(project_id, evt_prog)
@@ -773,6 +789,7 @@ class ExecutiveOrchestrator:
             "doc_title": title,
             "canonical_concepts_count": len(consolidated_concepts),
             "canonical_concepts": canonical_titles,
+            "duration_seconds": consolidated_result.get("duration_seconds"),
             "timestamp": time.time(),
         }
         self.event_queue.push(project_id, evt_consol_complete)

@@ -111,6 +111,8 @@ class RichLogger:
         # --- Phase 1: Intent Classification ---
         if event_type == "intent_classified":
             intent = event_data.get("intent", "UNKNOWN")
+            duration = event_data.get("duration_seconds")
+            duration_str = f" [dim]({duration}s)[/dim]" if duration is not None else ""
             style = (
                 "cyan"
                 if intent == "INGESTION"
@@ -128,7 +130,7 @@ class RichLogger:
             )
             console.print()
             console.print(
-                f"{proj_badge} [bold {style}]⚡ INTENT EVALUATED: {intent}[/bold {style}]{doc_type_str}{url_str}"
+                f"{proj_badge} [bold {style}]⚡ INTENT EVALUATED: {intent}[/bold {style}]{duration_str}{doc_type_str}{url_str}"
             )
 
         # --- Phase 2: Ingestion Pipeline Events ---
@@ -178,6 +180,8 @@ class RichLogger:
             total = event_data.get("total_chunks", 0)
             c_count = event_data.get("concepts_extracted", 0)
             c_titles = event_data.get("concept_titles", [])
+            duration = event_data.get("duration_seconds")
+            duration_str = f" [dim]({duration}s)[/dim]" if duration is not None else ""
             titles_str = ""
             if c_titles:
                 titles_formatted = ", ".join(
@@ -185,7 +189,7 @@ class RichLogger:
                 )
                 titles_str = f": {titles_formatted}"
             console.print(
-                f"{proj_badge}   │   • [dim]Chunk [{idx}/{total}][/dim]: extracted [bold green]+{c_count} concepts[/bold green]{titles_str}"
+                f"{proj_badge}   │   • [dim]Chunk [{idx}/{total}][/dim]: extracted [bold green]+{c_count} concepts[/bold green]{duration_str}{titles_str}"
             )
 
         elif event_type == "passages_extracted":
@@ -206,8 +210,10 @@ class RichLogger:
             c_count = event_data.get("canonical_concepts_count", 0)
             title = event_data.get("doc_title", "")
             canonical_concepts = event_data.get("canonical_concepts", [])
+            duration = event_data.get("duration_seconds")
+            duration_str = f" [dim]({duration}s)[/dim]" if duration is not None else ""
             console.print(
-                f"{proj_badge}   ├─ 🎯 [bold magenta]Consolidation Complete[/bold magenta]: synthesized [bold]{c_count} canonical concepts[/bold]"
+                f"{proj_badge}   ├─ 🎯 [bold magenta]Consolidation Complete[/bold magenta]: synthesized [bold]{c_count} canonical concepts[/bold]{duration_str}"
             )
             if canonical_concepts:
                 concepts_str = ", ".join(
