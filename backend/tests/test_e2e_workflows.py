@@ -7,12 +7,8 @@ Aligned with docs/ARCHITECTURE.md Section 2:
 - Path 3: INGESTION E2E (ArXiv 2605.11550 Document Fetching -> Passage Storage -> Ingestion Linking -> 3-Step Concept Hub Reorganization -> Final Summary)
 """
 
-import asyncio
 import os
 import sys
-import uuid
-import time
-from typing import List, Dict, Any
 
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if backend_dir not in sys.path:
@@ -20,26 +16,7 @@ if backend_dir not in sys.path:
 
 import pytest
 from app.db import db_engine
-from app.models import GraphNode, GraphEdge, PassageRecord, DocumentRecord
 from app.agents.orchestrator import orchestrator
-from app.agents.department_persona import DepartmentPersonaAgent
-from app.services.graph_ingestion_engine import graph_ingestion_engine
-from app.services.llm_gateway import llm_gateway
-from app.services.event_queue import event_queue
-
-# --- Real Paper Data (ArXiv 2605.11550) ---
-ARXIV_PAPER_TITLE = "Reasoning with Language Models: Search and Process Verification"
-ARXIV_PAPER_TEXT = """# Reasoning with Language Models: Search and Process Verification
-
-## Abstract
-Large language models (LLMs) have achieved remarkable progress in complex reasoning tasks, including mathematical problem solving and software engineering. Recent advances demonstrate that coupling autoregressive base models with structured search algorithms—such as Monte Carlo Tree Search (MCTS) and Process Reward Models (PRMs)—substantially boosts step-by-step reasoning performance.
-
-## Process Reward Models and Step-by-Step Verification
-Traditional outcome-based reward models evaluate only the final output of a reasoning chain. In contrast, Process Reward Models (PRMs) evaluate each intermediate reasoning step independently. By assigning fine-grained scalar scores to intermediate transitions, PRMs mitigate early logical errors and guide search algorithms toward correct reasoning trajectories.
-
-## Tree Search and Latent Reasoning Rollouts
-Tree search techniques decompose problem solving into a state-action search space. At each node in the search tree, the model generates candidate reasoning steps, which are evaluated by the process verifier. Rollouts explore promising reasoning branches while pruning low-scoring trajectory paths, significantly increasing inference-time compute efficiency.
-"""
 
 
 @pytest.mark.xdist_group(name="worker2")

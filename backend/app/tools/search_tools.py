@@ -7,13 +7,18 @@ import trafilatura
 from duckduckgo_search import DDGS
 
 
+from app.services.logger import logger
+
+
 class SearchTools:
     """Tools for querying ArXiv research papers, DuckDuckGo web search, and fetching/extracting web article content."""
 
     @staticmethod
     def search_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """Search DuckDuckGo for live web results, snippets, and page URLs."""
-        print(f"[SearchTools] Querying DuckDuckGo Web Search for: '{query}'")
+        logger.info(
+            f"🔍 [bold blue]SearchTools[/bold blue] Querying DuckDuckGo Web Search for: '[cyan]{query}[/cyan]'"
+        )
         try:
             results = []
             with DDGS() as ddgs:
@@ -27,7 +32,7 @@ class SearchTools:
                     )
             return results
         except Exception as e:
-            print(
+            logger.warning(
                 f"[SearchTools] DuckDuckGo search failed: {e}. Returning fallback result."
             )
             return [
@@ -41,7 +46,9 @@ class SearchTools:
     @staticmethod
     def search_arxiv(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
         """Search ArXiv API for relevant paper metadata and abstracts."""
-        print(f"[SearchTools] Querying ArXiv for: '{query}'")
+        logger.info(
+            f"📚 [bold blue]SearchTools[/bold blue] Querying ArXiv for: '[cyan]{query}[/cyan]'"
+        )
         try:
             client = arxiv.Client()
             search = arxiv.Search(
@@ -62,7 +69,9 @@ class SearchTools:
                 )
             return results
         except Exception as e:
-            print(f"[SearchTools] ArXiv search failed for query '{query}': {e}")
+            logger.error_box(
+                "SearchTools ArXiv Query Failed", f"Query: '{query}'\nError: {e}"
+            )
             raise RuntimeError(f"ArXiv search query failed for '{query}': {e}") from e
 
     @staticmethod
@@ -109,17 +118,17 @@ class SearchTools:
 
             markdown_output = f"# {title}\n\n{full_body}"
             debug_file_path = SearchTools._save_debug_markdown(url, markdown_output)
-            print(
-                f"[SearchTools] PDF successfully extracted ({len(markdown_output)} chars, {len(reader.pages)} pages) from {url}"
-            )
             return {
                 "url": url,
                 "content": markdown_output,
                 "debug_file_path": debug_file_path,
                 "status": "SUCCESS",
+                "doc_type": "pdf",
+                "page_count": len(reader.pages),
+                "char_count": len(markdown_output),
             }
         except Exception as e:
-            print(f"[SearchTools] PDF extraction failed: {e}")
+            logger.warning(f"[SearchTools] PDF extraction failed for {url}: {e}")
             return {
                 "url": url,
                 "content": "",
@@ -137,17 +146,16 @@ class SearchTools:
             )
             if extracted and extracted.strip():
                 debug_file_path = SearchTools._save_debug_markdown(url, extracted)
-                print(
-                    f"[SearchTools] HTML article successfully extracted ({len(extracted)} chars) from {url}"
-                )
                 return {
                     "url": url,
                     "content": extracted,
                     "debug_file_path": debug_file_path,
                     "status": "SUCCESS",
+                    "doc_type": "html",
+                    "char_count": len(extracted),
                 }
 
-            print(
+            logger.warning(
                 f"[SearchTools] Document extraction failed: No text extracted from HTML at {url}"
             )
             return {
@@ -158,7 +166,7 @@ class SearchTools:
                 "error": f"Failed to extract article content from {url}",
             }
         except Exception as e:
-            print(f"[SearchTools] HTML extraction exception: {e}")
+            logger.warning(f"[SearchTools] HTML extraction exception for {url}: {e}")
             return {
                 "url": url,
                 "content": "",
@@ -170,7 +178,6 @@ class SearchTools:
     @staticmethod
     def fetch_document(url: str) -> Dict[str, Any]:
         """Fetch document (PDF, web page, blog, or article) from URL and extract full Markdown content dynamically."""
-        print(f"[SearchTools] Extracting document from URL: {url}")
         target_url = url.strip()
 
         headers = {
@@ -208,7 +215,9 @@ class SearchTools:
                 return SearchTools._extract_html_content(resp.text, url)
 
         except Exception as e:
-            print(f"[SearchTools] Document extraction exception: {e}")
+            logger.warning(
+                f"[SearchTools] Document extraction exception for {url}: {e}"
+            )
             return {
                 "url": url,
                 "content": "",
@@ -241,10 +250,9 @@ class SearchTools:
                 f"<!-- Character Count: {len(markdown_content)} -->\n\n"
             )
             filepath.write_text(header + markdown_content, encoding="utf-8")
-            print(f"[SearchTools] Saved raw debug markdown to: {filepath}")
             return str(filepath)
         except Exception as e:
-            print(f"[SearchTools] Warning: Failed to save debug markdown: {e}")
+            logger.warning(f"[SearchTools] Warning: Failed to save debug markdown: {e}")
             return ""
 
 

@@ -323,6 +323,21 @@ class ExecutiveOrchestrator:
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Path 1: CONVERSATION (Single-Step Direct Response straightaway)."""
+        try:
+            from app.services.logger import logger
+
+            logger.phase_header(
+                "💬 PATH 1: DIRECT CONVERSATIONAL FLOW",
+                f"Project: {project_id} • Prompt: '{query[:80]}...'"
+                if len(query) > 80
+                else f"Project: {project_id} • Prompt: '{query}'",
+                style="magenta",
+            )
+        except Exception as log_err:
+            print(
+                f"[ExecutiveOrchestrator WARNING] Failed to render conversation phase header: {log_err}"
+            )
+
         yield {
             "event": "conversation_start",
             "message": "Executive Orchestrator responding directly via conversational mode...",
@@ -379,6 +394,19 @@ class ExecutiveOrchestrator:
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Path 2: RETRIEVAL (Step 1: Partitioned Hub Traversal -> Step 2: Relevance Evaluation -> Final Conversation)."""
+        try:
+            from app.services.logger import logger
+
+            logger.phase_header(
+                "🔍 PATH 2: RETRIEVAL & SUB-GRAPH TRAVERSAL",
+                f"Project: {project_id} • Query: '{query}'",
+                style="green",
+            )
+        except Exception as log_err:
+            print(
+                f"[ExecutiveOrchestrator WARNING] Failed to render retrieval phase header: {log_err}"
+            )
+
         yield {
             "event": "persona_traversal_start",
             "message": f"Executive Orchestrator identifying dynamic concept hubs in project '{project_id}' for query: '{query}'",
@@ -475,6 +503,19 @@ class ExecutiveOrchestrator:
         source_url = target_info.get("source_url")
         raw_payload = target_info.get("raw_text")
 
+        try:
+            from app.services.logger import logger
+
+            logger.phase_header(
+                "📥 PATH 3: DOCUMENT INGESTION PIPELINE",
+                f"Project: {project_id} • Source: {source_url or 'Raw Text Payload'}",
+                style="cyan",
+            )
+        except Exception as log_err:
+            print(
+                f"[ExecutiveOrchestrator WARNING] Failed to render ingestion phase header: {log_err}"
+            )
+
         # Step 1: Document Fetching & Content Assembly
         fetched_content = ""
         title = None
@@ -501,6 +542,8 @@ class ExecutiveOrchestrator:
                 "char_count": len(fetched_content),
                 "debug_file_path": debug_file_path,
                 "status": fetch_status,
+                "doc_type": doc_res.get("doc_type", "document"),
+                "page_count": doc_res.get("page_count"),
                 "timestamp": time.time(),
             }
             self.event_queue.push(project_id, evt_fetched)

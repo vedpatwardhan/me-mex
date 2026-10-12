@@ -196,22 +196,36 @@ class LLMGateway:
             raw_content = "".join(collected_chunks)
             vllm_reasoning = "".join(collected_reasoning)
 
+            try:
+                from app.services.logger import console
+
+                if vllm_reasoning:
+                    console.print(
+                        f"      [dim]🧠 Model reasoning trace generated: {len(vllm_reasoning)} chars[/dim]"
+                    )
+                elif enable_reasoning:
+                    parsed = self.parse_reasoning_output(raw_content)
+                    if parsed["thinking"]:
+                        console.print(
+                            f"      [dim]🧠 Parsed [THINK] reasoning trace: {len(parsed['thinking'])} chars[/dim]"
+                        )
+            except Exception as log_err:
+                print(f"[LLMGateway WARNING] Failed to render reasoning log: {log_err}")
+
             if vllm_reasoning:
-                print(
-                    f"[LLMGateway] vLLM Dedicated Reasoning Tokens Generated: {len(vllm_reasoning)} chars"
-                )
                 return strip_emojis(raw_content.strip())
 
             if enable_reasoning:
                 parsed = self.parse_reasoning_output(raw_content)
-                if parsed["thinking"]:
-                    print(
-                        f"[LLMGateway] Parsed [THINK] Reasoning Tokens: {len(parsed['thinking'])} chars"
-                    )
                 return strip_emojis(parsed["final_response"])
             return strip_emojis(raw_content.strip())
         except Exception as e:
-            print(f"[LLMGateway EXCEPTION] LLM completion request failed: {e}")
+            try:
+                from app.services.logger import logger
+
+                logger.error_box("LLMGateway Request Failed", str(e))
+            except Exception:
+                print(f"[LLMGateway EXCEPTION] LLM completion request failed: {e}")
             raise ConnectionError(f"vLLM Server unreachable or error ({e})")
 
     async def stream_chat_completion(
