@@ -51,47 +51,105 @@ class ExecutiveOrchestrator:
         self,
         text: str,
         chunk_size: Optional[int] = None,
-        min_chunk_size: int = 1500,
-        target_chunks: int = 8,
-        max_chunk_size: int = 12000,
+        min_chunks: int = 5,
+        max_chunks: int = 30,
+        max_safe_chunk_size: int = 45000,
     ) -> List[str]:
-        """Splits raw document text into cohesive passage chunks with min 1500 chars, dynamically scaling up to stay within 7-10 chunks."""
+        """Splits raw document text into cohesive passage chunks, scaling adaptively between min_chunks (5) and max_chunks (30) based on document length."""
         if not text:
             return []
 
-        # If chunk_size is not explicitly specified, calculate adaptively targeting 7-10 chunks
-        if chunk_size is None:
-            total_len = len(text)
-            calculated_size = max(
-                min_chunk_size, (total_len + target_chunks - 1) // target_chunks
-            )
-            chunk_size = min(max_chunk_size, calculated_size)
+        total_len = len(text)
 
-        paragraphs = text.split("\n\n")
-        chunks = []
+        # 1. Compute dynamic target chunk count: scales from 5 (<= 25k chars) to 30 (>= 300k chars)
+        if chunk_size is None:
+            scaled_target = min_chunks + int(max(0, total_len - 25000) / 11000)
+            target_chunks = max(min_chunks, min(max_chunks, scaled_target))
+            calculated_size = (total_len + target_chunks - 1) // target_chunks
+            chunk_size = min(max_safe_chunk_size, max(500, calculated_size))
+
+        # 2. Split into semantic paragraph units, breaking oversized paragraphs at sentence boundaries
+        raw_paragraphs = text.split("\n\n")
+        atomic_units: List[str] = []
+        for p in raw_paragraphs:
+            p_str = p.strip()
+            if not p_str:
+                continue
+            if len(p_str) <= chunk_size:
+                atomic_units.append(p_str)
+            else:
+                # Break large paragraph by sentences or newlines
+                import re
+
+                sentences = re.split(r"(?<=[.!?])\s+", p_str)
+                curr_sentence_buf = ""
+                for s in sentences:
+                    if len(curr_sentence_buf) + len(s) + 1 <= chunk_size:
+                        curr_sentence_buf += (" " if curr_sentence_buf else "") + s
+                    else:
+                        if curr_sentence_buf:
+                            atomic_units.append(curr_sentence_buf)
+                        curr_sentence_buf = s
+                if curr_sentence_buf:
+                    atomic_units.append(curr_sentence_buf)
+
+        if not atomic_units:
+            atomic_units = [text[:chunk_size]]
+
+        # 3. Assemble atomic units into chunks up to target chunk_size
+        chunks: List[str] = []
         curr = ""
-        for p in paragraphs:
-            if len(curr) + len(p) <= chunk_size:
-                curr += ("\n\n" if curr else "") + p
+        for unit in atomic_units:
+            if len(curr) + len(unit) + 2 <= chunk_size:
+                curr += ("\n\n" if curr else "") + unit
             else:
                 if curr:
                     chunks.append(curr.strip())
-                curr = p
+                curr = unit
         if curr.strip():
             chunks.append(curr.strip())
 
-        # Enforce strict 7-10 upper bound without exceeding max_chunk_size
-        while len(chunks) > 10:
-            min_idx = -1
+        # 4. Lower bound enforcement: if fewer than min_chunks and document length is substantial, subdivide largest chunks
+        min_split_threshold = min_chunks * 500  # >= 2500 characters
+        while len(chunks) < min_chunks and total_len >= min_split_threshold:
+            # Find largest chunk that can be split
+            max_idx = max(range(len(chunks)), key=lambda i: len(chunks[i]))
+            largest_chunk = chunks[max_idx]
+            if len(largest_chunk) < 600:
+                break  # cannot split any further without losing coherence
+
+            # Split largest chunk roughly in half at paragraph or sentence boundary
+            midpoint = len(largest_chunk) // 2
+            split_pos = largest_chunk.rfind("\n\n", 0, midpoint + 200)
+            if split_pos == -1 or split_pos < midpoint - 300:
+                split_pos = largest_chunk.rfind(". ", 0, midpoint + 200)
+                if split_pos != -1:
+                    split_pos += 1  # include period
+
+            if (
+                split_pos == -1
+                or split_pos <= 100
+                or split_pos >= len(largest_chunk) - 100
+            ):
+                split_pos = midpoint
+
+            part1 = largest_chunk[:split_pos].strip()
+            part2 = largest_chunk[split_pos:].strip()
+            if part1 and part2:
+                chunks[max_idx] = part1
+                chunks.insert(max_idx + 1, part2)
+            else:
+                break
+
+        # 5. Upper bound enforcement: strictly merge shortest adjacent chunks until len(chunks) <= max_chunks (30)
+        while len(chunks) > max_chunks:
+            min_idx = 0
             min_combined_len = float("inf")
             for i in range(len(chunks) - 1):
                 comb = len(chunks[i]) + len(chunks[i + 1])
-                if comb <= max_chunk_size and comb < min_combined_len:
+                if comb < min_combined_len:
                     min_combined_len = comb
                     min_idx = i
-            if min_idx == -1:
-                # Cannot merge further without exceeding max_chunk_size
-                break
             chunks[min_idx] = chunks[min_idx] + "\n\n" + chunks[min_idx + 1]
             chunks.pop(min_idx + 1)
 
@@ -624,7 +682,7 @@ class ExecutiveOrchestrator:
         )
         self.db.upsert_document(doc_rec)
 
-        # Store Out-of-Graph Passage Records with dynamic adaptive chunking (targeting 7-10 passages)
+        # Store Out-of-Graph Passage Records with dynamic adaptive chunking (scaling 5-30 passages based on document length)
         passage_chunks = self._chunk_text(full_content)
         passage_ids = []
         for idx, chunk_str in enumerate(passage_chunks):

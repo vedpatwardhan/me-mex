@@ -174,3 +174,71 @@ def test_consolidate_extracted_concepts_with_payload():
         assert (
             p_id in all_assigned_passages
         ), f"Passage {p_id} lost during consolidation"
+
+
+def test_chunk_text_empty_and_short():
+    """Verify empty text returns empty list, and tiny snippet returns single chunk."""
+    assert orchestrator._chunk_text("") == []
+    short_snippet = "A brief paragraph introducing world models."
+    chunks = orchestrator._chunk_text(short_snippet)
+    assert len(chunks) == 1
+    assert chunks[0] == short_snippet
+
+
+def test_chunk_text_min_chunks_guarantee():
+    """Verify medium-sized text (~15,000 chars) produces at least 5 chunks and strictly <= 30."""
+    para = (
+        "Latent world models learn state transitions across compact latent embeddings. "
+        * 15
+    )
+    doc_text = "\n\n".join([f"Section {i}\n{para}" for i in range(12)])
+    assert len(doc_text) >= 12000
+
+    chunks = orchestrator._chunk_text(doc_text)
+    assert 5 <= len(chunks) <= 30
+    assert all(len(c.strip()) > 0 for c in chunks)
+
+
+def test_chunk_text_25_page_paper():
+    """Verify a 25-page academic paper (~66,000 chars) yields between 7 and 12 chunks."""
+    section = (
+        "We formulate the policy optimization objective over simulated latent rollouts. "
+        "The dynamics predictor estimates future embeddings conditioned on candidate action sequences. "
+        "Heuristic tree search samples action branches to maximize cumulative discounted rewards.\n\n"
+        * 5
+    )
+    # Generate ~66,000 characters
+    doc_text = "\n\n".join([f"### Section {i}\n{section}" for i in range(50)])
+    assert 60000 <= len(doc_text) <= 75000
+
+    chunks = orchestrator._chunk_text(doc_text)
+    assert 7 <= len(chunks) <= 12
+    assert all(len(c.strip()) > 0 for c in chunks)
+
+
+def test_chunk_text_150_page_paper_max_chunks_guarantee():
+    """Verify a 150-page document (~350,000 chars) scales up to exactly 30 chunks and NEVER exceeds 30."""
+    long_section = (
+        "Diffusion policies represent complex multi-modal distributions over continuous action spaces. "
+        "By applying denoising diffusion probabilistic models, the agent generates trajectory rollouts. "
+        "Residual energy models steer the sampling trajectory toward high-feasibility regions.\n\n"
+        * 10
+    )
+    # Generate ~350,000 characters
+    doc_text = "\n\n".join([f"## Chapter {i}\n{long_section}" for i in range(120)])
+    assert len(doc_text) >= 300000
+
+    chunks = orchestrator._chunk_text(doc_text)
+    assert (
+        len(chunks) == 30
+    ), f"Expected exactly 30 chunks for massive document, got {len(chunks)}"
+    assert all(len(c.strip()) > 0 for c in chunks)
+
+
+def test_chunk_text_safe_token_ceiling():
+    """Verify individual chunk sizes never exceed 45,000 characters to stay within 16k context window."""
+    long_para = "A" * 50000
+    doc_text = f"{long_para}\n\n{long_para}"
+    chunks = orchestrator._chunk_text(doc_text)
+    assert 5 <= len(chunks) <= 30
+    assert all(len(c) <= 45000 for c in chunks)

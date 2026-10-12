@@ -59,7 +59,14 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
    - **Pre-Step 2 (Relevance Evaluation)**: Personas evaluate domain relevance across their explored nodes, user prompt, and conversation history (`chat_history`).
    - **Final Conversation**: With enriched topological graph context assembled, the system triggers the final conversation step to generate and stream the response to the user.
 3. **Path 3: `INGESTION` (Two Pre-Steps $\rightarrow$ Final Conversation Response)**
-   - **Pre-Step 1 (Document Fetching & Intra-Document Graph Construction)**: Orchestrator calls `ingest_document_tool` to fetch/scrape text content from URLs/PDFs, stores plain-text chunks in `passages`, and extracts immutable intra-document concept nodes.
+   - **Pre-Step 1 (Document Fetching & Intra-Document Graph Construction)**: Orchestrator calls `ingest_document_tool` to fetch/scrape text content from URLs/PDFs.
+     - **Adaptive Document Chunking (5 to 30 Passages)**: Dynamically partitions the text into $N \in [5, 30]$ passages:
+       $$N_{\text{target}} = \min\left(30, \max\left(5, 5 + \left\lfloor \frac{\text{len}(\text{text}) - 25000}{11000} \right\rfloor\right)\right)$$
+       - Short documents ($\le 25\text{k}$ characters, ~10 pages): 5 passages.
+       - Medium papers (60k–75k characters, ~25 pages): 7–12 passages.
+       - Massive documents ($\ge 300\text{k}$ characters, ~150 pages): 30 passages (strictly capped).
+     - **LLM Context Budget & Ceiling Guarantee**: Individual chunks are bounded at $\le 45,000$ characters (~13,000 tokens), preventing Ministral 3-8B's 16,384-token context window from overflowing while allowing 1,536 tokens for concept extraction.
+     - **Passage Storage & Pure Concept Extraction**: Text chunks are stored out-of-graph in `passages`. Ministral extracts atomic `CONCEPT` nodes per passage, and the Orchestrator executes a single-pass consolidation (`consolidate_extracted_concepts`) into canonical intra-document concepts.
    - **Pre-Step 2 (Sub-Graph Traversal, Relevance Evaluation, Linking & Reorganization)**: Performs partitioned sub-graph traversal and relevance evaluation across concept hubs. Personas link newly ingested intra-document concepts to existing domain hubs, and independently reorganize/split over-clustered mutable concept nodes (`SPLIT_CONCEPT`) using underlying passage context.
    - **Final Conversation**: Once graph integration and reorganization complete, the system triggers the final conversation step to provide an executive summary and confirmation response to the user.
 
