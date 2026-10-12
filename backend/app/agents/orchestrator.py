@@ -119,14 +119,13 @@ class ExecutiveOrchestrator:
             res = self.llm.generate_chat_completion(
                 messages,
                 temperature=0.2,
-                max_tokens=1536,
+                max_tokens=768,
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )
             data = json.loads(res)
             return {
                 "concepts": data.get("concepts", []),
-                "relations": data.get("relations", []),
             }
         except Exception as e:
             print(
@@ -139,14 +138,13 @@ class ExecutiveOrchestrator:
     def consolidate_extracted_concepts(
         self,
         raw_extracted_concepts: List[Dict[str, Any]],
-        extracted_relations: List[Dict[str, Any]],
         doc_title: str,
         query: str,
         chat_history: List[Dict[str, str]],
     ) -> Dict[str, Any]:
         """Consolidates raw passage concepts into document-specific canonical concepts in a single lean pass."""
         if not raw_extracted_concepts:
-            return {"concepts": [], "relations": []}
+            return {"concepts": []}
 
         system_prompt = load_prompt("consolidate_concepts", doc_title=doc_title)
         messages = [{"role": "system", "content": system_prompt}]
@@ -163,21 +161,10 @@ class ExecutiveOrchestrator:
             for c in raw_extracted_concepts
         ]
 
-        lean_relations = [
-            {
-                "source": r.get("source", ""),
-                "target": r.get("target", ""),
-                "description": r.get("description", ""),
-            }
-            for r in extracted_relations
-        ]
-
         payload_content = (
             f"User Query Context: {query}\n\n"
             f"Raw Passage Concept Extractions ({len(lean_concepts)} items):\n"
-            f"{json.dumps(lean_concepts, indent=2)}\n\n"
-            f"Raw Concept Relations ({len(lean_relations)} items):\n"
-            f"{json.dumps(lean_relations, indent=2)}"
+            f"{json.dumps(lean_concepts, indent=2)}"
         )
         messages.append({"role": "user", "content": payload_content})
 
@@ -197,7 +184,6 @@ class ExecutiveOrchestrator:
                 ),
                 "doc_type": data.get("doc_type", "paper"),
                 "concepts": data.get("concepts", []),
-                "relations": data.get("relations", []),
             }
         except Exception as e:
             print(
@@ -647,7 +633,6 @@ class ExecutiveOrchestrator:
 
         # Extract Raw Passage Concepts across chunks with bounded concurrency & Consolidate into Intra-Document Concepts
         raw_extracted_concepts: List[Dict[str, Any]] = []
-        extracted_relations: List[Dict[str, Any]] = []
         extraction_sem = asyncio.Semaphore(2)
 
         async def _extract_chunk(p_id: str, chunk_str: str, chunk_idx: int):
@@ -724,16 +709,13 @@ class ExecutiveOrchestrator:
                         "passage_ids": [p_id],
                     }
                 )
-            extracted_relations.extend(extraction.get("relations", []))
 
         evt_extracted = {
             "event": "passages_extracted",
             "doc_id": doc_id,
             "doc_title": title,
             "raw_concept_count": len(raw_extracted_concepts),
-            "raw_relation_count": len(extracted_relations),
             "total_raw_concepts": len(raw_extracted_concepts),
-            "total_raw_relations": len(extracted_relations),
             "timestamp": time.time(),
         }
         self.event_queue.push(project_id, evt_extracted)
@@ -751,7 +733,7 @@ class ExecutiveOrchestrator:
 
         try:
             consolidated_result = self.consolidate_extracted_concepts(
-                raw_extracted_concepts, extracted_relations, title, query, chat_history
+                raw_extracted_concepts, title, query, chat_history
             )
         except Exception as e:
             err_msg = f"Document ingestion aborted: Concept consolidation failed for '{title}'. Details: {str(e)}"
@@ -790,7 +772,6 @@ class ExecutiveOrchestrator:
             "doc_id": doc_id,
             "doc_title": title,
             "canonical_concepts_count": len(consolidated_concepts),
-            "canonical_relations_count": len(consolidated_result.get("relations", [])),
             "canonical_concepts": canonical_titles,
             "timestamp": time.time(),
         }

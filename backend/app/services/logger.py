@@ -190,10 +190,9 @@ class RichLogger:
 
         elif event_type == "passages_extracted":
             c_count = event_data.get("raw_concept_count", 0)
-            r_count = event_data.get("raw_relation_count", 0)
             title = event_data.get("doc_title", "")
             console.print(
-                f"{proj_badge}   ├─ 📦 [bold green]Passage Extraction Complete[/bold green]: [bold]{c_count} raw concepts[/bold], [bold]{r_count} relations[/bold] from '{title}'"
+                f"{proj_badge}   ├─ 📦 [bold green]Passage Extraction Complete[/bold green]: [bold]{c_count} raw concepts[/bold] from '{title}'"
             )
 
         elif event_type == "consolidation_start":
@@ -205,11 +204,10 @@ class RichLogger:
 
         elif event_type == "consolidation_complete":
             c_count = event_data.get("canonical_concepts_count", 0)
-            r_count = event_data.get("canonical_relations_count", 0)
             title = event_data.get("doc_title", "")
             canonical_concepts = event_data.get("canonical_concepts", [])
             console.print(
-                f"{proj_badge}   ├─ 🎯 [bold magenta]Consolidation Complete[/bold magenta]: synthesized [bold]{c_count} canonical concepts[/bold] & [bold]{r_count} qualitative relations[/bold]"
+                f"{proj_badge}   ├─ 🎯 [bold magenta]Consolidation Complete[/bold magenta]: synthesized [bold]{c_count} canonical concepts[/bold]"
             )
             if canonical_concepts:
                 concepts_str = ", ".join(

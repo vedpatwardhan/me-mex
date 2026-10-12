@@ -97,18 +97,16 @@ def test_consolidate_extracted_concepts():
     """Verify empty raw concepts handling in consolidate_extracted_concepts."""
     res = orchestrator.consolidate_extracted_concepts(
         raw_extracted_concepts=[],
-        extracted_relations=[],
         doc_title="Test Document",
         query="Test query",
         chat_history=[],
     )
     assert res["concepts"] == []
-    assert res["relations"] == []
 
 
 @pytest.mark.vllm
 def test_consolidate_extracted_concepts_with_payload():
-    """Verify concept consolidation deduplication, relation synthesis, and passage ID preservation with non-empty payload."""
+    """Verify concept consolidation deduplication and passage ID preservation with non-empty payload."""
     if not llm_gateway.is_server_available():
         print(
             "  ⏭️ test_consolidate_extracted_concepts_with_payload [SKIPPED - vLLM Server Offline]"
@@ -148,34 +146,14 @@ def test_consolidate_extracted_concepts_with_payload():
         },
     ]
 
-    raw_relations = [
-        {
-            "source": "Latent World Model",
-            "target": "Latent-Space Dynamics",
-            "description": "implements forward transition dynamics in latent space",
-        },
-        {
-            "source": "MCTS Action Planning",
-            "target": "Latent World Model",
-            "description": "plans trajectory rollouts through the learned model",
-        },
-        {
-            "source": "Process Reward Model",
-            "target": "MCTS Action Planning",
-            "description": "guides tree search exploration via step-level feedback",
-        },
-    ]
-
     res = orchestrator.consolidate_extracted_concepts(
         raw_extracted_concepts=raw_concepts,
-        extracted_relations=raw_relations,
         doc_title="World Models and Search Planning",
         query="Explain how latent world models combine with tree search planning",
         chat_history=[],
     )
 
     concepts = res.get("concepts", [])
-    relations = res.get("relations", [])
 
     # Verify canonical deduplication occurred and output lies in expected range
     assert (
@@ -196,10 +174,3 @@ def test_consolidate_extracted_concepts_with_payload():
         assert (
             p_id in all_assigned_passages
         ), f"Passage {p_id} lost during consolidation"
-
-    # Verify relations structure
-    assert len(relations) > 0, "Expected at least 1 consolidated relation"
-    for r in relations:
-        assert "source_idx" in r and 0 <= r["source_idx"] < len(concepts)
-        assert "target_idx" in r and 0 <= r["target_idx"] < len(concepts)
-        assert "description" in r and r["description"].strip()
