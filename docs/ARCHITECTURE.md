@@ -59,7 +59,12 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
    - **Pre-Step 2 (Relevance Evaluation)**: Personas evaluate domain relevance across their explored nodes, user prompt, and conversation history (`chat_history`).
    - **Final Conversation**: With enriched topological graph context assembled, the system triggers the final conversation step to generate and stream the response to the user.
 3. **Path 3: `INGESTION` (Two Pre-Steps $\rightarrow$ Final Conversation Response)**
-   - **Pre-Step 1 (Document Fetching & Intra-Document Graph Construction)**: Orchestrator calls `ingest_document_tool` to fetch/scrape text content from URLs/PDFs.
+   - **Pre-Step 1 (Document Fetching & Intra-Document Graph Construction)**: Orchestrator calls `ingest_document_tool` to fetch and extract content dynamically:
+     - **Universal Source Resolution**: Transparently ingests remote HTTP/HTTPS URLs (arXiv, blogs, HTML articles) and local filesystem references (`file:///...`, absolute paths `/Users/...`, `~/...`). Dispatches to format-specialized extractors:
+       - **PDFs (`.pdf`, `%PDF`)**: Binary stream reading, ArXiv metadata detection, PDF layout text extraction.
+       - **HTML (`.html`, `.htm`)**: Clean markdown extraction using Trafilatura with title metadata extraction.
+       - **Markdown (`.md`, `.markdown`)**: Direct UTF-8 ingestion preserving existing heading hierarchies.
+       - **Plain Text / Notes (`.txt`, `.log`, raw text)**: UTF-8 ingestion with automatic top-level header synthesis (`# {stem}`).
      - **Scale-Adaptive Document Chunking (1 to 30 Passages)**: Dynamically partitions the text into $N \in [1, 30]$ passages:
        - Tier 1 ($\le 1,500$ chars, X posts / quick notes): **1 chunk** (no artificial splitting).
        - Tier 2 ($1,500 < L \le 4,000$ chars, short memos): **2 chunks**.

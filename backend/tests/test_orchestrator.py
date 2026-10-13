@@ -339,3 +339,65 @@ def test_search_tools_is_misleading_filename():
         )
         is False
     )
+
+
+def test_fetch_local_text_file(tmp_path):
+    """Verify SearchTools fetches and extracts local .txt file with synthesized heading."""
+    from app.tools.search_tools import search_tools
+
+    note_file = tmp_path / "x_post_note.txt"
+    note_content = "This is a concise thought on spatial reasoning in robotics and dynamic affordances."
+    note_file.write_text(note_content, encoding="utf-8")
+
+    res = search_tools.fetch_document(str(note_file))
+    assert res["status"] == "SUCCESS"
+    assert res["doc_type"] == "document"
+    assert res["url"] == f"file://{note_file.resolve()}"
+    assert res["content"].startswith("# x_post_note\n\n")
+    assert "spatial reasoning in robotics" in res["content"]
+
+
+def test_fetch_local_markdown_file(tmp_path):
+    """Verify SearchTools fetches local .md file preserving existing headers."""
+    from app.tools.search_tools import search_tools
+
+    md_file = tmp_path / "architecture_notes.md"
+    md_content = (
+        "# End-to-End Multimodal Policies\n\nDiscussion on ACT and diffusion policies."
+    )
+    md_file.write_text(md_content, encoding="utf-8")
+
+    res = search_tools.fetch_document(f"file://{md_file.resolve()}")
+    assert res["status"] == "SUCCESS"
+    assert res["doc_type"] == "document"
+    assert res["content"].startswith("# End-to-End Multimodal Policies")
+    assert "diffusion policies" in res["content"]
+
+
+def test_fetch_local_html_file(tmp_path):
+    """Verify SearchTools fetches and extracts clean markdown from local .html file."""
+    from app.tools.search_tools import search_tools
+
+    html_file = tmp_path / "saved_article.html"
+    html_content = (
+        "<!DOCTYPE html><html><head><title>Robotics Foundation Models</title></head>"
+        "<body><article><h1>Robotics Foundation Models</h1><p>Foundation models represent a paradigm shift in robot learning.</p></article></body></html>"
+    )
+    html_file.write_text(html_content, encoding="utf-8")
+
+    res = search_tools.fetch_document(str(html_file))
+    assert res["status"] == "SUCCESS"
+    assert res["doc_type"] == "html"
+    assert "Robotics Foundation Models" in res["content"]
+    assert "paradigm shift" in res["content"]
+
+
+def test_fetch_local_file_not_found():
+    """Verify SearchTools returns structured error for non-existent local file without throwing."""
+    from app.tools.search_tools import search_tools
+
+    missing_url = "file:///non/existent/path/paper.pdf"
+    res = search_tools.fetch_document(missing_url)
+    assert res["status"] == "ERROR"
+    assert "Local file not found" in res["error"]
+    assert res["content"] == ""

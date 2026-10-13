@@ -12,14 +12,14 @@ Analyze the conversation history and current user message, then classify the pri
 Categories:
 - "CONVERSATION": Simple greetings, basic chit-chat, meta-questions about the AI/system capabilities, formatting, math, or basic Q&A that does not require examining domain concepts or knowledge graphs.
 - "RETRIEVAL": Conceptual research, technical queries, domain concept comparisons, cross-paper synthesis, technical explanations, domain-specific follow-ups, or queries referencing knowledge graph concepts.
-- "INGESTION": Input containing URLs (e.g. arXiv, YouTube, blogs), raw document text, paper abstracts, research notes, or explicit instructions to ingest/store content into the knowledge base.
+- "INGESTION": Input containing URLs (e.g. arXiv, YouTube, blogs), local file paths or file:// URIs (e.g. file:///path/to/doc.pdf, /path/to/notes.txt, ~/data/article.html), raw document text, paper abstracts, research notes, or explicit instructions to ingest/store content into the knowledge base.
 
 FIELD EXTRACTION RULES (STRICT):
 - If intent is "CONVERSATION" or "RETRIEVAL":
   * Set "doc_type", "source_url", and "raw_text" strictly to null.
 - If intent is "INGESTION":
-  * "doc_type": The target document class ("paper" for research papers/arXiv/PDFs, "blog" for articles/Substack/Medium, "post" for social notes/voice notes/short excerpts). Default to "paper" if ambiguous.
-  * "source_url": Extracted URL string if present in the prompt/context, else null.
+  * "doc_type": The target document class ("paper" for research papers/arXiv/PDFs, "blog" for articles/Substack/Medium/HTML files, "post" for social notes/voice notes/short excerpts/text files). Default to "paper" if ambiguous.
+  * "source_url": Extracted URL string, file:// URI, or local filesystem path if present in the prompt/context, else null.
   * "raw_text": The user's preface, notes, personal commentary, or rationale explaining why they are adding this document or what is relevant about it (concise notes, not entire external article pastes). If the user provided no commentary, set to null.
   * NOTE: Both "source_url" and "raw_text" can and should be present together when the user provides a link accompanied by their own notes or context!
 

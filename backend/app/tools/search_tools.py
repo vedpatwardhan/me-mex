@@ -245,9 +245,111 @@ class SearchTools:
             }
 
     @staticmethod
+    def _fetch_local_file(target_url: str) -> Dict[str, Any]:
+        """Fetch and extract content from a local file path or file:// URI across PDF, HTML, MD, and text formats."""
+        try:
+            from pathlib import Path
+            import urllib.parse
+
+            if target_url.startswith("file://"):
+                clean_path_str = urllib.parse.unquote(target_url[7:])
+            else:
+                clean_path_str = target_url
+
+            file_path = Path(clean_path_str).expanduser().resolve()
+            if not file_path.exists() or not file_path.is_file():
+                return {
+                    "url": target_url,
+                    "content": "",
+                    "debug_file_path": "",
+                    "status": "ERROR",
+                    "error": f"Local file not found at '{file_path}'",
+                }
+
+            suffix = file_path.suffix.lower()
+            url_repr = f"file://{file_path}"
+
+            # 1. PDF Documents
+            if suffix == ".pdf":
+                content_bytes = file_path.read_bytes()
+                return SearchTools._extract_pdf_content(content_bytes, url_repr)
+
+            # Check magic bytes for PDF if extension is ambiguous
+            try:
+                with file_path.open("rb") as f:
+                    magic = f.read(4)
+                if magic == b"%PDF":
+                    content_bytes = file_path.read_bytes()
+                    return SearchTools._extract_pdf_content(content_bytes, url_repr)
+            except Exception as magic_err:
+                logger.debug(
+                    f"[SearchTools] Magic byte check failed for {file_path}: {magic_err}"
+                )
+
+            # 2. HTML Files
+            if suffix in (".html", ".htm"):
+                html_text = file_path.read_text(encoding="utf-8", errors="replace")
+                return SearchTools._extract_html_content(html_text, url_repr)
+
+            # 3. Markdown Files
+            if suffix in (".md", ".markdown"):
+                md_text = file_path.read_text(
+                    encoding="utf-8", errors="replace"
+                ).strip()
+                # Ensure it has a leading header
+                if not any(md_text.startswith(h) for h in ("# ", "## ", "### ")):
+                    md_text = f"# {file_path.stem}\n\n{md_text}"
+                debug_file_path = SearchTools._save_debug_markdown(url_repr, md_text)
+                return {
+                    "url": url_repr,
+                    "content": md_text,
+                    "debug_file_path": debug_file_path,
+                    "status": "SUCCESS",
+                    "doc_type": "document",
+                    "char_count": len(md_text),
+                }
+
+            # 4. Plain Text, Notes, Logs, or other raw documents
+            raw_text = file_path.read_text(encoding="utf-8", errors="replace").strip()
+            if not any(raw_text.startswith(h) for h in ("# ", "## ", "### ")):
+                raw_text = f"# {file_path.stem}\n\n{raw_text}"
+            debug_file_path = SearchTools._save_debug_markdown(url_repr, raw_text)
+            return {
+                "url": url_repr,
+                "content": raw_text,
+                "debug_file_path": debug_file_path,
+                "status": "SUCCESS",
+                "doc_type": "document",
+                "char_count": len(raw_text),
+            }
+
+        except Exception as e:
+            logger.warning(
+                f"[SearchTools] Local file extraction failed for {target_url}: {e}"
+            )
+            return {
+                "url": target_url,
+                "content": "",
+                "debug_file_path": "",
+                "status": "ERROR",
+                "error": f"Failed to read local file: {str(e)}",
+            }
+
+    @staticmethod
     def fetch_document(url: str) -> Dict[str, Any]:
-        """Fetch document (PDF, web page, blog, or article) from URL and extract full Markdown content dynamically."""
+        """Fetch document (PDF, web page, blog, article, or local file) and extract full Markdown content dynamically."""
         target_url = url.strip()
+
+        # Check if URL is a local filesystem path or file:// URI
+        is_local = (
+            target_url.startswith("file://")
+            or target_url.startswith("/")
+            or target_url.startswith("~/")
+            or target_url.startswith("./")
+            or target_url.startswith("../")
+        )
+        if is_local:
+            return SearchTools._fetch_local_file(target_url)
 
         headers = {
             "User-Agent": (

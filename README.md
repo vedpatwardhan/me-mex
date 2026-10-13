@@ -24,6 +24,9 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                        1. Document Ingestion & Staging                                 │
 └────────────────────────────────────────────────────────────────────────────────────────┘
+ - Universal Source Ingestion:
+     - Remote Web URLs: Supports arXiv papers, web blogs, Substack, Medium, and online HTML articles with automatic metadata extraction.
+     - Local Filesystem & `file://` URIs: Directly ingests local files (`file:///path/to/doc.pdf`, `/path/to/notes.txt`, `~/docs/guide.md`, `saved_page.html`). Automatically dispatches to format-specialized extractors (PDF parsing, Trafilatura HTML extraction, markdown reader, or auto-titled plain text/notes).
  - Staged Sandbox: Uploaded documents/links do NOT immediately populate the active graph.
  - Scale-Adaptive Document Chunking (1 to 30 Passages):
      - Dynamically partitions documents based on length: <= 1.5k chars (1 chunk for X posts/short notes), 1.5k–4k (2 chunks), 4k–8k (3 chunks), 8k–14k (4 chunks), 14k–25k (5 chunks), and scales smoothly up to 30 chunks (>= 300k chars), bounded by [1, 30].
