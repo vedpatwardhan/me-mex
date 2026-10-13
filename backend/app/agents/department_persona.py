@@ -309,7 +309,7 @@ Formulate 3-4 focused sub-concepts to cluster around '{target_node.id}'.
                         {"role": "user", "content": user_split},
                     ],
                     temperature=0.2,
-                    max_tokens=512,
+                    max_tokens=2048,
                     response_format={"type": "json_object"},
                     enable_reasoning=False,
                 )
@@ -351,7 +351,7 @@ Assign EVERY direct neighbor node to exactly ONE sub-concept alias.
                         {"role": "user", "content": user_rewire},
                     ],
                     temperature=0.2,
-                    max_tokens=512,
+                    max_tokens=2048,
                     response_format={"type": "json_object"},
                     enable_reasoning=False,
                 )

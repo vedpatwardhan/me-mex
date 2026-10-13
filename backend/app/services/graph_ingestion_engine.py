@@ -43,6 +43,7 @@ class GraphIngestionEngine:
         """
         action = item.get("action") or item.get("command_type")
         dept_name = item.get("department_name", "Ingestion Engine")
+        persona_id = item.get("persona_id")
 
         # 1. Action: CREATE_EDGE / CONNECT_DIRECT (Connect concepts with qualitative relation edge)
         if action in ["CREATE_EDGE", "CONNECT_DIRECT", "CONSTRUCT_EDGE"]:
@@ -59,11 +60,17 @@ class GraphIngestionEngine:
                     project_ids=proj_list,
                 )
                 self.db.upsert_edge(edge_obj)
+                tgt_node = self.db.get_node(tgt_id)
+                src_node = self.db.get_node(src_id)
+                tgt_title = tgt_node.title if tgt_node else tgt_id
+                src_title = src_node.title if src_node else src_id
                 return {
                     "event": "node_touched",
+                    "persona_id": persona_id,
                     "persona_name": dept_name,
                     "node_id": tgt_id,
-                    "message": f"Connected concept '{src_id}' -> '{tgt_id}' ({edge_data.get('description', '')}).",
+                    "node_title": tgt_title,
+                    "message": f"Connected concept '{src_title}' -> '{tgt_title}' ({edge_data.get('description', '')}).",
                     "timestamp": time.time(),
                 }
 
@@ -103,8 +110,10 @@ class GraphIngestionEngine:
 
                 return {
                     "event": "node_touched",
+                    "persona_id": persona_id,
                     "persona_name": dept_name,
                     "node_id": c_id,
+                    "node_title": c_title,
                     "message": f"Created intermediate domain concept '{c_title}'.",
                     "timestamp": time.time(),
                 }
@@ -131,8 +140,10 @@ class GraphIngestionEngine:
                     self.db.upsert_node(target_node)
                     return {
                         "event": "node_touched",
+                        "persona_id": persona_id,
                         "persona_name": dept_name,
                         "node_id": target_id,
+                        "node_title": target_node.title,
                         "message": f"Edited mutable domain concept '{target_node.title}'.",
                         "timestamp": time.time(),
                     }
@@ -200,8 +211,10 @@ class GraphIngestionEngine:
 
                     return {
                         "event": "node_touched",
+                        "persona_id": persona_id,
                         "persona_name": dept_name,
                         "node_id": concept_id,
+                        "node_title": target_node.title,
                         "message": (
                             f"Subdivided concept hub '{target_node.title}' into "
                             f"{len(sub_concepts)} intermediate sub-concepts."

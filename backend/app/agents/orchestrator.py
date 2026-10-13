@@ -790,14 +790,24 @@ class ExecutiveOrchestrator:
                 return p_id, extraction, evt_prog
 
         try:
-            extractions = await asyncio.gather(
-                *[
-                    _extract_chunk(p_id, chunk_str, idx)
-                    for idx, (p_id, chunk_str) in enumerate(
-                        zip(passage_ids, passage_chunks)
+            tasks = [
+                asyncio.create_task(_extract_chunk(p_id, chunk_str, idx))
+                for idx, (p_id, chunk_str) in enumerate(
+                    zip(passage_ids, passage_chunks)
+                )
+            ]
+            for fut in asyncio.as_completed(tasks):
+                p_id, extraction, evt_prog = await fut
+                yield evt_prog  # Stream progress event immediately in real-time!
+                for c in extraction.get("concepts", []):
+                    raw_extracted_concepts.append(
+                        {
+                            "idx": c["idx"],
+                            "title": c["title"],
+                            "description": c.get("description", ""),
+                            "passage_ids": [p_id],
+                        }
                     )
-                ]
-            )
         except Exception as e:
             err_msg = f"Document ingestion aborted: Concept extraction from passages failed for '{title}'. Details: {str(e)}"
             print(f"[ExecutiveOrchestrator] {err_msg}")
@@ -824,18 +834,6 @@ class ExecutiveOrchestrator:
             ):
                 yield conv_event
             return
-
-        for p_id, extraction, evt_prog in extractions:
-            yield evt_prog
-            for c in extraction.get("concepts", []):
-                raw_extracted_concepts.append(
-                    {
-                        "idx": c["idx"],
-                        "title": c["title"],
-                        "description": c.get("description", ""),
-                        "passage_ids": [p_id],
-                    }
-                )
 
         evt_extracted = {
             "event": "passages_extracted",
@@ -1062,6 +1060,7 @@ class ExecutiveOrchestrator:
             )
             for cmd in ingest_res.get("commands", []):
                 cmd["department_name"] = dept.department_name
+                cmd["persona_id"] = dept.department_id
                 evt = self.ingestion_engine.execute_single_command(
                     cmd, title, proj_list
                 )
@@ -1076,6 +1075,7 @@ class ExecutiveOrchestrator:
             )
             for cmd in reorg_cmds:
                 cmd["department_name"] = dept.department_name
+                cmd["persona_id"] = dept.department_id
                 evt = self.ingestion_engine.execute_single_command(
                     cmd, title, proj_list
                 )
