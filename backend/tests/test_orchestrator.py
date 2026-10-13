@@ -401,3 +401,47 @@ def test_fetch_local_file_not_found():
     assert res["status"] == "ERROR"
     assert "Local file not found" in res["error"]
     assert res["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_execute_ingestion_flow_fails_fast_on_fetch_error_without_substituting_notes(
+    monkeypatch,
+):
+    """Verify that if document fetch fails, raw_payload notes are NEVER substituted for the file and flow aborts to conversation."""
+    from app.agents.orchestrator import orchestrator
+
+    async def mock_stream_chat_completion(messages, **kwargs):
+        yield "Document could not be retrieved from the provided path."
+
+    monkeypatch.setattr(
+        orchestrator.llm, "stream_chat_completion", mock_stream_chat_completion
+    )
+
+    target_info = {
+        "intent": "INGESTION",
+        "doc_type": "paper",
+        "source_url": "file:///path/does/not/exist/missing_paper.pdf",
+        "raw_text": "Here are my commentary notes about spatial policies.",
+    }
+
+    events = []
+    async for evt in orchestrator.execute_ingestion_flow(
+        query="ingest this file",
+        chat_history=[],
+        target_info=target_info,
+        project_id="test_proj_fail_fast",
+    ):
+        events.append(evt)
+
+    # First event should be document_fetched with status ERROR
+    fetch_evts = [e for e in events if e.get("event") == "document_fetched"]
+    assert len(fetch_evts) == 1
+    assert fetch_evts[0]["status"] == "ERROR"
+    assert fetch_evts[0]["title"] == "Unretrievable Document"
+
+    # Should have aborted to conversation rather than creating passages or calling ingest_document_tool
+    tool_evts = [e for e in events if e.get("event") == "orchestrator_tool_call"]
+    assert len(tool_evts) == 0
+
+    conversation_evts = [e for e in events if e.get("event") == "conversation_start"]
+    assert len(conversation_evts) == 1

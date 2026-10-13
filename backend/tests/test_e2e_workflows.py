@@ -69,16 +69,21 @@ async def test_e2e_ingestion_workflow_real_paper():
     proj_id = "e2e_ingest_proj"
 
     # Realistic user message containing a paper URL and user preface notes on why it is relevant
-    # user_ingest_message = (
-    #     "Please take a look at this paper and ingest it into the graph: "
-    #     "https://arxiv.org/pdf/2605.11550. "
-    #     "It covers world action interactive models."
-    # )
     user_ingest_message = (
         "Please take a look at this paper and ingest it into the graph: "
-        "https://arxiv.org/pdf/2502.18864. "
-        "It covers multi-agent co-scientists for automated discovery."
+        "https://arxiv.org/pdf/2605.11550. "
+        "It covers world action interactive models."
     )
+    # user_ingest_message = (
+    #     "Please take a look at this paper and ingest it into the graph: "
+    #     "https://arxiv.org/pdf/2502.18864. "
+    #     "It covers multi-agent co-scientists for automated discovery."
+    # )
+    # user_ingest_message = (
+    #     "Please take a look at this blog and ingest it into the graph: "
+    #     "https://transformer-circuits.pub/2025/attribution-graphs/methods.html. "
+    #     "It covers circuit tracing for LLMs."
+    # )
 
     events = []
     async for event in orchestrator.process_user_message(

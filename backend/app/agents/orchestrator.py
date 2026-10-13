@@ -638,52 +638,49 @@ class ExecutiveOrchestrator:
                 f"[ExecutiveOrchestrator WARNING] Failed to render ingestion phase header: {log_err}"
             )
 
-        # Step 1: Document Fetching & Content Assembly
+        # Step 1: Document Acquisition & Content Assembly
         fetched_content = ""
         debug_file_path = ""
+        fetch_error = None
         title = None
+        doc_type = target_info.get("doc_type") or "document"
+        page_count = None
 
         if source_url:
             doc_res = self.tools.fetch_document(source_url)
-            fetched_content = doc_res.get("content", "")
-            debug_file_path = doc_res.get("debug_file_path", "")
             fetch_status = doc_res.get("status", "SUCCESS")
-            error_msg = doc_res.get(
-                "error", "Document could not be retrieved from URL."
-            )
+            doc_type = doc_res.get("doc_type", doc_type)
+            page_count = doc_res.get("page_count")
 
-            title = self._extract_markdown_title(fetched_content)
+            if fetch_status == "SUCCESS" and doc_res.get("content"):
+                fetched_content = doc_res.get("content", "")
+                debug_file_path = doc_res.get("debug_file_path", "")
+                # Title is 100% owned by the document itself
+                title = self._extract_markdown_title(fetched_content)
+            else:
+                fetch_error = doc_res.get(
+                    "error", "Document could not be retrieved from source."
+                )
 
             evt_fetched = {
                 "event": "document_fetched",
                 "source_url": source_url,
-                "title": title or "Fetched Document",
+                "title": title
+                or (
+                    "Fetched Document" if not fetch_error else "Unretrievable Document"
+                ),
                 "char_count": len(fetched_content),
                 "debug_file_path": debug_file_path,
-                "status": fetch_status,
-                "doc_type": doc_res.get("doc_type", "document"),
-                "page_count": doc_res.get("page_count"),
+                "status": "SUCCESS" if not fetch_error else "ERROR",
+                "doc_type": doc_type,
+                "page_count": page_count,
                 "timestamp": time.time(),
             }
             self.event_queue.push(project_id, evt_fetched)
             yield evt_fetched
 
-            # If download failed and there is no user raw text payload to ingest, abort ingestion immediately and transition to conversation
-            if (fetch_status == "ERROR" or not fetched_content) and not raw_payload:
-                print(
-                    f"[ExecutiveOrchestrator] Document download failed for {source_url}. Aborting ingestion flow and initiating conversation response."
-                )
-                fail_query = (
-                    f"I attempted to ingest the document at '{source_url}', but downloading and extracting content failed ({error_msg}). "
-                    f"Inform the user clearly that the document could not be retrieved from this URL and suggest checking the URL or providing the text directly."
-                )
-                async for event in self.execute_conversation_flow(
-                    fail_query, chat_history, project_id=project_id
-                ):
-                    yield event
-                return
-
-        # Combine both fetched content and user commentary if both exist
+        # Assemble full content:
+        # Note: raw_payload is contextual commentary and NEVER a substitute for a failed document fetch!
         if fetched_content and raw_payload:
             full_content = (
                 f"### User Context & Notes\n{raw_payload.strip()}\n\n"
@@ -691,34 +688,48 @@ class ExecutiveOrchestrator:
             )
         elif fetched_content:
             full_content = fetched_content
+        elif raw_payload and not source_url:
+            # Direct paste of document text without a URL
+            full_content = raw_payload.strip()
+            title = self._extract_markdown_title(full_content)
         else:
-            full_content = raw_payload or ""
+            full_content = ""
 
-        if not full_content.strip():
-            print(
-                "[ExecutiveOrchestrator] Ingestion aborted: No content available to ingest."
-            )
+        # Step 2: SINGLE UNIFIED ERROR HANDLING & CONVERSATION TRANSITION
+        # If no valid document content could be established, abort to conversation in exactly one place.
+        if not full_content:
+            if fetch_error:
+                print(
+                    "[ExecutiveOrchestrator] Document ingestion failed for "
+                    f"'{source_url}': {fetch_error}. Aborting to conversation."
+                )
+                fail_query = (
+                    f"I attempted to ingest the document at '{source_url}', "
+                    f"but downloading and extracting content failed ({fetch_error}). "
+                    f"Inform the user clearly that the document could not be retrieved "
+                    "from this URL or file path and suggest checking the source or "
+                    "providing the text directly."
+                )
+            else:
+                print(
+                    "[ExecutiveOrchestrator] Ingestion aborted: No document URL or "
+                    "content was provided."
+                )
+                fail_query = (
+                    "No document or content was provided for ingestion. "
+                    "Inform the user to provide a valid document URL, local file path, "
+                    "or document text."
+                )
+
             async for event in self.execute_conversation_flow(
-                "No content or document was provided for ingestion. Inform the user to provide a valid document URL or text.",
-                chat_history,
-                project_id=project_id,
+                fail_query, chat_history, project_id=project_id
             ):
                 yield event
             return
 
+        # Fallback only if the document itself lacked a markdown header
         if not title:
-            title = self._extract_markdown_title(full_content)
-
-        if not title:
-            first_line = (
-                full_content.strip().splitlines()[0]
-                if (full_content and full_content.strip())
-                else ""
-            )
-            if first_line and len(first_line) < 80:
-                title = first_line.lstrip("#").strip()
-            else:
-                title = f"Ingested Document {uuid.uuid4().hex[:6]}"
+            title = f"Ingested Document {uuid.uuid4().hex[:6]}"
 
         tool_evt = {
             "event": "orchestrator_tool_call",
