@@ -44,6 +44,7 @@ class ExecutiveOrchestrator:
         self.llm = llm_gateway
         self.tools = search_tools
         self.event_queue = event_queue
+        self.ingestion_engine = graph_ingestion_engine
         self.max_k_hubs = max_k_hubs
 
     @staticmethod
@@ -1035,7 +1036,7 @@ class ExecutiveOrchestrator:
                 query=query,
                 chat_history=chat_history,
                 project_id=project_id,
-                max_depth=3,
+                max_depth=5,
                 partition_node_ids=partition_ids if partition_ids else None,
             )
 
