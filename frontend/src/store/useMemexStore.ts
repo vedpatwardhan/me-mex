@@ -229,11 +229,14 @@ export const useMemexStore = create<MemexState>((set, get) => ({
             } else if (evtType === 'tool_complete') {
               logMsg = eventData.message || 'Tool call completed.';
             } else if (evtType === 'passages_chunked') {
-              logMsg = `Document chunked into ${eventData.total_chunks || 'multiple'} passages.`;
+              const count = eventData.chunk_count || eventData.total_chunks || 'multiple';
+              logMsg = `Document chunked into ${count} passages.`;
             } else if (evtType === 'passage_extraction_progress') {
-              logMsg = `Extracting concepts: passage ${eventData.current_chunk}/${eventData.total_chunks}...`;
+              const current = eventData.chunk_index ?? eventData.current_chunk ?? '?';
+              const total = eventData.total_chunks ?? '?';
+              logMsg = `Extracting concepts: passage ${current}/${total}...`;
             } else if (evtType === 'passages_extracted') {
-              logMsg = `Passage extractions complete: ${eventData.total_raw_concepts} raw concepts found.`;
+              logMsg = `Passage extractions complete: ${eventData.raw_concept_count || eventData.total_raw_concepts || ''} raw concepts found.`;
             } else if (evtType === 'consolidation_start') {
               logMsg = `Consolidating concepts into canonical knowledge nodes...`;
             } else if (evtType === 'consolidation_complete') {
@@ -246,8 +249,16 @@ export const useMemexStore = create<MemexState>((set, get) => ({
               logMsg = `Created ${eventData.count} intra-document concept nodes.`;
             } else if (evtType === 'hubs_calculated') {
               logMsg = `Identified ${eventData.count || 0} active community hubs for cross-linking.`;
+            } else if (evtType === 'partitions_calculated') {
+              const deptCount = Object.keys(eventData.partitions || {}).length;
+              logMsg = `Partitioned knowledge space into ${deptCount} specialist domains.`;
             } else if (evtType === 'persona_traversal_start') {
               logMsg = eventData.message || `Specialist persona exploring sub-graph...`;
+            } else if (evtType === 'persona_traversal_active') {
+              const count = (eventData.traversed_node_ids || []).length;
+              logMsg = `Persona [${eventData.department_name}]: explored ${count} adjacent nodes.`;
+            } else if (evtType === 'node_touched') {
+              logMsg = eventData.message || `Touched node: "${eventData.node_title || eventData.node_id}"`;
             } else if (evtType === 'ingestion_completed') {
               logMsg = eventData.message || `Document ingestion completed.`;
             }

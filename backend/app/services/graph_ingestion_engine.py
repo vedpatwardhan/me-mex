@@ -194,12 +194,27 @@ class GraphIngestionEngine:
                         )
                         self.db.upsert_edge(hub_edge)
 
-                    # Re-wire neighbor edges to target the new sub-concepts
+                    # Re-wire neighbor edges to target the new sub-concepts (removing old link to umbrella hub)
+                    project_scope = proj_list[0] if proj_list else None
+                    current_edges = self.db.get_edges(project_scope)
+
                     for rewired in rewired_edges:
                         neighbor_id = rewired.get("neighbor_id")
                         sub_alias = rewired.get("connect_to_sub_alias")
                         target_sub_id = sub_alias_map.get(sub_alias)
                         if neighbor_id and target_sub_id:
+                            # 1. Remove old edge between neighbor and original umbrella hub
+                            for old_edge in current_edges:
+                                if (
+                                    old_edge.source_id == neighbor_id
+                                    and old_edge.target_id == concept_id
+                                ) or (
+                                    old_edge.source_id == concept_id
+                                    and old_edge.target_id == neighbor_id
+                                ):
+                                    self.db.delete_edge(old_edge.id)
+
+                            # 2. Add cleanly rewired edge pointing to the specific sub-concept
                             rewired_edge = GraphEdge(
                                 _id=f"edge_{uuid.uuid4().hex[:8]}",
                                 source_id=neighbor_id,

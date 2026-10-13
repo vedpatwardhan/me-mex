@@ -170,3 +170,90 @@ def test_mutable_concept_node_splitting():
     titles = [n.title for n in sub_nodes]
     assert "Sub-Concept Alpha" in titles
     assert "Sub-Concept Beta" in titles
+
+
+def test_split_concept_rewiring_deletes_old_hub_edge():
+    """Verify SPLIT_CONCEPT deletes the old edge between neighbor and original hub when re-wiring to sub-concept."""
+    project_id = "test_rewire_proj"
+
+    # Hub node
+    hub_node = GraphNode(
+        _id="hub_original",
+        node_type="CONCEPT",
+        title="Everything Hub",
+        description="Over-clustered mutable hub.",
+        passage_ids=[],
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
+    db_engine.upsert_node(hub_node)
+
+    # Neighbor concept node
+    neighbor_node = GraphNode(
+        _id="neighbor_concept",
+        node_type="CONCEPT",
+        title="World Models",
+        description="Neighbor concept.",
+        passage_ids=[],
+        project_ids=[project_id],
+        metadata={"immutable": True},
+    )
+    db_engine.upsert_node(neighbor_node)
+
+    # Pre-existing edge connecting neighbor to hub
+    old_edge = GraphEdge(
+        _id="edge_old_neighbor_hub",
+        source_id="neighbor_concept",
+        target_id="hub_original",
+        description="Generic Hub Link",
+        project_ids=[project_id],
+    )
+    db_engine.upsert_edge(old_edge)
+    assert len(db_engine.get_edges(project_id)) == 1
+
+    # Split hub and rewire neighbor to sub_1
+    split_cmd_item = {
+        "action": "SPLIT_CONCEPT",
+        "concept_id": "hub_original",
+        "sub_concepts": [
+            {
+                "sub_id_alias": "sub_1",
+                "title": "World Models Focus",
+                "description": "Specific sub-concept",
+                "passage_ids": [],
+            }
+        ],
+        "rewired_edges": [
+            {
+                "neighbor_id": "neighbor_concept",
+                "connect_to_sub_alias": "sub_1",
+                "relation_type": "SUBSET_OF",
+            }
+        ],
+    }
+
+    graph_ingestion_engine.execute_single_command(
+        item=split_cmd_item, doc_title="Test Doc", proj_list=[project_id]
+    )
+
+    all_edges = db_engine.get_edges(project_id)
+    # Expected edges:
+    # 1. sub_1 -> hub_original (SUBSET_OF umbrella edge)
+    # 2. neighbor_concept -> sub_1 (rewired edge)
+    # The old edge neighbor_concept -> hub_original MUST have been deleted!
+    assert len(all_edges) == 2
+    direct_hub_edges = [
+        e
+        for e in all_edges
+        if (e.source_id == "neighbor_concept" and e.target_id == "hub_original")
+        or (e.source_id == "hub_original" and e.target_id == "neighbor_concept")
+    ]
+    assert len(direct_hub_edges) == 0, "Old edge to original hub was not deleted!"
+
+    sub_rewired_edges = [
+        e
+        for e in all_edges
+        if e.source_id == "neighbor_concept" and e.target_id != "hub_original"
+    ]
+    assert len(sub_rewired_edges) == 1
+    assert sub_rewired_edges[0].description == "SUBSET_OF"

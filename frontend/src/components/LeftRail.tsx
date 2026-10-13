@@ -198,11 +198,32 @@ export const LeftRail: React.FC = () => {
               {/* Streaming Activity Events (shown while generating or completed) */}
               {msg.streaming_events && msg.streaming_events.length > 0 && (
                 <div className="bg-slate-900/80 border border-white/5 rounded-xl p-2.5 space-y-1.5 font-mono text-[10.5px]">
-                  <div className="flex items-center gap-1.5 text-cyan-400 font-semibold mb-1">
-                    <Activity className="w-3.5 h-3.5 animate-spin" />
-                    <span>Pipeline Progress:</span>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-1.5 text-cyan-400 font-semibold">
+                      {thinkingState.isThinking && msg === messages[messages.length - 1] ? (
+                        <>
+                          <Activity className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                          <span>Pipeline Progress:</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400">Pipeline Complete</span>
+                        </>
+                      )}
+                    </div>
+                    <span className="text-[9.5px] text-slate-500 font-sans">
+                      {msg.streaming_events.length} events
+                    </span>
                   </div>
-                  <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                  <div
+                    ref={(el) => {
+                      if (el && thinkingState.isThinking) {
+                        el.scrollTop = el.scrollHeight;
+                      }
+                    }}
+                    className="space-y-1 max-h-48 overflow-y-auto pr-1 border-t border-white/5 pt-1.5 scrollbar-thin scrollbar-thumb-slate-700"
+                  >
                     {msg.streaming_events.map((evtText, idx) => (
                       <div key={idx} className="flex items-start gap-1.5 text-slate-300">
                         <span className="text-cyan-500/70 select-none">▸</span>
