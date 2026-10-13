@@ -60,13 +60,18 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
    - **Final Conversation**: With enriched topological graph context assembled, the system triggers the final conversation step to generate and stream the response to the user.
 3. **Path 3: `INGESTION` (Two Pre-Steps $\rightarrow$ Final Conversation Response)**
    - **Pre-Step 1 (Document Fetching & Intra-Document Graph Construction)**: Orchestrator calls `ingest_document_tool` to fetch/scrape text content from URLs/PDFs.
-     - **Adaptive Document Chunking (5 to 30 Passages)**: Dynamically partitions the text into $N \in [5, 30]$ passages:
-       $$N_{\text{target}} = \min\left(30, \max\left(5, 5 + \left\lfloor \frac{\text{len}(\text{text}) - 25000}{11000} \right\rfloor\right)\right)$$
-       - Short documents ($\le 25\text{k}$ characters, ~10 pages): 5 passages.
-       - Medium papers (60k–75k characters, ~25 pages): 7–12 passages.
-       - Massive documents ($\ge 300\text{k}$ characters, ~150 pages): 30 passages (strictly capped).
+     - **Scale-Adaptive Document Chunking (1 to 30 Passages)**: Dynamically partitions the text into $N \in [1, 30]$ passages:
+       - Tier 1 ($\le 1,500$ chars, X posts / quick notes): **1 chunk** (no artificial splitting).
+       - Tier 2 ($1,500 < L \le 4,000$ chars, short memos): **2 chunks**.
+       - Tier 3 ($4,000 < L \le 8,000$ chars, medium articles): **3 chunks**.
+       - Tier 4 ($8,000 < L \le 14,000$ chars, multi-section overviews): **4 chunks**.
+       - Tier 5 ($14,000 < L \le 25,000$ chars, short papers / reports): **5 chunks**.
+       - Tier 6 ($L > 25,000$ chars up to $\ge 300\text{k}$ chars): scales from 5 to 30 chunks:
+         $$N_{\text{target}} = \min\left(30, \max\left(5, 5 + \left\lfloor \frac{\text{len}(\text{text}) - 25000}{11000} \right\rfloor\right)\right)$$
      - **LLM Context Budget & Ceiling Guarantee**: Individual chunks are bounded at $\le 45,000$ characters (~13,000 tokens), preventing Ministral 3-8B's 16,384-token context window from overflowing while allowing 1,536 tokens for concept extraction.
-     - **Passage Storage & Pure Concept Extraction**: Text chunks are stored out-of-graph in `passages`. Ministral extracts atomic `CONCEPT` nodes per passage, and the Orchestrator executes a single-pass consolidation (`consolidate_extracted_concepts`) into canonical intra-document concepts.
+     - **Density-Aware Concept Extraction & Scale-Aware Consolidation**:
+       - Passages extract **1 to 3 atomic concepts** (1 for focused notes, 2–3 for dense passages; max 3).
+       - Canonical consolidation scales naturally: preserves 1–5 canonical concepts for small inputs ($\le 6$ raw concepts) without forcing artificial expansion, and consolidates down to 6–10 canonical concepts for large inputs ($> 10$ raw concepts).
    - **Pre-Step 2 (Sub-Graph Traversal, Relevance Evaluation, Linking & Reorganization)**: Performs partitioned sub-graph traversal and relevance evaluation across concept hubs. Personas link newly ingested intra-document concepts to existing domain hubs, and independently reorganize/split over-clustered mutable concept nodes (`SPLIT_CONCEPT`) using underlying passage context.
    - **Final Conversation**: Once graph integration and reorganization complete, the system triggers the final conversation step to provide an executive summary and confirmation response to the user.
 

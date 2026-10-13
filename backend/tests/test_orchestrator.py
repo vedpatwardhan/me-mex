@@ -157,8 +157,8 @@ def test_consolidate_extracted_concepts_with_payload():
 
     # Verify canonical deduplication occurred and output lies in expected range
     assert (
-        2 <= len(concepts) <= 5
-    ), f"Expected 2-5 consolidated concepts, got {len(concepts)}"
+        1 <= len(concepts) <= 5
+    ), f"Expected 1-5 consolidated concepts, got {len(concepts)}"
     assert res.get("doc_description") and isinstance(res["doc_description"], str)
 
     # Verify concept properties and passage_id preservation
@@ -185,17 +185,67 @@ def test_chunk_text_empty_and_short():
     assert chunks[0] == short_snippet
 
 
-def test_chunk_text_min_chunks_guarantee():
-    """Verify medium-sized text (~15,000 chars) produces at least 5 chunks and strictly <= 30."""
+def test_chunk_text_x_post_single_chunk():
+    """Verify a small X post or note (<= 1500 chars) returns exactly 1 chunk without splitting."""
+    post_text = (
+        "We just released LeWM-v2! A new approach to reachability-conditioned latent world models. "
+        "Key insight: unprojecting 2D representations into compact 3D manifolds stabilizes long-horizon rollout planning. "
+        "Code and checkpoints available on HuggingFace and GitHub. Read the full paper for details."
+    )
+    assert len(post_text) < 1500
+    chunks = orchestrator._chunk_text(post_text)
+    assert len(chunks) == 1
+    assert chunks[0] == post_text
+
+
+def test_chunk_text_short_memo_two_chunks():
+    """Verify a short memo (1500 - 4000 chars) produces 2 chunks."""
+    p1 = "Paragraph 1 discusses the fundamental motivation behind world models. " * 15
+    p2 = "Paragraph 2 details the architectural formulation and loss metrics. " * 15
+    doc_text = f"{p1}\n\n{p2}"
+    assert 1500 < len(doc_text) <= 4000
+    chunks = orchestrator._chunk_text(doc_text)
+    assert len(chunks) == 2
+    assert all(len(c.strip()) > 0 for c in chunks)
+
+
+def test_chunk_text_medium_article_three_chunks():
+    """Verify a medium article (4000 - 8000 chars) produces 3 chunks."""
+    sec = (
+        "Exploring diffusion policies over continuous action manifolds with residual energy steering. "
+        * 18
+    )
+    doc_text = "\n\n".join([f"Section {i}\n{sec}" for i in range(3)])
+    assert 4000 < len(doc_text) <= 8000
+    chunks = orchestrator._chunk_text(doc_text)
+    assert len(chunks) == 3
+    assert all(len(c.strip()) > 0 for c in chunks)
+
+
+def test_chunk_text_overview_four_chunks():
+    """Verify a multi-section overview (8000 - 14000 chars) produces 4 chunks."""
+    sec = (
+        "Detailed analysis of state predictive representations and temporal alignment diagnostics. "
+        * 25
+    )
+    doc_text = "\n\n".join([f"Part {i}\n{sec}" for i in range(4)])
+    assert 8000 < len(doc_text) <= 14000
+    chunks = orchestrator._chunk_text(doc_text)
+    assert len(chunks) == 4
+    assert all(len(c.strip()) > 0 for c in chunks)
+
+
+def test_chunk_text_short_paper_five_chunks():
+    """Verify a short paper or report (14000 - 25000 chars) produces 5 chunks."""
     para = (
         "Latent world models learn state transitions across compact latent embeddings. "
         * 15
     )
-    doc_text = "\n\n".join([f"Section {i}\n{para}" for i in range(12)])
-    assert len(doc_text) >= 12000
+    doc_text = "\n\n".join([f"Section {i}\n{para}" for i in range(15)])
+    assert 14000 <= len(doc_text) <= 25000
 
     chunks = orchestrator._chunk_text(doc_text)
-    assert 5 <= len(chunks) <= 30
+    assert len(chunks) == 5
     assert all(len(c.strip()) > 0 for c in chunks)
 
 

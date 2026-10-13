@@ -85,22 +85,46 @@ class ExecutiveOrchestrator:
         self,
         text: str,
         chunk_size: Optional[int] = None,
-        min_chunks: int = 5,
+        min_chunks: int = 1,
         max_chunks: int = 30,
         max_safe_chunk_size: int = 45000,
     ) -> List[str]:
-        """Splits raw document text into cohesive passage chunks, scaling adaptively between min_chunks (5) and max_chunks (30) based on document length."""
+        """Splits raw document text into cohesive passage chunks, scaling adaptively between min_chunks (1) and max_chunks (30) based on document length."""
         if not text:
             return []
 
         total_len = len(text)
 
-        # 1. Compute dynamic target chunk count: scales from 5 (<= 25k chars) to 30 (>= 300k chars)
+        # 1. Compute dynamic target chunk count:
+        # Tier 1 (<= 1.5k): 1 chunk (X post, brief note)
+        # Tier 2 (1.5k - 4k): 2 chunks (short memo)
+        # Tier 3 (4k - 8k): 3 chunks (medium article)
+        # Tier 4 (8k - 14k): 4 chunks (long overview)
+        # Tier 5 (14k - 25k): 5 chunks (short report)
+        # Tier 6 (> 25k): 5 to 30 chunks (scaling up to 30 for >= 300k chars)
         if chunk_size is None:
-            scaled_target = min_chunks + int(max(0, total_len - 25000) / 11000)
-            target_chunks = max(min_chunks, min(max_chunks, scaled_target))
+            if total_len <= 1500:
+                target_chunks = 1
+            elif total_len <= 4000:
+                target_chunks = 2
+            elif total_len <= 8000:
+                target_chunks = 3
+            elif total_len <= 14000:
+                target_chunks = 4
+            elif total_len <= 25000:
+                target_chunks = 5
+            else:
+                scaled_target = 5 + int((total_len - 25000) / 11000)
+                target_chunks = max(min_chunks, min(max_chunks, scaled_target))
+
             calculated_size = (total_len + target_chunks - 1) // target_chunks
             chunk_size = min(max_safe_chunk_size, max(500, calculated_size))
+        else:
+            target_chunks = min_chunks
+
+        # If document is short enough to fit entirely in 1 chunk and target is 1, return directly
+        if target_chunks == 1 and total_len <= max_safe_chunk_size:
+            return [text.strip()]
 
         # 2. Split into semantic paragraph units, breaking oversized paragraphs at sentence boundaries
         raw_paragraphs = text.split("\n\n")
@@ -143,10 +167,9 @@ class ExecutiveOrchestrator:
         if curr.strip():
             chunks.append(curr.strip())
 
-        # 4. Lower bound enforcement: if fewer than min_chunks and document length is substantial, subdivide largest chunks
-        min_split_threshold = min_chunks * 500  # >= 2500 characters
-        while len(chunks) < min_chunks and total_len >= min_split_threshold:
-            # Find largest chunk that can be split
+        # 4. Target bound enforcement: subdivide if fewer chunks than target and text is substantial
+        effective_min = max(min_chunks, target_chunks)
+        while len(chunks) < effective_min and total_len > 1500:
             max_idx = max(range(len(chunks)), key=lambda i: len(chunks[i]))
             largest_chunk = chunks[max_idx]
             if len(largest_chunk) < 600:
@@ -175,8 +198,9 @@ class ExecutiveOrchestrator:
             else:
                 break
 
-        # 5. Upper bound enforcement: strictly merge shortest adjacent chunks until len(chunks) <= max_chunks (30)
-        while len(chunks) > max_chunks:
+        # 5. Upper bound enforcement: strictly merge shortest adjacent chunks until len(chunks) <= effective_max
+        effective_max = min(max_chunks, max(target_chunks, min_chunks))
+        while len(chunks) > effective_max:
             min_idx = 0
             min_combined_len = float("inf")
             for i in range(len(chunks) - 1):
@@ -715,7 +739,7 @@ class ExecutiveOrchestrator:
         )
         self.db.upsert_document(doc_rec)
 
-        # Store Out-of-Graph Passage Records with dynamic adaptive chunking (scaling 5-30 passages based on document length)
+        # Store Out-of-Graph Passage Records with dynamic adaptive chunking (scaling 1-30 passages based on document length)
         passage_chunks = self._chunk_text(full_content)
         passage_ids = []
         for idx, chunk_str in enumerate(passage_chunks):

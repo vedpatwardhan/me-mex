@@ -25,9 +25,10 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 │                        1. Document Ingestion & Staging                                 │
 └────────────────────────────────────────────────────────────────────────────────────────┘
  - Staged Sandbox: Uploaded documents/links do NOT immediately populate the active graph.
- - Adaptive Document Chunking (5 to 30 Passages):
-     - Dynamically partitions documents based on length: scales smoothly from 5 chunks (<= 25k chars) up to 30 chunks (>= 300k chars), strictly bounded by [5, 30].
+ - Scale-Adaptive Document Chunking (1 to 30 Passages):
+     - Dynamically partitions documents based on length: <= 1.5k chars (1 chunk for X posts/short notes), 1.5k–4k (2 chunks), 4k–8k (3 chunks), 8k–14k (4 chunks), 14k–25k (5 chunks), and scales smoothly up to 30 chunks (>= 300k chars), bounded by [1, 30].
      - Context Window & Token Budget Protection: Guarantees individual chunks never exceed 45,000 characters (~13,000 tokens), safeguarding Ministral 3-8B's 16,384-token context window against prompt overflow while reserving 1,536 completion tokens.
+     - Density-Aware Concept Extraction & Consolidation: Passages extract 1 to 3 concepts (1 for focused notes, 2–3 for rich passages, max 3). Canonical consolidation scales naturally without forcing an arbitrary 6–10 concept quota for low-volume documents.
  - Out-of-Graph Passage Storage: Text chunks are stored as plain text records in `passages`
    collection, linked only via `passage_ids` inside atomic `CONCEPT` nodes.
  - Plain text retrieval: Passages are opened only when clicked to validate concept extraction.
