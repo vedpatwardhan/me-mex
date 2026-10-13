@@ -76,12 +76,24 @@ export const GraphCanvas: React.FC = () => {
     return prewarmForceSimulation(rawGraphData.nodes, rawGraphData.links, 180);
   }, [rawGraphData]);
 
-  // Configure runtime force viscosity parameters
+  // Configure runtime force parameters to keep the graph nicely spread out
   useEffect(() => {
     if (!fgRef.current) return;
     const fg = fgRef.current;
     if (typeof fg.d3VelocityDecay === 'function') {
       fg.d3VelocityDecay(0.55);
+    }
+    if (typeof fg.d3Force === 'function') {
+      const linkForce = fg.d3Force('link');
+      if (linkForce && typeof linkForce.distance === 'function') {
+        linkForce.distance((l: any) => (l.type === 'SUBSET_OF' ? 95 : 150));
+      }
+      const chargeForce = fg.d3Force('charge');
+      if (chargeForce && typeof chargeForce.strength === 'function') {
+        chargeForce.strength((d: any) =>
+          d.node_type === 'ROOT' || d.is_immutable ? -550 : -320
+        );
+      }
     }
   }, []);
 

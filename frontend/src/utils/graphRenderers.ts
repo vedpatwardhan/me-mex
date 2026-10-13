@@ -39,7 +39,7 @@ export const drawMeMexNode = (
   const isRoot = isRootNode(node);
   const rootType = isRoot ? getRootSubType(node) : null;
   const isImmutable = isImmutableConcept(node);
-  const radius = isRoot ? 12 : isSelected ? 10 : isHovered ? 8.5 : 6.5;
+  const radius = isSelected ? 9.5 : isHovered ? 8.5 : 7.0;
 
   let baseColor = '#fbbf24'; // Mutable Concept (Amber)
   if (isRoot) {

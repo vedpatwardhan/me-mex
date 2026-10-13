@@ -21,7 +21,7 @@ export const prewarmForceSimulation = (
         d3
           .forceManyBody()
           .strength((d: any) =>
-            d.node_type === 'ROOT' || d.is_immutable ? -320 : -140
+            d.node_type === 'ROOT' || d.is_immutable ? -550 : -320
           )
           .theta(0.85)
       )
@@ -30,17 +30,17 @@ export const prewarmForceSimulation = (
         d3
           .forceLink(linksCopy)
           .id((d: any) => d.id)
-          .distance((l: any) => (l.type === 'SUBSET_OF' ? 45 : 85))
-          .strength(0.7)
+          .distance((l: any) => (l.type === 'SUBSET_OF' ? 95 : 150))
+          .strength(0.6)
       )
       .force(
         'collide',
         d3
           .forceCollide()
-          .radius((d: any) => (d.node_type === 'ROOT' ? 16 : 10) + 4)
+          .radius(24)
           .iterations(2)
       )
-      .force('center', d3.forceCenter(0, 0).strength(0.05))
+      .force('center', d3.forceCenter(0, 0).strength(0.04))
       .velocityDecay(0.55);
 
     simulation.stop();
