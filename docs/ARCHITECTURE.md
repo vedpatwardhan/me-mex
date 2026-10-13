@@ -172,9 +172,9 @@ The graph network enforces a strict **Hierarchy of Mutability**:
 Both Retrieval and Ingestion operate on a unified multi-agent pattern structured around **Departments** (Thematic Concept Hubs):
 
 1. **Mutually Exclusive Sub-Graph Exploration:**
-   - **Unweighted Topological Hub Detection**: Identifies foundational keystone concepts in real time (<5ms) using `rustworkx` unweighted eigenvector centrality and community partitioning. Each detected concept hub is assigned a dedicated Specialist Persona representing domain expertise for that concept cluster.
-   - **Mutually Exclusive Graph Partitioning**: The graph network is partitioned into mutually exclusive sub-graphs across concept hubs so persona explorations do not overlap.
-   - **Iterative Multi-Hop Traversal**: Each Concept Hub Persona independently expands its strictly assigned sub-graph region up to `max_depth = 3`.
+   - **Unweighted Topological Hub Detection**: Identifies foundational keystone concepts in real time (<5ms) using `rustworkx` unweighted eigenvector centrality with relative thresholding ($s_i \ge 0.30 \times s_{\max}$). Each detected concept hub is assigned a dedicated Specialist Persona representing domain expertise for that concept cluster.
+   - **Mutually Exclusive Voronoi Graph Partitioning**: The graph network is partitioned via multi-source topological shortest-path (Voronoi) distance anchored directly to the detected department hubs ($H = [h_1, \dots, h_m]$). Every node $v$ is assigned to its closest hub $h^*(v) = \arg\min d(v, h_i)$ (with ties resolved by hub centrality). Partitions are keyed directly by `hub_node.id`, guaranteeing $P_i \cap P_j = \emptyset$ and eliminating key-name mismatches.
+   - **Iterative Multi-Hop Traversal**: Each Concept Hub Persona independently expands its strictly assigned sub-graph partition (`partition_node_ids`) up to `max_depth = 3`.
    - **Root Node Traversal Blocking**: Traversal visits Root Nodes for provenance context and summaries, but strictly **blocks Root Nodes from expanding further hops**.
 2. **Relevance Evaluation:**
    - Each Specialist Persona evaluates the relevance of its accumulated domain nodes, search history, user prompt, and conversation history (`chat_history`) independently.

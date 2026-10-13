@@ -94,3 +94,86 @@ def test_pure_centrality_dynamic_hub_selection():
     assert not any(n.node_type == "paper" for n, _ in hubs)
     # High centrality concept node MUST be included
     assert any(n.id == "concept_high_hub" for n, _ in hubs)
+
+
+def test_partition_department_communities_voronoi_mutual_exclusivity():
+    """Verify that partition_department_communities partitions all nodes around designated hubs with strict mutual exclusivity."""
+    # Setup test project with 2 hubs and connected periphery nodes
+    proj = "proj_voronoi_test"
+    hub_a = GraphNode(
+        _id="hub_a",
+        node_type="concept",
+        title="Hub A Robotics",
+        description="Core Robotics Paradigm",
+        project_ids=[proj],
+    )
+    hub_b = GraphNode(
+        _id="hub_b",
+        node_type="concept",
+        title="Hub B Vision",
+        description="Core Vision Paradigm",
+        project_ids=[proj],
+    )
+    leaf_a = GraphNode(
+        _id="leaf_a",
+        node_type="concept",
+        title="Leaf A Gripper",
+        description="Gripper leaf attached to Hub A",
+        project_ids=[proj],
+    )
+    leaf_b = GraphNode(
+        _id="leaf_b",
+        node_type="concept",
+        title="Leaf B Camera",
+        description="Camera leaf attached to Hub B",
+        project_ids=[proj],
+    )
+    db_engine.upsert_node(hub_a)
+    db_engine.upsert_node(hub_b)
+    db_engine.upsert_node(leaf_a)
+    db_engine.upsert_node(leaf_b)
+
+    # Edge hub_a -> leaf_a
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="edge_a",
+            source_id="hub_a",
+            target_id="leaf_a",
+            project_ids=[proj],
+        )
+    )
+    # Edge hub_b -> leaf_b
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="edge_b",
+            source_id="hub_b",
+            target_id="leaf_b",
+            project_ids=[proj],
+        )
+    )
+
+    hubs = [hub_a, hub_b]
+    partitions = graph_analytics.partition_department_communities(
+        project_id=proj, hubs=hubs
+    )
+
+    # Partitions must be keyed by hub ID
+    assert "hub_a" in partitions
+    assert "hub_b" in partitions
+
+    # Each hub must be in its own partition
+    assert "hub_a" in partitions["hub_a"]
+    assert "hub_b" in partitions["hub_b"]
+
+    # Topological proximity: leaf_a must be in hub_a partition, leaf_b in hub_b
+    assert "leaf_a" in partitions["hub_a"]
+    assert "leaf_b" in partitions["hub_b"]
+
+    # Mutual Exclusivity: intersection must be empty
+    set_a = set(partitions["hub_a"])
+    set_b = set(partitions["hub_b"])
+    assert len(set_a.intersection(set_b)) == 0
+
+    # Coverage: all nodes must be partitioned
+    all_partitioned = set_a.union(set_b)
+    assert all_partitioned == {"hub_a", "hub_b", "leaf_a", "leaf_b"}

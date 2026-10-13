@@ -74,11 +74,24 @@ class GraphAnalyticsWorker:
     @staticmethod
     def partition_department_communities(
         project_id: Optional[str] = None,
+        hubs: Optional[List[GraphNode]] = None,
     ) -> Dict[str, List[str]]:
-        """Partition concept nodes into 3-4 distinct Department Communities using NetworkX Louvain/Leiden graph clustering."""
+        """Partition concept nodes into mutually exclusive Department Communities anchored to concept hubs using topological Voronoi distance."""
         nodes = db_engine.get_nodes(project_id)
+        if not nodes:
+            return {}
+
+        # If hubs not passed explicitly, discover top candidate mutable concept hubs
+        if hubs is None:
+            top_hub_tuples = GraphAnalyticsWorker.get_top_concept_hubs(project_id)
+            hubs = [h[0] for h in top_hub_tuples]
+
+        if not hubs:
+            return {}
+
         edges = db_engine.get_edges(project_id)
 
+        # Build undirected graph for topological distance metric
         nx_graph = nx.Graph()
         for n in nodes:
             nx_graph.add_node(n.id)
@@ -86,36 +99,58 @@ class GraphAnalyticsWorker:
         for e in edges:
             nx_graph.add_edge(e.source_id, e.target_id, weight=1.0)
 
-        if len(nx_graph) == 0:
-            return {}
-
-        try:
-            communities = nx.community.louvain_communities(
-                nx_graph, weight="weight", seed=42
-            )
-        except Exception:
-            # Simple fallback partition if graph is tiny or disconnected
-            all_nodes = [n.id for n in nodes]
-            communities = [all_nodes]
-
-        department_map: Dict[str, List[str]] = {}
+        hub_ids = [h.id for h in hubs]
         centralities = GraphAnalyticsWorker.calculate_hub_centrality(project_id)
 
-        for idx, comm in enumerate(communities):
-            comm_nodes = list(comm)
-            # Find highest centrality hub node in this community
-            top_hub_id = (
-                max(comm_nodes, key=lambda nid: centralities.get(nid, 0.0))
-                if comm_nodes
-                else f"Cluster {idx+1}"
-            )
-            top_node = db_engine.get_node(top_hub_id)
-            dept_title = (
-                f"Department of {top_node.title}"
-                if top_node
-                else f"Department of Cluster {idx+1}"
-            )
-            department_map[dept_title] = comm_nodes
+        # Multi-source shortest path Voronoi partitioning:
+        # Compute shortest topological path from each hub to all reachable nodes
+        distances_from_hubs: Dict[str, Dict[str, int]] = {}
+        for h_id in hub_ids:
+            try:
+                distances_from_hubs[h_id] = nx.single_source_shortest_path_length(
+                    nx_graph, h_id
+                )
+            except Exception:
+                distances_from_hubs[h_id] = {h_id: 0}
+
+        department_map: Dict[str, List[str]] = {h_id: [] for h_id in hub_ids}
+
+        # Assign each node to its closest department hub
+        for n in nodes:
+            best_hub = None
+            best_dist = float("inf")
+            best_score = -1.0
+
+            for h_id in hub_ids:
+                d = distances_from_hubs[h_id].get(n.id, float("inf"))
+                score = centralities.get(h_id, 0.0)
+
+                # Minimize distance; break ties by highest hub centrality, then lexicographical order
+                if d < best_dist:
+                    best_dist = d
+                    best_hub = h_id
+                    best_score = score
+                elif d == best_dist and score > best_score:
+                    best_hub = h_id
+                    best_score = score
+                elif (
+                    d == best_dist
+                    and score == best_score
+                    and best_hub
+                    and h_id < best_hub
+                ):
+                    best_hub = h_id
+
+            # Fallback for disconnected nodes that have no path to any hub: assign to highest centrality hub
+            if best_hub is None or best_dist == float("inf"):
+                best_hub = max(hub_ids, key=lambda hid: centralities.get(hid, 0.0))
+
+            department_map[best_hub].append(n.id)
+
+        # Ensure the hub itself is in its own partition if not already
+        for h_id in hub_ids:
+            if h_id not in department_map[h_id]:
+                department_map[h_id].append(h_id)
 
         return department_map
 

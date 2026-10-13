@@ -555,8 +555,9 @@ class ExecutiveOrchestrator:
             return
 
         # Pre-Step 1 & 2: Mutually Exclusive Sub-Graph Traversal & Relevance Evaluation
+        top_hub_nodes = [dept.hub_node for dept in active_departments]
         department_communities = self.analytics.partition_department_communities(
-            project_id
+            project_id=project_id, hubs=top_hub_nodes
         )
 
         for dept in active_departments:
@@ -572,7 +573,7 @@ class ExecutiveOrchestrator:
             yield start_evt
 
         async def _traverse_dept(dept):
-            partition_ids = set(department_communities.get(dept.department_name, []))
+            partition_ids = set(department_communities.get(dept.hub_node.id, []))
             finding = await asyncio.to_thread(
                 dept.explore_concept_hub,
                 query=query,
@@ -1000,15 +1001,18 @@ class ExecutiveOrchestrator:
             DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
         ]
 
-        # Partition network into mutually exclusive sub-graph communities
+        # Partition network into mutually exclusive sub-graph communities anchored to detected hubs
+        top_hub_nodes = [dept.hub_node for dept in active_departments]
         department_communities = self.analytics.partition_department_communities(
-            project_id
+            project_id=project_id, hubs=top_hub_nodes
         )
         evt_parts = {
             "event": "partitions_calculated",
             "partitions": {
-                dept_name: list(node_ids)
-                for dept_name, node_ids in department_communities.items()
+                dept.department_name: list(
+                    department_communities.get(dept.hub_node.id, [])
+                )
+                for dept in active_departments
             },
             "timestamp": time.time(),
         }
@@ -1026,7 +1030,7 @@ class ExecutiveOrchestrator:
             }
 
             # 1. Partitioned Sub-Graph Traversal
-            partition_ids = set(department_communities.get(dept.department_name, []))
+            partition_ids = set(department_communities.get(dept.hub_node.id, []))
             traversal_finding = dept.explore_concept_hub(
                 query=query,
                 chat_history=chat_history,
