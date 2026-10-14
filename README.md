@@ -6,6 +6,16 @@ Me-Mex is an agentic external memory system designed to function as an external 
 
 ---
 
+## 📸 Current Status (13/10/26)
+
+The pipeline is working end-to-end for ingestion of an arxiv paper and adding it to the graph with re-organization. The "Everything" concept node is where it all begins followed by sub-division into different concepts.
+
+| Before Reorganization | After Reorganization |
+| :---: | :---: |
+| <img src="./assets/before_131026.png" alt="Graph Before Reorganization" width="100%" /> | <img src="./assets/after_131026.png" alt="Graph After Reorganization" width="100%" /> |
+
+---
+
 ## 📚 Master Documentation Index
 
 All master technical specs, research syntheses, and product roadmaps are consolidated in the `docs/` directory:
