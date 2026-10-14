@@ -10,9 +10,9 @@ Me-Mex is an agentic external memory system designed to function as an external 
 
 The pipeline is working end-to-end for ingestion of an arxiv paper and adding it to the graph with re-organization. The "Everything" concept node is where it all begins followed by sub-division into different concepts.
 
-| Before Reorganization | After Reorganization |
+| Before Ingestion | After Ingestion |
 | :---: | :---: |
-| <img src="./assets/before_131026.png" alt="Graph Before Reorganization" width="100%" /> | <img src="./assets/after_131026.png" alt="Graph After Reorganization" width="100%" /> |
+| <img src="./assets/before_131026.png" alt="Graph Before Ingestion" width="100%" /> | <img src="./assets/after_131026.png" alt="Graph After Ingestion" width="100%" /> |
 
 ---
 
