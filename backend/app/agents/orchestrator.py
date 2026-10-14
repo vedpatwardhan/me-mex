@@ -857,8 +857,12 @@ class ExecutiveOrchestrator:
         yield evt_consol_start
 
         try:
-            consolidated_result = self.consolidate_extracted_concepts(
-                raw_extracted_concepts, title, query, chat_history
+            consolidated_result = await asyncio.to_thread(
+                self.consolidate_extracted_concepts,
+                raw_extracted_concepts,
+                title,
+                query,
+                chat_history,
             )
         except Exception as e:
             err_msg = f"Document ingestion aborted: Concept consolidation failed for '{title}'. Details: {str(e)}"
@@ -1030,13 +1034,18 @@ class ExecutiveOrchestrator:
 
             # 1. Partitioned Sub-Graph Traversal
             partition_ids = set(department_communities.get(dept.hub_node.id, []))
-            traversal_finding = dept.explore_concept_hub(
+            traversal_finding = await asyncio.to_thread(
+                dept.explore_concept_hub,
                 query=query,
                 chat_history=chat_history,
                 project_id=project_id,
                 max_depth=5,
                 partition_node_ids=partition_ids if partition_ids else None,
             )
+
+            # Yield each node_touched event recorded during traversal (hop 0 + expansion)
+            for touch_evt in traversal_finding.get("emitted_events", []):
+                yield touch_evt
 
             # Telemetry: Active persona traversal nodes
             evt_active = {
@@ -1050,7 +1059,8 @@ class ExecutiveOrchestrator:
             yield evt_active
 
             # 2. Ingestion Linking (Immediate execution into MongoDB)
-            ingest_res = dept.persona_ingestion(
+            ingest_res = await asyncio.to_thread(
+                dept.persona_ingestion,
                 intra_doc_nodes,
                 title,
                 query,
@@ -1069,7 +1079,8 @@ class ExecutiveOrchestrator:
                     yield evt
 
             # 3. Non-Destructive Concept Hub Reorganization (Operating on real-time graph state)
-            reorg_cmds = dept.reorganize_concept_hub(
+            reorg_cmds = await asyncio.to_thread(
+                dept.reorganize_concept_hub,
                 explored_nodes=traversal_finding["explored_nodes"],
                 project_id=project_id,
             )

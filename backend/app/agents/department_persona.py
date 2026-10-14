@@ -57,6 +57,7 @@ class DepartmentPersonaAgent:
         visited_node_ids = set([self.hub_node.id])
         current_frontier = [self.hub_node.id]
         explored_nodes_map: Dict[str, GraphNode] = {self.hub_node.id: self.hub_node}
+        emitted_events: List[Dict[str, Any]] = []
 
         # Emit node_touched event for Hop 0 Hub Node
         hub_evt = {
@@ -69,6 +70,7 @@ class DepartmentPersonaAgent:
             "timestamp": time.time(),
         }
         event_queue.push(project_id, hub_evt)
+        emitted_events.append(hub_evt)
 
         for depth in range(1, max_depth + 1):
             if not current_frontier:
@@ -164,6 +166,7 @@ class DepartmentPersonaAgent:
                         "timestamp": time.time(),
                     }
                     event_queue.push(project_id, evt)
+                    emitted_events.append(evt)
 
             current_frontier = next_frontier
 
@@ -174,6 +177,7 @@ class DepartmentPersonaAgent:
             "hub_node_id": self.hub_node.id,
             "explored_nodes": self.last_explored_nodes,
             "traversed_node_ids": list(visited_node_ids),
+            "emitted_events": emitted_events,
         }
 
     def reorganize_concept_hub(
