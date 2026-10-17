@@ -45,3 +45,4 @@ Thumbs.db
 # Temporary files
 temp_*
 backend/temp_downloads/
+data/
