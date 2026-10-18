@@ -24,7 +24,7 @@ The roadmap bridges core engine implementation with real-time UI interactivity, 
    ├── Clean 3-Element Topology: Root Nodes, Intra-Doc Concepts, Persona Domain Hubs, & Typed Edges
    ├── Node Mutability Enforcement: Root & Intra-Doc nodes (Immutable), Domain Hubs (Mutable)
    ├── 3 Gateway Execution Paths: Conversation (direct), Retrieval (2 pre-steps), Ingestion (2 pre-steps)
-   └── Mutually Exclusive Hub Partitioning: rustworkx unweighted eigenvector hub detection
+   └── Mutually Exclusive Hub Partitioning: rustworkx unweighted eigenvector hub detection and reorganization
 
   [ Goal 2: Comprehensive Backend Testing Pipeline ] — UPCOMING
    ├── Unit Test Suite: MongoDB models, FastMCP search tools, Pydantic schema validation
