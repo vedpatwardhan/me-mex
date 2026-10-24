@@ -261,29 +261,54 @@ class DepartmentPersonaAgent:
             f"[{self.department_name}] Step 3 Reorganization started: {evt_disc_start['message']}"
         )
 
+        # Early exit if no mutable nodes qualify for reorganization
+        if not qualifying_nodes:
+            disc_msg = (
+                f"[{self.department_name}] Discovery completed: Sub-graph is cohesive. "
+                f"No mutable nodes meet the degree threshold (>= {degree_threshold}) for subdivision."
+            )
+            evt_disc_done = {
+                "event": "reorg_discovery_completed",
+                "persona_id": self.department_id,
+                "department_name": self.department_name,
+                "candidate_count": 0,
+                "candidate_ids": [],
+                "message": disc_msg,
+                "timestamp": time.time(),
+            }
+            emitted_events.append(evt_disc_done)
+            print(disc_msg)
+            return {"commands": [], "emitted_events": emitted_events}
+
         # STEP 1: Discovery Phase (Identify candidate mutable concept nodes)
-        # Inlining connected edges directly into each node object for unified LLM inspection
+        # Only present valid qualifying mutable nodes as candidates to prevent LLM picking immutable neighbor IDs
         nodes_payload = [
             {
-                "id": n.id,
+                "candidate_id": n.id,
                 "title": n.title,
                 "description": n.description,
-                "immutable": n.is_immutable,
-                "degree": degree_map.get(n.id, 0),
-                "passage_ids": n.passage_ids,
-                "connected_edges": neighbor_map.get(n.id, []),
+                "connection_degree": degree_map.get(n.id, 0),
+                "connected_neighbor_context": [
+                    {
+                        "neighbor_title": nb["neighbor_title"],
+                        "relation": nb["relation_type"],
+                        "direction": nb["direction"],
+                    }
+                    for nb in neighbor_map.get(n.id, [])
+                ],
             }
-            for n in explored_nodes
+            for n in qualifying_nodes
         ]
 
         system_discover = load_prompt(
             "persona_reorganize_discover", department_name=self.department_name
         )
         user_discover = f"""
-Explored Sub-Graph Nodes (with Inlined Connected Edges & Degrees):
+Candidate Mutable Concept Hubs Eligible for Subdivision ({len(qualifying_nodes)} candidate(s)):
 {json.dumps(nodes_payload, indent=2)}
 
-Identify any MUTABLE concept nodes with degree >= {degree_threshold} that combine distinct sub-themes requiring non-destructive intermediate subdivision.
+Select candidate_id values for any concept hubs that combine distinct sub-themes requiring intermediate subdivision.
+You may ONLY select from the candidate_id values above.
 """
         candidate_ids = []
         try:
@@ -293,7 +318,7 @@ Identify any MUTABLE concept nodes with degree >= {degree_threshold} that combin
                     {"role": "user", "content": user_discover},
                 ],
                 temperature=0.2,
-                max_tokens=256,
+                max_tokens=1024,
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )

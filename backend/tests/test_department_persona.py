@@ -235,3 +235,118 @@ def test_reorganize_concept_hub_emits_telemetry_events(monkeypatch):
     done_evt = next(e for e in events if e["event"] == "reorg_discovery_completed")
     assert done_evt["candidate_count"] == 0
     assert "cohesive" in done_evt["message"]
+
+
+def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch):
+    """Verify that when a mutable hub has degree >= threshold, it is passed to LLM and selected."""
+    project_id = "proj_qualifying_hub_test"
+    hub = GraphNode(
+        _id="hub_qualifying",
+        node_type="CONCEPT",
+        title="Everything",
+        description="Over-clustered mutable hub.",
+        passage_ids=["pass_q1"],
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
+    db_engine.upsert_node(hub)
+
+    from app.models import PassageRecord
+
+    p_rec = PassageRecord(
+        _id="pass_q1",
+        doc_id="doc_q1",
+        chunk_index=0,
+        text_content="Passage text describing sub-areas of everything.",
+        project_ids=[project_id],
+    )
+    db_engine.upsert_passage(p_rec)
+
+    # Create 5 neighbors connecting to hub
+    for i in range(5):
+        n_node = GraphNode(
+            _id=f"neighbor_{i}",
+            node_type="CONCEPT",
+            title=f"Topic {i}",
+            description="Topic desc",
+            passage_ids=[],
+            project_ids=[project_id],
+            metadata={"immutable": True},
+        )
+        db_engine.upsert_node(n_node)
+        db_engine.upsert_edge(
+            GraphEdge(
+                _id=f"edge_q_{i}",
+                source_id=f"neighbor_{i}",
+                target_id="hub_qualifying",
+                description="RELEVANT_TO",
+                project_ids=[project_id],
+            )
+        )
+
+    agent = DepartmentPersonaAgent(hub)
+
+    # Mock LLM calls:
+    # 1. Discovery returns candidate hub_qualifying
+    # 2. Split returns 2 sub-concepts
+    # 3. Rewire returns rewired edges
+    import json
+
+    def mock_chat_completion(messages, **kwargs):
+        sys_content = messages[0]["content"]
+        if (
+            "reorganize_discover" in sys_content
+            or "candidate_concept_ids" in sys_content
+            or "candidate_id" in sys_content
+        ):
+            return '{"candidate_concept_ids": ["hub_qualifying"]}'
+        elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
+            return json.dumps(
+                {
+                    "sub_concepts": [
+                        {
+                            "sub_id_alias": "sub_1",
+                            "title": "Sub 1",
+                            "description": "D1",
+                            "passage_ids": ["pass_q1"],
+                        },
+                        {
+                            "sub_id_alias": "sub_2",
+                            "title": "Sub 2",
+                            "description": "D2",
+                            "passage_ids": ["pass_q1"],
+                        },
+                    ]
+                }
+            )
+        elif "reorganize_rewire" in sys_content or "rewired_edges" in sys_content:
+            return json.dumps(
+                {
+                    "rewired_edges": [
+                        {
+                            "neighbor_id": "neighbor_0",
+                            "connect_to_sub_alias": "sub_1",
+                            "relation_type": "RELEVANT_TO",
+                        },
+                        {
+                            "neighbor_id": "neighbor_1",
+                            "connect_to_sub_alias": "sub_2",
+                            "relation_type": "RELEVANT_TO",
+                        },
+                    ]
+                }
+            )
+        return "{}"
+
+    from app.services.llm_gateway import llm_gateway
+
+    monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
+
+    res = agent.reorganize_concept_hub(
+        explored_nodes=[hub], project_id=project_id, degree_threshold=5
+    )
+    assert len(res["commands"]) == 1
+    cmd = res["commands"][0]
+    assert cmd["action"] == "SPLIT_CONCEPT"
+    assert cmd["concept_id"] == "hub_qualifying"
+    assert len(cmd["sub_concepts"]) == 2

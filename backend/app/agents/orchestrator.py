@@ -1079,9 +1079,16 @@ class ExecutiveOrchestrator:
                     yield evt
 
             # 3. Non-Destructive Concept Hub Reorganization (Operating on real-time graph state)
+            # Ensure the actively modified hub node is included with its updated post-ingestion degree
+            eval_nodes_dict = {
+                n.id: n for n in traversal_finding.get("explored_nodes", [])
+            }
+            eval_nodes_dict[dept.hub_node.id] = dept.hub_node
+            reorg_eval_nodes = list(eval_nodes_dict.values())
+
             reorg_res = await asyncio.to_thread(
                 dept.reorganize_concept_hub,
-                explored_nodes=traversal_finding["explored_nodes"],
+                explored_nodes=reorg_eval_nodes,
                 project_id=project_id,
             )
 
