@@ -345,7 +345,8 @@ Formulated Sub-Concepts Available for Connection:
 Complete List of Direct Neighbor Nodes to Re-Wire:
 {json.dumps(neighbors, indent=2)}
 
-Assign EVERY direct neighbor node to exactly ONE sub-concept alias.
+1. Assign EVERY direct neighbor node to AT LEAST ONE sub-concept alias (multiple if semantically relevant).
+2. Ensure EVERY formulated sub-concept alias is connected to AT LEAST ONE neighbor node. No sub-concept should remain idle.
 """
             rewired_edges = []
             try:

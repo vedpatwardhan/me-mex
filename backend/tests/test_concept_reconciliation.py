@@ -257,3 +257,194 @@ def test_split_concept_rewiring_deletes_old_hub_edge():
     ]
     assert len(sub_rewired_edges) == 1
     assert sub_rewired_edges[0].description == "SUBSET_OF"
+
+
+def test_split_concept_rewire_multi_subconcept_connections():
+    """Verify that a single neighbor can be cleanly re-wired to MULTIPLE sub-concepts,
+
+    old umbrella edges are deleted once, and no sub-concept is left idle.
+    """
+    project_id = "test_multi_rewire_project"
+
+    # Hub node
+    hub_node = GraphNode(
+        _id="hub_multi",
+        node_type="CONCEPT",
+        title="Multi-Domain Hub",
+        description="Over-clustered hub to split.",
+        passage_ids=[],
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
+    db_engine.upsert_node(hub_node)
+
+    # Neighbor concept node that is relevant to multiple sub-concepts
+    neighbor_node = GraphNode(
+        _id="neighbor_shared_eval",
+        node_type="CONCEPT",
+        title="Benchmark Evaluations",
+        description="Evaluation protocol relevant to multiple sub-domains.",
+        passage_ids=[],
+        project_ids=[project_id],
+        metadata={"immutable": True},
+    )
+    db_engine.upsert_node(neighbor_node)
+
+    # Pre-existing edge connecting neighbor to hub
+    old_edge = GraphEdge(
+        _id="edge_old_eval_hub",
+        source_id="neighbor_shared_eval",
+        target_id="hub_multi",
+        description="General Link",
+        project_ids=[project_id],
+    )
+    db_engine.upsert_edge(old_edge)
+    assert len(db_engine.get_edges(project_id)) == 1
+
+    # Split hub into 2 sub-concepts, and rewire the neighbor to BOTH sub_1 and sub_2
+    split_cmd_item = {
+        "action": "SPLIT_CONCEPT",
+        "concept_id": "hub_multi",
+        "sub_concepts": [
+            {
+                "sub_id_alias": "sub_1",
+                "title": "Latent Dynamics Sub-Concept",
+                "description": "Dynamics modeling.",
+                "passage_ids": [],
+            },
+            {
+                "sub_id_alias": "sub_2",
+                "title": "Policy Optimization Sub-Concept",
+                "description": "Policy learning.",
+                "passage_ids": [],
+            },
+        ],
+        "rewired_edges": [
+            {
+                "neighbor_id": "neighbor_shared_eval",
+                "connect_to_sub_alias": "sub_1",
+                "relation_type": "EVALUATES",
+            },
+            {
+                "neighbor_id": "neighbor_shared_eval",
+                "connect_to_sub_alias": "sub_2",
+                "relation_type": "BENCHMARKS",
+            },
+        ],
+    }
+
+    graph_ingestion_engine.execute_single_command(
+        item=split_cmd_item, doc_title="Test Doc", proj_list=[project_id]
+    )
+
+    all_edges = db_engine.get_edges(project_id)
+    # Expected edges:
+    # 1. sub_1 -> hub_multi (SUBSET_OF umbrella edge)
+    # 2. sub_2 -> hub_multi (SUBSET_OF umbrella edge)
+    # 3. neighbor_shared_eval -> sub_1 (EVALUATES)
+    # 4. neighbor_shared_eval -> sub_2 (BENCHMARKS)
+    # The old edge neighbor_shared_eval -> hub_multi MUST have been deleted!
+    assert len(all_edges) == 4
+
+    direct_hub_edges = [
+        e
+        for e in all_edges
+        if (e.source_id == "neighbor_shared_eval" and e.target_id == "hub_multi")
+        or (e.source_id == "hub_multi" and e.target_id == "neighbor_shared_eval")
+    ]
+    assert len(direct_hub_edges) == 0, "Old edge to original hub was not deleted!"
+
+    sub_rewired_edges = [
+        e
+        for e in all_edges
+        if e.source_id == "neighbor_shared_eval" and e.target_id != "hub_multi"
+    ]
+    assert len(sub_rewired_edges) == 2
+    relations = {e.description for e in sub_rewired_edges}
+    assert "EVALUATES" in relations
+    assert "BENCHMARKS" in relations
+
+
+def test_split_concept_defensive_guard_prevents_idle_subconcepts():
+    """Verify that if LLM omits a sub-concept in rewired_edges, the backend guard
+
+    automatically links the idle sub-concept to an available neighbor.
+    """
+    project_id = "test_idle_guard_project"
+
+    hub_node = GraphNode(
+        _id="hub_idle_test",
+        node_type="CONCEPT",
+        title="Clustered Concept",
+        description="Hub to split with an omitted subconcept.",
+        passage_ids=[],
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
+    db_engine.upsert_node(hub_node)
+
+    neighbor_node = GraphNode(
+        _id="neighbor_context_node",
+        node_type="CONCEPT",
+        title="Related Context",
+        description="Neighbor context.",
+        passage_ids=[],
+        project_ids=[project_id],
+        metadata={"immutable": True},
+    )
+    db_engine.upsert_node(neighbor_node)
+
+    old_edge = GraphEdge(
+        _id="edge_old_context_hub",
+        source_id="neighbor_context_node",
+        target_id="hub_idle_test",
+        description="General Link",
+        project_ids=[project_id],
+    )
+    db_engine.upsert_edge(old_edge)
+
+    # Split into 2 sub-concepts, but the rewired_edges ONLY mentions sub_1!
+    split_cmd_item = {
+        "action": "SPLIT_CONCEPT",
+        "concept_id": "hub_idle_test",
+        "sub_concepts": [
+            {
+                "sub_id_alias": "sub_1",
+                "title": "Sub 1 Active",
+                "description": "Active sub-concept",
+                "passage_ids": [],
+            },
+            {
+                "sub_id_alias": "sub_2",
+                "title": "Sub 2 Forgotten",
+                "description": "Omitted by LLM in rewired_edges",
+                "passage_ids": [],
+            },
+        ],
+        "rewired_edges": [
+            {
+                "neighbor_id": "neighbor_context_node",
+                "connect_to_sub_alias": "sub_1",
+                "relation_type": "RELEVANT_TO",
+            }
+        ],
+    }
+
+    graph_ingestion_engine.execute_single_command(
+        item=split_cmd_item, doc_title="Test Doc", proj_list=[project_id]
+    )
+
+    all_edges = db_engine.get_edges(project_id)
+    # Expected edges:
+    # 1. sub_1 -> hub (SUBSET_OF)
+    # 2. sub_2 -> hub (SUBSET_OF)
+    # 3. neighbor -> sub_1 (explicitly rewired)
+    # 4. neighbor -> sub_2 (auto-fallback connected so sub_2 is NOT idle!)
+    assert len(all_edges) == 4
+
+    sub_rewired_edges = [
+        e
+        for e in all_edges
+        if e.source_id == "neighbor_context_node" and e.target_id != "hub_idle_test"
+    ]
+    assert len(sub_rewired_edges) == 2, "Defensive guard failed to connect sub_2!"
