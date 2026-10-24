@@ -186,3 +186,52 @@ def test_department_persona_mutually_exclusive_partitioning():
     assert "concept_inside_partition" in traversed
     # concept_outside_partition MUST be excluded because it is outside partition boundary!
     assert "concept_outside_partition" not in traversed
+
+
+def test_reorganize_concept_hub_emits_telemetry_events(monkeypatch):
+    """Verify that DepartmentPersonaAgent.reorganize_concept_hub emits discovery telemetry
+
+    events even when no nodes qualify or when explored_nodes is empty.
+    """
+    hub = GraphNode(
+        _id="hub_telemetry",
+        node_type="CONCEPT",
+        title="Telemetry Hub",
+        description="Testing reorganization telemetry.",
+        passage_ids=[],
+        project_ids=["proj_reorg_telemetry"],
+        metadata={"immutable": False},
+    )
+    agent = DepartmentPersonaAgent(hub)
+
+    # 1. Empty explored nodes
+    res_empty = agent.reorganize_concept_hub(
+        explored_nodes=[], project_id="proj_reorg_telemetry"
+    )
+    assert res_empty["commands"] == []
+    assert res_empty["emitted_events"] == []
+
+    # 2. Mock discovery LLM response returning 0 candidate IDs
+    from app.services.llm_gateway import llm_gateway
+
+    monkeypatch.setattr(
+        llm_gateway,
+        "generate_chat_completion",
+        lambda *args, **kwargs: '{"candidate_concept_ids": []}',
+    )
+
+    db_engine.upsert_node(hub)
+    res = agent.reorganize_concept_hub(
+        explored_nodes=[hub], project_id="proj_reorg_telemetry", degree_threshold=5
+    )
+    events = res.get("emitted_events", [])
+    assert len(events) == 2
+    event_names = [e["event"] for e in events]
+    assert "reorg_discovery_started" in event_names
+    assert "reorg_discovery_completed" in event_names
+    start_evt = next(e for e in events if e["event"] == "reorg_discovery_started")
+    assert start_evt["qualifying_candidates_count"] == 0
+    assert start_evt["evaluated_nodes_count"] == 1
+    done_evt = next(e for e in events if e["event"] == "reorg_discovery_completed")
+    assert done_evt["candidate_count"] == 0
+    assert "cohesive" in done_evt["message"]

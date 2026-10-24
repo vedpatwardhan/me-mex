@@ -185,14 +185,21 @@ class DepartmentPersonaAgent:
         explored_nodes: list[GraphNode] | None = None,
         project_id: str = "global",
         degree_threshold: int = 5,
-    ) -> List[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
         3-Step Non-Destructive Concept Node Reorganization & Subdivision during Ingestion.
 
         Step 1 (Discovery): Inspects full sub-graph payload to discover candidate over-clustered mutable concept nodes.
         Step 2 (Formulation): Formulates 2-3 focused sub-concepts around each target node using passage text grounding.
         Step 3 (Neighbor Re-Wiring): Re-wires direct neighbor edges to connect through the new sub-concepts while preserving the original concept hub as an umbrella node.
+
+        Returns a dictionary containing both executable commands and emitted telemetry events:
+        {"commands": List[Dict[str, Any]], "emitted_events": List[Dict[str, Any]]}
         """
+        emitted_events: List[Dict[str, Any]] = []
+        if not explored_nodes:
+            return {"commands": [], "emitted_events": []}
+
         all_edges = db_engine.get_edges(project_id)
         node_id_set = {n.id for n in explored_nodes}
         node_map = {n.id: n for n in explored_nodes}
@@ -228,6 +235,31 @@ class DepartmentPersonaAgent:
                 neighbor_map[e.target_id].append(
                     _make_neighbor(e.source_id, "incoming", e.description)
                 )
+
+        # Count mutable candidate nodes meeting the degree threshold
+        qualifying_nodes = [
+            n
+            for n in explored_nodes
+            if not n.is_immutable and degree_map.get(n.id, 0) >= degree_threshold
+        ]
+
+        evt_disc_start = {
+            "event": "reorg_discovery_started",
+            "persona_id": self.department_id,
+            "department_name": self.department_name,
+            "evaluated_nodes_count": len(explored_nodes),
+            "qualifying_candidates_count": len(qualifying_nodes),
+            "qualifying_node_titles": [n.title for n in qualifying_nodes],
+            "message": (
+                f"[{self.department_name}] Evaluating {len(explored_nodes)} nodes "
+                f"({len(qualifying_nodes)} mutable with degree >= {degree_threshold}) for reorganization..."
+            ),
+            "timestamp": time.time(),
+        }
+        emitted_events.append(evt_disc_start)
+        print(
+            f"[{self.department_name}] Step 3 Reorganization started: {evt_disc_start['message']}"
+        )
 
         # STEP 1: Discovery Phase (Identify candidate mutable concept nodes)
         # Inlining connected edges directly into each node object for unified LLM inspection
@@ -273,16 +305,84 @@ Identify any MUTABLE concept nodes with degree >= {degree_threshold} that combin
                 f"[{self.department_name}] Concept reorganization discovery failed: {e}"
             ) from e
 
+        if candidate_ids:
+            found_titles = [
+                (node_map.get(cid).title if node_map.get(cid) else cid)
+                for cid in candidate_ids
+            ]
+            disc_msg = (
+                f"[{self.department_name}] Discovered {len(candidate_ids)} over-clustered candidate node(s) "
+                f"for subdivision: {', '.join(found_titles)}."
+            )
+        else:
+            disc_msg = (
+                f"[{self.department_name}] Discovery completed: Sub-graph is cohesive. "
+                f"No nodes require intermediate subdivision."
+            )
+
+        evt_disc_done = {
+            "event": "reorg_discovery_completed",
+            "persona_id": self.department_id,
+            "department_name": self.department_name,
+            "candidate_count": len(candidate_ids),
+            "candidate_ids": candidate_ids,
+            "message": disc_msg,
+            "timestamp": time.time(),
+        }
+        emitted_events.append(evt_disc_done)
+        print(disc_msg)
+
         reorg_commands: List[Dict[str, Any]] = []
 
         # STEPS 2 & 3: Separated Sub-Concept Formulation & Neighbor Edge Re-Wiring per candidate concept node
         for c_id in candidate_ids:
             target_node = node_map.get(c_id) or db_engine.get_node(c_id)
-            if not target_node or target_node.is_immutable:
+            if not target_node:
+                skip_evt = {
+                    "event": "reorg_candidate_skipped",
+                    "persona_id": self.department_id,
+                    "department_name": self.department_name,
+                    "concept_id": c_id,
+                    "reason": "Node not found in graph",
+                    "message": f"[{self.department_name}] Skipped candidate '{c_id}': not found in graph.",
+                    "timestamp": time.time(),
+                }
+                emitted_events.append(skip_evt)
+                print(skip_evt["message"])
+                continue
+
+            if target_node.is_immutable:
+                skip_evt = {
+                    "event": "reorg_candidate_skipped",
+                    "persona_id": self.department_id,
+                    "department_name": self.department_name,
+                    "concept_id": c_id,
+                    "node_title": target_node.title,
+                    "reason": "Node is immutable (Root or intra-document concept)",
+                    "message": f"[{self.department_name}] Skipped candidate '{target_node.title}': immutable node.",
+                    "timestamp": time.time(),
+                }
+                emitted_events.append(skip_evt)
+                print(skip_evt["message"])
                 continue
 
             # Fetch plain-text passage chunks with explicit passage_id keys for grounding
             passages = db_engine.get_passages(target_node.passage_ids)
+            if not passages:
+                skip_evt = {
+                    "event": "reorg_candidate_skipped",
+                    "persona_id": self.department_id,
+                    "department_name": self.department_name,
+                    "concept_id": c_id,
+                    "node_title": target_node.title,
+                    "reason": "No passage chunks associated with node",
+                    "message": f"[{self.department_name}] Skipped candidate '{target_node.title}': no grounding passages.",
+                    "timestamp": time.time(),
+                }
+                emitted_events.append(skip_evt)
+                print(skip_evt["message"])
+                continue
+
             passage_payload = [
                 {"passage_id": p.id, "text_content": p.text_content} for p in passages
             ]
@@ -328,6 +428,18 @@ Formulate 3-4 focused sub-concepts to cluster around '{target_node.id}'.
                 ) from e
 
             if not sub_concepts:
+                skip_evt = {
+                    "event": "reorg_candidate_skipped",
+                    "persona_id": self.department_id,
+                    "department_name": self.department_name,
+                    "concept_id": c_id,
+                    "node_title": target_node.title,
+                    "reason": "Sub-concept formulation returned 0 concepts",
+                    "message": f"[{self.department_name}] Skipped candidate '{target_node.title}': formulation produced 0 sub-concepts.",
+                    "timestamp": time.time(),
+                }
+                emitted_events.append(skip_evt)
+                print(skip_evt["message"])
                 continue
 
             # STEP 3: Neighbor Edge Re-Wiring (Iterate over ALL direct neighbors)
@@ -379,7 +491,7 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
                 }
             )
 
-        return reorg_commands
+        return {"commands": reorg_commands, "emitted_events": emitted_events}
 
     def persona_ingestion(
         self,
@@ -441,7 +553,7 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
             res = llm_gateway.generate_chat_completion(
                 messages,
                 temperature=0.2,
-                max_tokens=1024,
+                max_tokens=4096,
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )

@@ -259,6 +259,12 @@ export const useMemexStore = create<MemexState>((set, get) => ({
               logMsg = `Persona [${eventData.department_name}]: explored ${count} adjacent nodes.`;
             } else if (evtType === 'node_touched') {
               logMsg = eventData.message || `Touched node: "${eventData.node_title || eventData.node_id}"`;
+            } else if (evtType === 'reorg_discovery_started') {
+              logMsg = eventData.message || `Persona [${eventData.department_name}]: Evaluating nodes for reorganization...`;
+            } else if (evtType === 'reorg_discovery_completed') {
+              logMsg = eventData.message || `Persona [${eventData.department_name}]: Reorganization discovery complete.`;
+            } else if (evtType === 'reorg_candidate_skipped') {
+              logMsg = eventData.message || `Persona [${eventData.department_name}]: Skipped candidate node (${eventData.reason}).`;
             } else if (evtType === 'ingestion_completed') {
               logMsg = eventData.message || `Document ingestion completed.`;
             }

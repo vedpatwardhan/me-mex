@@ -1079,12 +1079,18 @@ class ExecutiveOrchestrator:
                     yield evt
 
             # 3. Non-Destructive Concept Hub Reorganization (Operating on real-time graph state)
-            reorg_cmds = await asyncio.to_thread(
+            reorg_res = await asyncio.to_thread(
                 dept.reorganize_concept_hub,
                 explored_nodes=traversal_finding["explored_nodes"],
                 project_id=project_id,
             )
-            for cmd in reorg_cmds:
+
+            # Yield and broadcast all reorganization discovery and decision telemetry events
+            for reorg_evt in reorg_res.get("emitted_events", []):
+                self.event_queue.push(project_id, reorg_evt)
+                yield reorg_evt
+
+            for cmd in reorg_res.get("commands", []):
                 cmd["department_name"] = dept.department_name
                 cmd["persona_id"] = dept.department_id
                 evt = self.ingestion_engine.execute_single_command(
