@@ -1000,11 +1000,107 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, evt_hubs)
         yield evt_hubs
 
-        active_departments = [
-            DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
+        # Step 2: Candidate Hub Assembly & Relevance Routing
+        top_hubs = self.analytics.get_top_concept_hubs(
+            project_id=project_id, max_k=self.max_k_hubs
+        )
+        evt_hubs = {
+            "event": "hubs_calculated",
+            "hubs": [
+                {"id": h[0].id, "title": h[0].title, "score": round(h[1], 4)}
+                for h in top_hubs
+            ],
+            "count": len(top_hubs),
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, evt_hubs)
+        yield evt_hubs
+
+        # Phase 1: Pre-Check Persona Relevance Filtering
+        candidate_hubs_payload = [
+            {"id": h[0].id, "title": h[0].title, "description": h[0].description}
+            for h in top_hubs
+        ]
+        intra_concepts_payload = [
+            {"id": n.id, "title": n.title, "description": n.description}
+            for n in intra_doc_nodes
         ]
 
-        # Partition network into mutually exclusive sub-graph communities anchored to detected hubs
+        system_route = load_prompt("persona_route_relevance")
+        user_route = f"""
+Incoming Document: '{title}'
+Newly Extracted Concepts ({len(intra_concepts_payload)} items):
+{json.dumps(intra_concepts_payload, indent=2)}
+
+Candidate Persona Domain Hubs ({len(candidate_hubs_payload)} items):
+{json.dumps(candidate_hubs_payload, indent=2)}
+
+Select 1 to 3 candidate hubs that have genuine domain relevance to host or connect with these concepts.
+If no specialized domain hub fits, you MUST select the 'Everything' hub.
+"""
+        selected_hub_ids = []
+        try:
+            res_route = self.llm.generate_chat_completion(
+                [
+                    {"role": "system", "content": system_route},
+                    {"role": "user", "content": user_route},
+                ],
+                temperature=0.1,
+                max_tokens=512,
+                response_format={"type": "json_object"},
+                enable_reasoning=False,
+            )
+            data_route = json.loads(res_route)
+            selected_hub_ids = data_route.get("selected_hub_ids", [])
+        except Exception as e:
+            print(f"[ExecutiveOrchestrator] Persona routing error: {e}")
+            selected_hub_ids = []
+
+        # Enforce universal fallback: if empty, fallback to 'Everything' or first top hub
+        if not selected_hub_ids:
+            genesis_candidate = next(
+                (
+                    h[0].id
+                    for h in top_hubs
+                    if h[0].title.strip().lower() == "everything"
+                ),
+                top_hubs[0][0].id if top_hubs else None,
+            )
+            if genesis_candidate:
+                selected_hub_ids = [genesis_candidate]
+
+        # Filter active departments to ONLY the selected hubs
+        selected_hub_set = set(selected_hub_ids)
+        active_departments = [
+            DepartmentPersonaAgent(hub_node, score)
+            for hub_node, score in top_hubs
+            if hub_node.id in selected_hub_set
+        ]
+        if not active_departments and top_hubs:
+            active_departments = [
+                DepartmentPersonaAgent(top_hubs[0][0], top_hubs[0][1])
+            ]
+
+        evt_route_done = {
+            "event": "persona_routing_completed",
+            "active_hub_ids": [d.hub_node.id for d in active_departments],
+            "active_hub_titles": [d.hub_node.title for d in active_departments],
+            "bypassed_hub_titles": [
+                h[0].title
+                for h in top_hubs
+                if h[0].id not in {d.hub_node.id for d in active_departments}
+            ],
+            "message": (
+                f"Persona routing completed: activated {len(active_departments)} domain hub(s) "
+                f"({', '.join(d.hub_node.title for d in active_departments)})."
+            ),
+            "timestamp": time.time(),
+        }
+        self.event_queue.push(project_id, evt_route_done)
+        yield evt_route_done
+        print(f"[ExecutiveOrchestrator] {evt_route_done['message']}")
+
+        # Partition network into mutually exclusive sub-graph communities anchored to detected active hubs
         top_hub_nodes = [dept.hub_node for dept in active_departments]
         department_communities = self.analytics.partition_department_communities(
             project_id=project_id, hubs=top_hub_nodes
@@ -1022,6 +1118,9 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, evt_parts)
         yield evt_parts
 
+        # Phase 2: Parallel Partitioned Sub-Graph Traversal for active personas
+        collective_explored_trees: Dict[str, Dict[str, Any]] = {}
+
         for dept in active_departments:
             yield {
                 "event": "persona_traversal_start",
@@ -1032,7 +1131,6 @@ class ExecutiveOrchestrator:
                 "timestamp": time.time(),
             }
 
-            # 1. Partitioned Sub-Graph Traversal
             partition_ids = set(department_communities.get(dept.hub_node.id, []))
             traversal_finding = await asyncio.to_thread(
                 dept.explore_concept_hub,
@@ -1043,11 +1141,9 @@ class ExecutiveOrchestrator:
                 partition_node_ids=partition_ids if partition_ids else None,
             )
 
-            # Yield each node_touched event recorded during traversal (hop 0 + expansion)
             for touch_evt in traversal_finding.get("emitted_events", []):
                 yield touch_evt
 
-            # Telemetry: Active persona traversal nodes
             evt_active = {
                 "event": "persona_traversal_active",
                 "department_id": dept.department_id,
@@ -1058,41 +1154,166 @@ class ExecutiveOrchestrator:
             self.event_queue.push(project_id, evt_active)
             yield evt_active
 
-            # 2. Ingestion Linking (Immediate execution into MongoDB)
-            ingest_res = await asyncio.to_thread(
-                dept.persona_ingestion,
-                intra_doc_nodes,
-                title,
-                query,
-                traversal_finding["explored_nodes"],
-                chat_history=chat_history,
-                project_id=project_id,
-            )
-            for cmd in ingest_res.get("commands", []):
-                cmd["department_name"] = dept.department_name
-                cmd["persona_id"] = dept.department_id
-                evt = self.ingestion_engine.execute_single_command(
-                    cmd, title, proj_list
-                )
-                if evt:
-                    self.event_queue.push(project_id, evt)
-                    yield evt
-
-            # 3. Non-Destructive Concept Hub Reorganization (Operating on real-time graph state)
-            # Ensure the actively modified hub node is included with its updated post-ingestion degree
-            eval_nodes_dict = {
+            # Store explored nodes per department for collective linking and post-reorganization
+            dept_nodes_dict = {
                 n.id: n for n in traversal_finding.get("explored_nodes", [])
             }
-            eval_nodes_dict[dept.hub_node.id] = dept.hub_node
-            reorg_eval_nodes = list(eval_nodes_dict.values())
+            dept_nodes_dict[dept.hub_node.id] = dept.hub_node
+            collective_explored_trees[dept.hub_node.id] = {
+                "department_id": dept.department_id,
+                "department_name": dept.department_name,
+                "hub_node": dept.hub_node,
+                "explored_nodes": list(dept_nodes_dict.values()),
+            }
 
-            reorg_res = await asyncio.to_thread(
-                dept.reorganize_concept_hub,
-                explored_nodes=reorg_eval_nodes,
-                project_id=project_id,
+        # Phase 3: Collective Multi-Hub Ingestion Linking (Radial Invariant & Surjective Coverage)
+        available_domains_payload = []
+        for h_id, d_info in collective_explored_trees.items():
+            h_node = d_info["hub_node"]
+            exp_nodes = d_info["explored_nodes"]
+            available_domains_payload.append(
+                {
+                    "domain_hub_id": h_node.id,
+                    "domain_name": d_info["department_name"],
+                    "central_hub_node": {
+                        "id": h_node.id,
+                        "title": h_node.title,
+                        "description": h_node.description,
+                    },
+                    "intermediate_explored_concepts": [
+                        {
+                            "id": n.id,
+                            "title": n.title,
+                            "description": n.description,
+                        }
+                        for n in exp_nodes
+                        if n.id != h_node.id
+                    ],
+                }
             )
 
-            # Yield and broadcast all reorganization discovery and decision telemetry events
+        system_collective = load_prompt("collective_ingestion_linking")
+        user_collective = f"""
+Document Title: '{title}'
+User Query: "{query}"
+
+Newly Extracted Intra-Document Concepts ({len(intra_concepts_payload)} items, IMMUTABLE):
+{json.dumps(intra_concepts_payload, indent=2)}
+
+Available Active Persona Domains and Explored Sub-Graph Nodes:
+{json.dumps(available_domains_payload, indent=2)}
+
+INVARIANTS TO ENFORCE:
+1. RADIAL TREE INVARIANT: For any single persona domain, each newly extracted concept can connect to AT MOST ONE node (the single most specific semantic match). Never connect to an intermediate node and also to the central hub.
+2. SURJECTIVE COVERAGE: Every newly extracted concept MUST connect to AT LEAST ONE node across the available domains.
+3. SELECTIVE ATTACHMENT: Connect concepts ONLY to domains where they genuinely belong.
+"""
+        collective_commands = []
+        try:
+            res_collective = self.llm.generate_chat_completion(
+                [
+                    {"role": "system", "content": system_collective},
+                    {"role": "user", "content": user_collective},
+                ],
+                temperature=0.2,
+                max_tokens=4096,
+                response_format={"type": "json_object"},
+                enable_reasoning=False,
+            )
+            data_collective = json.loads(res_collective)
+            collective_commands = data_collective.get("commands", [])
+        except Exception as e:
+            print(f"[ExecutiveOrchestrator] Collective ingestion linking error: {e}")
+            collective_commands = []
+
+        # Execute collective linking commands into MongoDB with Radial Single-Attachment Enforcement
+        # Map: (concept_id, domain_hub_id) -> chosen command (to enforce at most 1 connection per domain)
+        domain_connections_tracker: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        non_edge_commands: List[Dict[str, Any]] = []
+
+        # Pre-populate domain lookup map: node_id -> domain_hub_id
+        node_to_domain_map: Dict[str, str] = {}
+        for h_id, d_info in collective_explored_trees.items():
+            for n in d_info["explored_nodes"]:
+                node_to_domain_map[n.id] = h_id
+
+        for cmd in collective_commands:
+            action = cmd.get("action")
+            if action in ["CREATE_EDGE", "CONNECT_DIRECT", "CONSTRUCT_EDGE"]:
+                edge = cmd.get("edge", {})
+                src = edge.get("source_id")
+                tgt = edge.get("target_id")
+                domain = edge.get("domain_hub_id") or node_to_domain_map.get(tgt)
+                if src and tgt and domain:
+                    pair_key = (src, domain)
+                    # If already connected to this domain, prioritize deeper intermediate node over root hub
+                    if pair_key not in domain_connections_tracker:
+                        domain_connections_tracker[pair_key] = cmd
+                    else:
+                        existing_cmd = domain_connections_tracker[pair_key]
+                        existing_tgt = existing_cmd.get("edge", {}).get("target_id")
+                        if existing_tgt == domain and tgt != domain:
+                            # Replace hub link with more specific intermediate node link
+                            domain_connections_tracker[pair_key] = cmd
+                else:
+                    non_edge_commands.append(cmd)
+            else:
+                non_edge_commands.append(cmd)
+
+        filtered_commands = (
+            list(domain_connections_tracker.values()) + non_edge_commands
+        )
+
+        # Defensive Guard: Verify Surjective Coverage (Every concept must connect to at least one node)
+        connected_concepts = {
+            cmd.get("edge", {}).get("source_id")
+            for cmd in filtered_commands
+            if cmd.get("edge", {}).get("source_id")
+        }
+        fallback_hub = active_departments[0].hub_node
+        for intra in intra_doc_nodes:
+            if intra.id not in connected_concepts:
+                filtered_commands.append(
+                    {
+                        "action": "CREATE_EDGE",
+                        "department_name": active_departments[0].department_name,
+                        "persona_id": active_departments[0].department_id,
+                        "edge": {
+                            "source_id": intra.id,
+                            "target_id": fallback_hub.id,
+                            "relation_type": "RELEVANT_TO",
+                            "description": "Fallback foundational connection ensuring complete graph connectivity.",
+                        },
+                    }
+                )
+
+        for cmd in filtered_commands:
+            # Map persona details if missing
+            tgt = cmd.get("edge", {}).get("target_id")
+            dept_id = node_to_domain_map.get(tgt)
+            if dept_id and dept_id in collective_explored_trees:
+                cmd["department_name"] = collective_explored_trees[dept_id][
+                    "department_name"
+                ]
+                cmd["persona_id"] = collective_explored_trees[dept_id]["department_id"]
+            evt = self.ingestion_engine.execute_single_command(cmd, title, proj_list)
+            if evt:
+                self.event_queue.push(project_id, evt)
+                yield evt
+
+        # Phase 4: Consolidated Post-Linking Macro-Reorganization
+        # Runs ONCE after all edges are established into MongoDB
+        for dept in active_departments:
+            dept_explored = collective_explored_trees.get(dept.hub_node.id, {}).get(
+                "explored_nodes", [dept.hub_node]
+            )
+            reorg_res = await asyncio.to_thread(
+                dept.reorganize_concept_hub,
+                explored_nodes=dept_explored,
+                project_id=project_id,
+                degree_threshold=5,
+            )
+
             for reorg_evt in reorg_res.get("emitted_events", []):
                 self.event_queue.push(project_id, reorg_evt)
                 yield reorg_evt

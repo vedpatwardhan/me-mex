@@ -445,3 +445,102 @@ async def test_execute_ingestion_flow_fails_fast_on_fetch_error_without_substitu
 
     conversation_evts = [e for e in events if e.get("event") == "conversation_start"]
     assert len(conversation_evts) == 1
+
+
+@pytest.mark.asyncio
+async def test_coordinated_persona_routing_and_fallback(monkeypatch):
+    """Verify that candidate hubs are routed via LLM, falling back to 'Everything' when unrelated."""
+    from app.agents.orchestrator import orchestrator
+    from app.models import GraphNode
+    from app.db import db_engine
+
+    proj = "test_routing_proj"
+    everything_hub = GraphNode(
+        _id="hub_everything_route",
+        title="Everything",
+        description="Universal anchor.",
+        node_type="CONCEPT",
+        project_ids=[proj],
+        metadata={"immutable": False, "is_genesis": True},
+    )
+    driving_hub = GraphNode(
+        _id="hub_driving_route",
+        title="Autonomous Driving",
+        description="Vehicle dynamics.",
+        node_type="CONCEPT",
+        project_ids=[proj],
+        metadata={"immutable": False},
+    )
+    db_engine.upsert_node(everything_hub)
+    db_engine.upsert_node(driving_hub)
+
+    # Mock routing LLM to select ONLY everything_hub for an unrelated biology topic
+    def mock_routing(messages, **kwargs):
+        sys_msg = messages[0]["content"]
+        if (
+            "persona_route_relevance" in sys_msg
+            or "Executive Knowledge Graph Router" in sys_msg
+        ):
+            return '{"selected_hub_ids": ["hub_everything_route"], "reasoning": "Biology paper unrelated to driving."}'
+        elif (
+            "collective_ingestion_linking" in sys_msg
+            or "Collective Graph Integration Coordinator" in sys_msg
+        ):
+            return '{"commands": [{"action": "CREATE_EDGE", "edge": {"source_id": "c1", "target_id": "hub_everything_route", "domain_hub_id": "hub_everything_route"}}]}'
+        return "{}"
+
+    monkeypatch.setattr(orchestrator.llm, "generate_chat_completion", mock_routing)
+
+    # Verify get_top_concept_hubs returns both
+    top_hubs = orchestrator.analytics.get_top_concept_hubs(project_id=proj)
+    hub_ids = [h[0].id for h in top_hubs]
+    assert "hub_everything_route" in hub_ids
+
+
+def test_radial_tree_invariant_drops_duplicate_ancestor_edges():
+    """Verify that graph ingestion engine drops redundant duplicate links between the same concept and target."""
+    from app.services.graph_ingestion_engine import graph_ingestion_engine
+    from app.models import GraphNode
+    from app.db import db_engine
+
+    proj = "test_radial_inv_proj"
+    src = GraphNode(
+        _id="concept_src_test",
+        title="Source Concept",
+        description="Source",
+        node_type="CONCEPT",
+        project_ids=[proj],
+        metadata={"immutable": True},
+    )
+    tgt = GraphNode(
+        _id="concept_tgt_test",
+        title="Target Hub",
+        description="Target",
+        node_type="CONCEPT",
+        project_ids=[proj],
+        metadata={"immutable": False},
+    )
+    db_engine.upsert_node(src)
+    db_engine.upsert_node(tgt)
+
+    cmd = {
+        "action": "CREATE_EDGE",
+        "edge": {
+            "source_id": "concept_src_test",
+            "target_id": "concept_tgt_test",
+            "description": "First Link",
+        },
+    }
+    evt1 = graph_ingestion_engine.execute_single_command(cmd, "Doc", [proj])
+    assert evt1 is not None
+    assert evt1["event"] == "node_touched"
+
+    # Attempting to execute the exact same edge again should be blocked by the Radial Invariant guard
+    evt2 = graph_ingestion_engine.execute_single_command(cmd, "Doc", [proj])
+    assert evt2 is None
+    edges = [
+        e
+        for e in db_engine.get_edges(proj)
+        if e.source_id == "concept_src_test" and e.target_id == "concept_tgt_test"
+    ]
+    assert len(edges) == 1, "Duplicate edge was not blocked!"

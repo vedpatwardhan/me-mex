@@ -198,6 +198,22 @@ class GraphAnalyticsWorker:
                 if len(selected_hubs) >= max_k:
                     break
 
+        # GUARANTEE: The primordial Universal Genesis node ('Everything') must ALWAYS be present in candidate hubs
+        genesis_node = next(
+            (
+                n
+                for n in mutable_concept_hubs
+                if n.title.strip().lower() == "everything"
+                or n.metadata.get("is_genesis") is True
+            ),
+            None,
+        )
+        if genesis_node:
+            selected_ids = {h[0].id for h in selected_hubs}
+            if genesis_node.id not in selected_ids:
+                genesis_score = centralities.get(genesis_node.id, 0.0)
+                selected_hubs.append((genesis_node, genesis_score))
+
         return selected_hubs
 
 

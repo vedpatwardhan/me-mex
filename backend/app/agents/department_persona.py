@@ -391,30 +391,30 @@ You may ONLY select from the candidate_id values above.
                 print(skip_evt["message"])
                 continue
 
-            # Fetch plain-text passage chunks with explicit passage_id keys for grounding
-            passages = db_engine.get_passages(target_node.passage_ids)
-            if not passages:
-                skip_evt = {
-                    "event": "reorg_candidate_skipped",
-                    "persona_id": self.department_id,
-                    "department_name": self.department_name,
-                    "concept_id": c_id,
-                    "node_title": target_node.title,
-                    "reason": "No passage chunks associated with node",
-                    "message": f"[{self.department_name}] Skipped candidate '{target_node.title}': no grounding passages.",
-                    "timestamp": time.time(),
-                }
-                emitted_events.append(skip_evt)
-                print(skip_evt["message"])
-                continue
-
-            passage_payload = [
-                {"passage_id": p.id, "text_content": p.text_content} for p in passages
-            ]
-
             neighbors = neighbor_map.get(c_id, [])
 
-            # STEP 2: Sub-Concept Formulation (Propose sub-clusters ONLY)
+            # STEP 2: Pure Semantic Sub-Concept Formulation
+            # Invariant: Sub-concept formulation operates purely on the rich titles, descriptions,
+            # and relations of connected neighbor concepts without leaking verbose raw passage texts.
+            neighbor_concepts_payload = []
+            for nb in neighbors:
+                nb_id = nb.get("neighbor_id")
+                nb_node = (
+                    (node_map.get(nb_id) or db_engine.get_node(nb_id))
+                    if nb_id
+                    else None
+                )
+                if nb_node:
+                    neighbor_concepts_payload.append(
+                        {
+                            "id": nb_node.id,
+                            "title": nb_node.title,
+                            "description": nb_node.description,
+                            "relation_to_hub": nb.get("relation_type", "RELEVANT_TO"),
+                            "direction": nb.get("direction", "incoming"),
+                        }
+                    )
+
             system_split = load_prompt(
                 "persona_reorganize_split",
                 department_name=self.department_name,
@@ -423,12 +423,12 @@ You may ONLY select from the candidate_id values above.
             user_split = f"""
 Target Over-Clustered Mutable Concept Hub: '{target_node.title}' (ID: {target_node.id})
 Current Description: {target_node.description}
-Connection Degree: {degree_map.get(target_node.id, 0)}
+Total Connected Neighbor Concepts: {len(neighbor_concepts_payload)}
 
-Associated Grounding Passages with Explicit IDs:
-{json.dumps(passage_payload, indent=2)}
+Connected Neighbor Concepts Clustered Around '{target_node.title}':
+{json.dumps(neighbor_concepts_payload, indent=2)}
 
-Formulate 3-4 focused sub-concepts to cluster around '{target_node.id}'.
+Group these connected concept themes into 3-4 focused intermediate sub-concepts.
 """
             sub_concepts = []
             try:

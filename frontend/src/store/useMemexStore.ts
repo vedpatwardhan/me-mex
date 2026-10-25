@@ -249,6 +249,8 @@ export const useMemexStore = create<MemexState>((set, get) => ({
               logMsg = `Created ${eventData.count} intra-document concept nodes.`;
             } else if (evtType === 'hubs_calculated') {
               logMsg = `Identified ${eventData.count || 0} active community hubs for cross-linking.`;
+            } else if (evtType === 'persona_routing_completed') {
+              logMsg = eventData.message || `Persona routing complete: selected active domains.`;
             } else if (evtType === 'partitions_calculated') {
               const deptCount = Object.keys(eventData.partitions || {}).length;
               logMsg = `Partitioned knowledge space into ${deptCount} specialist domains.`;

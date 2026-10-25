@@ -51,6 +51,17 @@ class GraphIngestionEngine:
             src_id = edge_data.get("source_id")
             tgt_id = edge_data.get("target_id")
             if src_id and tgt_id:
+                # Radial Tree Invariant Guard: Prevent duplicate edges between the same source and target
+                project_scope = proj_list[0] if proj_list else None
+                existing_edges = self.db.get_edges(project_scope)
+                for existing in existing_edges:
+                    if (
+                        existing.source_id == src_id and existing.target_id == tgt_id
+                    ) or (
+                        existing.source_id == tgt_id and existing.target_id == src_id
+                    ):
+                        return None  # Edge already exists, skip redundant duplicate
+
                 edge_id = f"edge_{uuid.uuid4().hex[:8]}"
                 edge_obj = GraphEdge(
                     _id=edge_id,

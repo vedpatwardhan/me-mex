@@ -177,3 +177,46 @@ def test_partition_department_communities_voronoi_mutual_exclusivity():
     # Coverage: all nodes must be partitioned
     all_partitioned = set_a.union(set_b)
     assert all_partitioned == {"hub_a", "hub_b", "leaf_a", "leaf_b"}
+
+
+def test_everything_hub_guaranteed_in_candidate_hubs():
+    """Verify that get_top_concept_hubs always includes the primordial 'Everything' node,
+
+    even if other nodes have much higher degrees.
+    """
+    proj = "proj_everything_guarantee_test"
+    genesis = GraphNode(
+        _id="concept_genesis_guaranteed",
+        title="Everything",
+        description="Universal knowledge anchor.",
+        node_type="CONCEPT",
+        project_ids=[proj],
+        metadata={"immutable": False, "is_genesis": True},
+    )
+    db_engine.upsert_node(genesis)
+
+    # Add several high-degree nodes
+    for i in range(10):
+        n = GraphNode(
+            _id=f"high_deg_node_{i}",
+            title=f"High Degree Node {i}",
+            description="High degree node.",
+            node_type="CONCEPT",
+            project_ids=[proj],
+            metadata={"immutable": False},
+        )
+        db_engine.upsert_node(n)
+        db_engine.upsert_edge(
+            GraphEdge(
+                _id=f"edge_high_{i}",
+                source_id=f"high_deg_node_{i}",
+                target_id="high_deg_node_0",
+                project_ids=[proj],
+            )
+        )
+
+    hubs = graph_analytics.get_top_concept_hubs(project_id=proj, max_k=3)
+    hub_ids = [h[0].id for h in hubs]
+    assert (
+        "concept_genesis_guaranteed" in hub_ids
+    ), "Everything hub must be guaranteed in top hubs!"

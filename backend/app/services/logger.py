@@ -241,18 +241,20 @@ class RichLogger:
         elif event_type == "hubs_calculated":
             count = event_data.get("count", 0)
             hubs = event_data.get("hubs", [])
-            hub_str = ", ".join(
-                f"'{h.get('title')}' ({h.get('score')})" for h in hubs[:3]
-            )
+            hub_str = ", ".join(f"'{h.get('title')}' ({h.get('score')})" for h in hubs)
             console.print(
                 f"{proj_badge}   ├─ 🌐 [bold blue]Top Concept Hubs Computed[/bold blue]: {count} hubs ({hub_str})"
             )
+
+        elif event_type == "persona_routing_completed":
+            msg = event_data.get("message", "Persona routing completed.")
+            console.print(f"{proj_badge}   ├─ 🎯 [bold green]{msg}[/bold green]")
 
         elif event_type == "partitions_calculated":
             partitions = event_data.get("partitions", {})
             parts_summary = ", ".join(
                 f"{dept} ({len(nodes)} nodes)"
-                for dept, nodes in list(partitions.items())[:3]
+                for dept, nodes in list(partitions.items())
             )
             console.print(
                 f"{proj_badge}   ├─ 🧩 [bold blue]Mutually Exclusive Partitions[/bold blue]: {len(partitions)} communities ({parts_summary})"

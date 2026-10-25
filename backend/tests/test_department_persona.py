@@ -245,7 +245,7 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
         node_type="CONCEPT",
         title="Everything",
         description="Over-clustered mutable hub.",
-        passage_ids=["pass_q1"],
+        passage_ids=[],  # Invariant: Mutable hub has no direct passages!
         project_ids=[project_id],
         metadata={"immutable": False},
     )
@@ -262,14 +262,14 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
     )
     db_engine.upsert_passage(p_rec)
 
-    # Create 5 neighbors connecting to hub
+    # Create 5 neighbors connecting to hub, with neighbor_0 holding the grounding passage!
     for i in range(5):
         n_node = GraphNode(
             _id=f"neighbor_{i}",
             node_type="CONCEPT",
             title=f"Topic {i}",
             description="Topic desc",
-            passage_ids=[],
+            passage_ids=["pass_q1"] if i == 0 else [],
             project_ids=[project_id],
             metadata={"immutable": True},
         )
@@ -307,14 +307,12 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
                         {
                             "sub_id_alias": "sub_1",
                             "title": "Sub 1",
-                            "description": "D1",
-                            "passage_ids": ["pass_q1"],
+                            "description": "Synthesized description of Sub 1.",
                         },
                         {
                             "sub_id_alias": "sub_2",
                             "title": "Sub 2",
-                            "description": "D2",
-                            "passage_ids": ["pass_q1"],
+                            "description": "Synthesized description of Sub 2.",
                         },
                     ]
                 }
