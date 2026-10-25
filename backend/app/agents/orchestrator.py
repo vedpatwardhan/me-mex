@@ -340,7 +340,7 @@ class ExecutiveOrchestrator:
             res = self.llm.generate_chat_completion(
                 messages,
                 temperature=0.0,
-                max_tokens=256,
+                max_tokens=1024,
                 response_format={"type": "json_object"},
                 enable_reasoning=False,
             )
@@ -374,6 +374,21 @@ class ExecutiveOrchestrator:
             print(f"[ExecutiveOrchestrator] classify_intent error: {e}")
             raise RuntimeError(f"User intent classification failed: {e}") from e
 
+    @staticmethod
+    def _sanitize_chat_history(
+        chat_history: Optional[List[Dict[str, str]]], max_len: int = 1024
+    ) -> List[Dict[str, str]]:
+        """Sanitizes incoming chat history turns to prevent oversized assistant messages from bloating prompts."""
+        if not chat_history:
+            return []
+        sanitized = []
+        for item in chat_history:
+            content = item.get("content") or item.get("text", "")
+            if len(content) > max_len:
+                content = content[:max_len] + "..."
+            sanitized.append({**item, "content": content})
+        return sanitized
+
     async def process_user_message(
         self,
         query: str,
@@ -381,8 +396,7 @@ class ExecutiveOrchestrator:
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Central conversational entry point routing user input dynamically across the 3 execution paths."""
-        if chat_history is None:
-            chat_history = []
+        chat_history = self._sanitize_chat_history(chat_history)
         try:
             intent_result = self.classify_intent(query, chat_history)
             intent = intent_result["intent"]
