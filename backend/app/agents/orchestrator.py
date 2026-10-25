@@ -984,14 +984,14 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, evt_intra_created)
         yield evt_intra_created
 
-        # Step 2: Sub-Graph Traversal, Relevance Eval, Multi-Hub Linking & Concept Reorganization
+        # Step 2: Sub-Graph Traversal, Candidate Hub Assembly & Relevance Routing
         top_hubs = self.analytics.get_top_concept_hubs(
             project_id=project_id, max_k=self.max_k_hubs
         )
         evt_hubs = {
             "event": "hubs_calculated",
             "hubs": [
-                {"id": h[0].id, "title": h[0].title, "score": round(h[1], 4)}
+                {"id": h.id, "title": h.title, "score": round(h.centrality_score, 4)}
                 for h in top_hubs
             ],
             "count": len(top_hubs),
@@ -1000,74 +1000,12 @@ class ExecutiveOrchestrator:
         self.event_queue.push(project_id, evt_hubs)
         yield evt_hubs
 
-        # Step 2: Candidate Hub Assembly & Relevance Routing
-        top_hubs = self.analytics.get_top_concept_hubs(
-            project_id=project_id, max_k=self.max_k_hubs
+        # Phase 1: Pre-Check Persona Relevance Filtering (delegated to DepartmentPersonaAgent)
+        selected_hub_ids = DepartmentPersonaAgent.filter_relevant_hubs(
+            doc_title=title,
+            intra_doc_nodes=intra_doc_nodes,
+            candidate_hubs=[h.node for h in top_hubs],
         )
-        evt_hubs = {
-            "event": "hubs_calculated",
-            "hubs": [
-                {"id": h[0].id, "title": h[0].title, "score": round(h[1], 4)}
-                for h in top_hubs
-            ],
-            "count": len(top_hubs),
-            "timestamp": time.time(),
-        }
-        self.event_queue.push(project_id, evt_hubs)
-        yield evt_hubs
-
-        # Phase 1: Pre-Check Persona Relevance Filtering
-        candidate_hubs_payload = [
-            {"id": h[0].id, "title": h[0].title, "description": h[0].description}
-            for h in top_hubs
-        ]
-        intra_concepts_payload = [
-            {"id": n.id, "title": n.title, "description": n.description}
-            for n in intra_doc_nodes
-        ]
-
-        system_route = load_prompt("persona_route_relevance")
-        user_route = f"""
-Incoming Document: '{title}'
-Newly Extracted Concepts ({len(intra_concepts_payload)} items):
-{json.dumps(intra_concepts_payload, indent=2)}
-
-Candidate Persona Domain Hubs ({len(candidate_hubs_payload)} items):
-{json.dumps(candidate_hubs_payload, indent=2)}
-
-Select 1 to 3 candidate hubs that have genuine domain relevance to host or connect with these concepts.
-If no specialized domain hub fits, you MUST select the 'Everything' hub.
-"""
-        selected_hub_ids = []
-        try:
-            res_route = self.llm.generate_chat_completion(
-                [
-                    {"role": "system", "content": system_route},
-                    {"role": "user", "content": user_route},
-                ],
-                temperature=0.1,
-                max_tokens=512,
-                response_format={"type": "json_object"},
-                enable_reasoning=False,
-            )
-            data_route = json.loads(res_route)
-            selected_hub_ids = data_route.get("selected_hub_ids", [])
-        except Exception as e:
-            print(f"[ExecutiveOrchestrator] Persona routing error: {e}")
-            selected_hub_ids = []
-
-        # Enforce universal fallback: if empty, fallback to 'Everything' or first top hub
-        if not selected_hub_ids:
-            genesis_candidate = next(
-                (
-                    h[0].id
-                    for h in top_hubs
-                    if h[0].title.strip().lower() == "everything"
-                ),
-                top_hubs[0][0].id if top_hubs else None,
-            )
-            if genesis_candidate:
-                selected_hub_ids = [genesis_candidate]
 
         # Filter active departments to ONLY the selected hubs
         selected_hub_set = set(selected_hub_ids)
@@ -1091,8 +1029,8 @@ If no specialized domain hub fits, you MUST select the 'Everything' hub.
                 if h[0].id not in {d.hub_node.id for d in active_departments}
             ],
             "message": (
-                f"Persona routing completed: activated {len(active_departments)} domain hub(s) "
-                f"({', '.join(d.hub_node.title for d in active_departments)})."
+                f"Persona routing completed: activated {len(active_departments)} domain"
+                f" hub(s) ({', '.join(d.hub_node.title for d in active_departments)})."
             ),
             "timestamp": time.time(),
         }
@@ -1103,7 +1041,7 @@ If no specialized domain hub fits, you MUST select the 'Everything' hub.
         # Partition network into mutually exclusive sub-graph communities anchored to detected active hubs
         top_hub_nodes = [dept.hub_node for dept in active_departments]
         department_communities = self.analytics.partition_department_communities(
-            project_id=project_id, hubs=top_hub_nodes
+            project_id=project_id, hubs=top_hub_nodes, max_depth=5
         )
         evt_parts = {
             "event": "partitions_calculated",
@@ -1167,6 +1105,10 @@ If no specialized domain hub fits, you MUST select the 'Everything' hub.
             }
 
         # Phase 3: Collective Multi-Hub Ingestion Linking (Radial Invariant & Surjective Coverage)
+        intra_concepts_payload = [
+            {"id": n.id, "title": n.title, "description": n.description}
+            for n in intra_doc_nodes
+        ]
         available_domains_payload = []
         for h_id, d_info in collective_explored_trees.items():
             h_node = d_info["hub_node"]
@@ -1228,11 +1170,11 @@ INVARIANTS TO ENFORCE:
 
         # Execute collective linking commands into MongoDB with Radial Single-Attachment Enforcement
         # Map: (concept_id, domain_hub_id) -> chosen command (to enforce at most 1 connection per domain)
-        domain_connections_tracker: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        non_edge_commands: List[Dict[str, Any]] = []
+        domain_connections_tracker: dict[tuple[str, str], dict[str, Any]] = {}
+        non_edge_commands: list[dict[str, Any]] = []
 
         # Pre-populate domain lookup map: node_id -> domain_hub_id
-        node_to_domain_map: Dict[str, str] = {}
+        node_to_domain_map: dict[str, str] = {}
         for h_id, d_info in collective_explored_trees.items():
             for n in d_info["explored_nodes"]:
                 node_to_domain_map[n.id] = h_id

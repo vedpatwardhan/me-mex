@@ -55,6 +55,43 @@ class GraphNode(BaseModel):
         return False
 
 
+class ConceptHubCandidate(BaseModel):
+    """
+    Candidate Concept Hub Entity identified via graph centrality analytics.
+    Exposes explicit schema guarantees for ID, Title, Description, and centrality score.
+    Supports unpacking or tuple indexing for backward compatibility.
+    """
+
+    node: GraphNode
+    centrality_score: float
+
+    @property
+    def id(self) -> str:
+        return self.node.id
+
+    @property
+    def title(self) -> str:
+        return self.node.title
+
+    @property
+    def description(self) -> str:
+        return self.node.description
+
+    def __getitem__(self, item: int):
+        """Enable tuple unpacking / indexing (candidate[0] -> node, candidate[1] -> score)."""
+        if item == 0:
+            return self.node
+        elif item == 1:
+            return self.centrality_score
+        raise IndexError(
+            "ConceptHubCandidate only supports indices 0 (node) and 1 (score)"
+        )
+
+    def __iter__(self):
+        """Enable unpacking: node, score = candidate."""
+        return iter((self.node, self.centrality_score))
+
+
 class GraphEdge(BaseModel):
     """
     Qualitative Typed Relation Edge Entity.

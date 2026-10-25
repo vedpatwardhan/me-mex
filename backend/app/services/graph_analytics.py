@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Tuple
 import rustworkx as rx
 import networkx as nx
 from app.db import db_engine
-from app.models import GraphNode, GraphEdge, MacroDocumentRecord
+from app.models import GraphNode, GraphEdge, MacroDocumentRecord, ConceptHubCandidate
 
 
 class GraphAnalyticsWorker:
@@ -75,8 +75,12 @@ class GraphAnalyticsWorker:
     def partition_department_communities(
         project_id: Optional[str] = None,
         hubs: Optional[List[GraphNode]] = None,
+        max_depth: int = 5,
     ) -> Dict[str, List[str]]:
-        """Partition concept nodes into mutually exclusive Department Communities anchored to concept hubs using topological Voronoi distance."""
+        """Partition concept nodes into mutually exclusive Department Communities anchored to concept hubs using topological Voronoi distance.
+
+        Nodes exceeding max_depth hops from a hub remain unassigned to preserve locality.
+        """
         nodes = db_engine.get_nodes(project_id)
         if not nodes:
             return {}
@@ -102,20 +106,20 @@ class GraphAnalyticsWorker:
         hub_ids = [h.id for h in hubs]
         centralities = GraphAnalyticsWorker.calculate_hub_centrality(project_id)
 
-        # Multi-source shortest path Voronoi partitioning:
-        # Compute shortest topological path from each hub to all reachable nodes
+        # Multi-source shortest path Voronoi partitioning bounded by max_depth:
+        # Compute shortest topological path from each hub to reachable nodes within max_depth hops
         distances_from_hubs: Dict[str, Dict[str, int]] = {}
         for h_id in hub_ids:
             try:
                 distances_from_hubs[h_id] = nx.single_source_shortest_path_length(
-                    nx_graph, h_id
+                    nx_graph, h_id, cutoff=max_depth
                 )
             except Exception:
                 distances_from_hubs[h_id] = {h_id: 0}
 
         department_map: Dict[str, List[str]] = {h_id: [] for h_id in hub_ids}
 
-        # Assign each node to its closest department hub
+        # Assign each node to its closest department hub strictly within max_depth hops
         for n in nodes:
             best_hub = None
             best_dist = float("inf")
@@ -123,6 +127,8 @@ class GraphAnalyticsWorker:
 
             for h_id in hub_ids:
                 d = distances_from_hubs[h_id].get(n.id, float("inf"))
+                if d > max_depth:
+                    continue
                 score = centralities.get(h_id, 0.0)
 
                 # Minimize distance; break ties by highest hub centrality, then lexicographical order
@@ -141,13 +147,11 @@ class GraphAnalyticsWorker:
                 ):
                     best_hub = h_id
 
-            # Fallback for disconnected nodes that have no path to any hub: assign to highest centrality hub
-            if best_hub is None or best_dist == float("inf"):
-                best_hub = max(hub_ids, key=lambda hid: centralities.get(hid, 0.0))
+            # Only assign if within max_depth (no unbounded fallback)
+            if best_hub is not None and best_dist <= max_depth:
+                department_map[best_hub].append(n.id)
 
-            department_map[best_hub].append(n.id)
-
-        # Ensure the hub itself is in its own partition if not already
+        # Ensure the hub itself is in its own partition
         for h_id in hub_ids:
             if h_id not in department_map[h_id]:
                 department_map[h_id].append(h_id)
@@ -159,7 +163,7 @@ class GraphAnalyticsWorker:
         project_id: Optional[str] = None,
         max_k: int = 8,
         relative_threshold: float = 0.30,
-    ) -> List[Tuple[GraphNode, float]]:
+    ) -> List[ConceptHubCandidate]:
         """Identify mutable domain concept hub nodes dynamically using eigenvector/degree centrality with relative thresholding."""
         # Filter candidate concept hubs: strictly Mutable Concepts (excludes Root Nodes & Immutable Intra-Document Concepts)
         all_nodes = db_engine.get_nodes(project_id)
@@ -190,11 +194,13 @@ class GraphAnalyticsWorker:
         max_score = concept_scores[0][1]
 
         # Apply relative thresholding (s_i >= relative_threshold * max_score)
-        selected_hubs: List[Tuple[GraphNode, float]] = []
+        selected_hubs: List[ConceptHubCandidate] = []
         for c_node, score in concept_scores:
             # Always include the top hub; for others, enforce relative thresholding
             if not selected_hubs or score >= (max_score * relative_threshold):
-                selected_hubs.append((c_node, score))
+                selected_hubs.append(
+                    ConceptHubCandidate(node=c_node, centrality_score=score)
+                )
                 if len(selected_hubs) >= max_k:
                     break
 
@@ -209,10 +215,14 @@ class GraphAnalyticsWorker:
             None,
         )
         if genesis_node:
-            selected_ids = {h[0].id for h in selected_hubs}
+            selected_ids = {h.id for h in selected_hubs}
             if genesis_node.id not in selected_ids:
                 genesis_score = centralities.get(genesis_node.id, 0.0)
-                selected_hubs.append((genesis_node, genesis_score))
+                selected_hubs.append(
+                    ConceptHubCandidate(
+                        node=genesis_node, centrality_score=genesis_score
+                    )
+                )
 
         return selected_hubs
 

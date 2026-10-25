@@ -17,6 +17,7 @@ from app.db import db_engine
 from app.models import (
     GraphNode,
     GraphEdge,
+    ConceptHubCandidate,
 )
 from app.services.llm_gateway import llm_gateway
 from app.services.event_queue import event_queue
@@ -493,7 +494,7 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
                         {"role": "user", "content": user_rewire},
                     ],
                     temperature=0.2,
-                    max_tokens=2048,
+                    max_tokens=4096,
                     response_format={"type": "json_object"},
                     enable_reasoning=False,
                 )
@@ -597,3 +598,68 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
             raise RuntimeError(
                 f"[{self.department_name}] Persona cross-linking ingestion failed: {e}"
             ) from e
+
+    @staticmethod
+    def filter_relevant_hubs(
+        doc_title: str,
+        intra_doc_nodes: List[GraphNode],
+        candidate_hubs: List[GraphNode],
+    ) -> List[str]:
+        """Pre-check relevance filtering evaluating candidate persona hubs against extracted concepts.
+
+        Selects 1 to 3 candidate hubs that have genuine domain relevance.
+        Guarantees fallback to the 'Everything' hub if no specialized domain hub fits.
+        """
+        candidate_hubs_payload = [
+            {"id": h.id, "title": h.title, "description": h.description}
+            for h in candidate_hubs
+        ]
+        intra_concepts_payload = [
+            {"id": n.id, "title": n.title, "description": n.description}
+            for n in intra_doc_nodes
+        ]
+
+        system_route = load_prompt("persona_route_relevance")
+        user_route = f"""
+Incoming Document: '{doc_title}'
+Newly Extracted Concepts ({len(intra_concepts_payload)} items):
+{json.dumps(intra_concepts_payload, indent=2)}
+
+Candidate Persona Domain Hubs ({len(candidate_hubs_payload)} items):
+{json.dumps(candidate_hubs_payload, indent=2)}
+
+Select 1 to 3 candidate hubs that have genuine domain relevance to host or connect with these concepts.
+If no specialized domain hub fits, you MUST select the 'Everything' hub.
+"""
+        selected_hub_ids = []
+        try:
+            res_route = llm_gateway.generate_chat_completion(
+                [
+                    {"role": "system", "content": system_route},
+                    {"role": "user", "content": user_route},
+                ],
+                temperature=0.1,
+                max_tokens=512,
+                response_format={"type": "json_object"},
+                enable_reasoning=False,
+            )
+            data_route = json.loads(res_route)
+            selected_hub_ids = data_route.get("selected_hub_ids", [])
+        except Exception as e:
+            print(f"[DepartmentPersonaAgent] Persona relevance routing error: {e}")
+            selected_hub_ids = []
+
+        # Enforce universal fallback: if empty or unselected, fallback to 'Everything' or first top hub
+        if not selected_hub_ids:
+            genesis_candidate = next(
+                (
+                    h.id
+                    for h in candidate_hubs
+                    if h.title.strip().lower() == "everything"
+                ),
+                candidate_hubs[0].id if candidate_hubs else None,
+            )
+            if genesis_candidate:
+                selected_hub_ids = [genesis_candidate]
+
+        return selected_hub_ids

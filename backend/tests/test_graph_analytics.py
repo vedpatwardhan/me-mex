@@ -174,9 +174,32 @@ def test_partition_department_communities_voronoi_mutual_exclusivity():
     set_b = set(partitions["hub_b"])
     assert len(set_a.intersection(set_b)) == 0
 
-    # Coverage: all nodes must be partitioned
+    # Coverage: all nodes within max_depth must be partitioned
     all_partitioned = set_a.union(set_b)
     assert all_partitioned == {"hub_a", "hub_b", "leaf_a", "leaf_b"}
+
+    # Distant node beyond max_depth (e.g. max_depth=1) should NOT be partitioned
+    distant_node = GraphNode(
+        _id="distant_node",
+        title="Distant Node",
+        description="",
+        project_ids=[proj],
+    )
+    db_engine.upsert_node(distant_node)
+    # leaf_a -> distant_node (distance from hub_a is 2)
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="edge_distant",
+            source_id="leaf_a",
+            target_id="distant_node",
+            project_ids=[proj],
+        )
+    )
+    bounded_partitions = graph_analytics.partition_department_communities(
+        project_id=proj, hubs=hubs, max_depth=1
+    )
+    assert "distant_node" not in bounded_partitions["hub_a"]
+    assert "distant_node" not in bounded_partitions["hub_b"]
 
 
 def test_everything_hub_guaranteed_in_candidate_hubs():
