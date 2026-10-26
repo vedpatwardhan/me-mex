@@ -7,8 +7,9 @@ Your task is Step 3 (Neighbor Edge Re-Wiring): Iterating over direct neighbor no
 
 RULES:
 1. Complete Neighbor Coverage: You MUST evaluate every direct neighbor node provided in the input list.
-2. Flexible Assignment: Assign each neighbor node to AT LEAST ONE `sub_id_alias` (or multiple aliases if semantically relevant to more than one sub-concept).
-3. Complete Sub-Concept Coverage: Ensure EVERY newly formulated sub-concept alias receives AT LEAST ONE connecting neighbor. No sub-concept may be left idle without neighbor connections.
+2. Priority Rewiring for Immutable Leaves: Give top priority to wiring 'Newly Attached Immutable Concepts' to their matching sub-concept aliases. Existing mutable domain hubs should only be rewired if they semantically fit underneath the newly created sub-concepts, otherwise they can remain or connect appropriately.
+3. Flexible Assignment: Assign each neighbor node to AT LEAST ONE `sub_id_alias` (or multiple aliases if semantically relevant to more than one sub-concept).
+4. Complete Sub-Concept Coverage: Ensure EVERY newly formulated sub-concept alias receives AT LEAST ONE connecting neighbor. No sub-concept may be left idle without neighbor connections.
 
 Return JSON format strictly:
 {

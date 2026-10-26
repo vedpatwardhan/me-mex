@@ -24,6 +24,11 @@ export const GraphCanvas: React.FC = () => {
   const traversingNodeIds = thinkingState.visitedNodeIds || [];
   const fgRef = useRef<any>(null);
 
+  // Persistent cache of node positions so dragging or selecting does not cause layout reshuffling
+  const persistentPositionsRef = useRef<Map<string, { x: number; y: number; fx: number; fy: number }>>(
+    new Map()
+  );
+
   // Initialize offscreen glow texture sprite cache
   const glowCache = useMemo(() => createGlowTextureCache(), []);
 
@@ -71,9 +76,26 @@ export const GraphCanvas: React.FC = () => {
     };
   }, [nodes, edges, searchQuery, selectedNodeTypeFilter]);
 
-  // Headless physics pre-warming simulation to eliminate bouncing on initial mount
+  // Headless physics pre-warming simulation: only calculates positions for initial mount or new nodes
   const stabilizedGraphData = useMemo(() => {
-    return prewarmForceSimulation(rawGraphData.nodes, rawGraphData.links, 180);
+    const res = prewarmForceSimulation(
+      rawGraphData.nodes,
+      rawGraphData.links,
+      180,
+      persistentPositionsRef.current
+    );
+
+    // Save calculated positions into persistent ref
+    res.nodes.forEach((n) => {
+      persistentPositionsRef.current.set(n.id, {
+        x: n.x,
+        y: n.y,
+        fx: n.fx ?? n.x,
+        fy: n.fy ?? n.y,
+      });
+    });
+
+    return res;
   }, [rawGraphData]);
 
   // Configure runtime force parameters to keep the graph nicely spread out
@@ -182,9 +204,32 @@ export const GraphCanvas: React.FC = () => {
         linkLineDash={(link: any) => (link.description?.includes('CONTRASTS') ? [3, 2] : null)}
         linkDirectionalArrowLength={4}
         linkDirectionalArrowRelPos={0.95}
+        onNodeDrag={(node: any) => {
+          node.fx = node.x;
+          node.fy = node.y;
+          persistentPositionsRef.current.set(node.id, {
+            x: node.x,
+            y: node.y,
+            fx: node.x,
+            fy: node.y,
+          });
+          // Do not reheat simulation so surrounding nodes remain completely frozen
+          if (fgRef.current && typeof fgRef.current.d3AlphaTarget === 'function') {
+            fgRef.current.d3AlphaTarget(0);
+          }
+        }}
         onNodeDragEnd={(node: any) => {
           node.fx = node.x;
           node.fy = node.y;
+          persistentPositionsRef.current.set(node.id, {
+            x: node.x,
+            y: node.y,
+            fx: node.x,
+            fy: node.y,
+          });
+          if (fgRef.current && typeof fgRef.current.d3AlphaTarget === 'function') {
+            fgRef.current.d3AlphaTarget(0);
+          }
         }}
         onNodeClick={(node: any) => {
           if (selectedNodeId === node.id) {

@@ -31,6 +31,7 @@ interface MemexState {
   clearChatHistory: () => Promise<void>;
   sendMessage: (text: string, isVoice?: boolean) => Promise<void>;
   createProjectWorkspace: (name: string, description: string) => Promise<void>;
+  deleteNode: (nodeId: string) => Promise<boolean>;
 }
 
 const initialDefaultChat: Record<string, ChatMessage[]> = {};
@@ -133,6 +134,32 @@ export const useMemexStore = create<MemexState>((set, get) => ({
       }
     } catch (err) {
       console.error(`Failed to clear chat history for ${projId}:`, err);
+    }
+  },
+
+  deleteNode: async (nodeId: string) => {
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to delete node');
+      }
+
+      set((state) => ({
+        nodes: state.nodes.filter((n) => n.id !== nodeId),
+        edges: state.edges.filter((e) => {
+          const s = typeof e.source === 'object' ? (e.source as any).id : e.source;
+          const t = typeof e.target === 'object' ? (e.target as any).id : e.target;
+          return s !== nodeId && t !== nodeId;
+        }),
+        selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId,
+      }));
+      return true;
+    } catch (err) {
+      console.error(`Failed to delete node ${nodeId}:`, err);
+      return false;
     }
   },
 

@@ -117,3 +117,61 @@ def test_clear_project_chat_endpoint(test_client: TestClient):
     res_after = test_client.get("/api/projects/proj_clear_test/chat")
     assert res_after.status_code == 200
     assert len(res_after.json()) == 0
+
+
+@pytest.mark.xdist_group(name="worker1")
+def test_delete_node_endpoint(test_client: TestClient):
+    """Test DELETE /api/nodes/{node_id} deletes the node and all incident edges."""
+    from app.db import db_engine
+    from app.models import GraphNode, GraphEdge
+
+    # Setup isolated test nodes and edges
+    node_a = GraphNode(
+        _id="node_del_a", title="Node A to Delete", project_ids=["global"]
+    )
+    node_b = GraphNode(
+        _id="node_del_b", title="Node B Neighbor", project_ids=["global"]
+    )
+    edge_ab = GraphEdge(
+        _id="edge_del_ab",
+        source_id="node_del_a",
+        target_id="node_del_b",
+        project_ids=["global"],
+    )
+    edge_ba = GraphEdge(
+        _id="edge_del_ba",
+        source_id="node_del_b",
+        target_id="node_del_a",
+        project_ids=["global"],
+    )
+
+    db_engine.upsert_node(node_a)
+    db_engine.upsert_node(node_b)
+    db_engine.upsert_edge(edge_ab)
+    db_engine.upsert_edge(edge_ba)
+
+    # Verify existing
+    assert db_engine.get_node("node_del_a") is not None
+    assert db_engine.get_node("node_del_b") is not None
+
+    # Call DELETE /api/nodes/node_del_a
+    res = test_client.delete("/api/nodes/node_del_a")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["deleted_node_id"] == "node_del_a"
+    assert data["deleted_edge_count"] == 2
+
+    # Verify node_del_a is deleted, node_del_b remains
+    assert db_engine.get_node("node_del_a") is None
+    assert db_engine.get_node("node_del_b") is not None
+
+    # Verify both incident edges are deleted
+    remaining_edges = db_engine.get_edges("global")
+    remaining_edge_ids = {e.id for e in remaining_edges}
+    assert "edge_del_ab" not in remaining_edge_ids
+    assert "edge_del_ba" not in remaining_edge_ids
+
+    # Delete non-existent node returns 404
+    res_404 = test_client.delete("/api/nodes/non_existent_node")
+    assert res_404.status_code == 404

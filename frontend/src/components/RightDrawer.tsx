@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useMemexStore } from '../store/useMemexStore';
 import { isRootNode, getRootSubType, isImmutableConcept } from '../types';
 import {
@@ -8,7 +8,9 @@ import {
   Trophy,
   Lock,
   Edit3,
-  GitCommit
+  GitCommit,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const RightDrawer: React.FC = () => {
@@ -16,7 +18,11 @@ export const RightDrawer: React.FC = () => {
     selectedNodeId,
     setSelectedNodeId,
     nodes,
+    deleteNode,
   } = useMemexStore();
+
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Collapse completely if no node is selected
   if (!selectedNodeId) return null;
@@ -154,6 +160,50 @@ export const RightDrawer: React.FC = () => {
           <div className="bg-[#090d16] p-4 rounded-2xl border border-white/10 text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-wrap shadow-inner font-medium">
             {selectedNode.content}
           </div>
+        </div>
+
+        {/* Delete Node Action Section */}
+        <div className="pt-4 border-t border-white/10">
+          {!confirmDelete ? (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="w-full py-2.5 px-3 rounded-xl border border-rose-500/30 bg-rose-950/20 hover:bg-rose-950/50 text-rose-400 hover:text-rose-200 transition-all flex items-center justify-center gap-2 font-medium text-xs group"
+            >
+              <Trash2 className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
+              <span>Delete Node from Database</span>
+            </button>
+          ) : (
+            <div className="bg-rose-950/40 border border-rose-500/40 p-3.5 rounded-2xl space-y-3">
+              <div className="flex items-start gap-2 text-rose-300 text-xs leading-snug">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span>
+                  Are you sure you want to delete <strong>{selectedNode.title}</strong>? All connected edges will also be deleted permanently.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={isDeleting}
+                  onClick={async () => {
+                    setIsDeleting(true);
+                    await deleteNode(selectedNode.id);
+                    setIsDeleting(false);
+                    setConfirmDelete(false);
+                  }}
+                  className="flex-1 py-1.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isDeleting ? 'Deleting...' : 'Yes, Delete'}</span>
+                </button>
+                <button
+                  disabled={isDeleting}
+                  onClick={() => setConfirmDelete(false)}
+                  className="py-1.5 px-3 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 font-medium text-xs transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </aside>

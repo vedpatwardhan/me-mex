@@ -1,15 +1,36 @@
 export const prewarmForceSimulation = (
   nodes: any[],
   links: any[],
-  ticks: number = 180
+  ticks: number = 180,
+  existingPositions?: Map<string, { x: number; y: number; fx?: number; fy?: number }>
 ): { nodes: any[]; links: any[] } => {
   if (!nodes.length) return { nodes, links };
 
-  const nodesCopy = nodes.map((n) => ({ ...n }));
+  const nodesCopy = nodes.map((n) => {
+    const existing = existingPositions?.get(n.id);
+    if (existing) {
+      return {
+        ...n,
+        x: existing.x,
+        y: existing.y,
+        fx: existing.fx ?? existing.x,
+        fy: existing.fy ?? existing.y,
+      };
+    }
+    return { ...n };
+  });
+
   const linksCopy = links.map((l) => ({ ...l }));
 
   const d3 = (globalThis as any).d3;
   if (!d3 || !d3.forceSimulation) {
+    // If d3 is unavailable, ensure fx/fy are locked to current coordinates if present
+    nodesCopy.forEach((n) => {
+      if (n.x !== undefined && n.y !== undefined) {
+        n.fx = n.x;
+        n.fy = n.y;
+      }
+    });
     return { nodes: nodesCopy, links: linksCopy };
   }
 
@@ -47,6 +68,12 @@ export const prewarmForceSimulation = (
     for (let i = 0; i < ticks; ++i) {
       simulation.tick();
     }
+
+    // Freeze every node's position once initialized so dragging does not displace other nodes
+    nodesCopy.forEach((n) => {
+      n.fx = n.x;
+      n.fy = n.y;
+    });
   } catch (e) {
     console.warn('Pre-warming simulation skipped:', e);
   }

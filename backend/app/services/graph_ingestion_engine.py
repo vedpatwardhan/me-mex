@@ -239,6 +239,16 @@ class GraphIngestionEngine:
                                 project_ids=proj_list,
                             )
                             self.db.upsert_edge(rewired_edge)
+                        else:
+                            print(
+                                f"[{dept_name}] Warning: Rewire item skipped (neighbor_id: {neighbor_id}, "
+                                f"sub_alias: {sub_alias}, target_sub_id: {target_sub_id})"
+                            )
+
+                    print(
+                        f"[{dept_name}] Reorganization commit for '{target_node.title}': "
+                        f"Created {len(sub_concepts)} sub-concepts, rewired {len(deleted_neighbors)} neighbors."
+                    )
 
                     # Defensive Guard: Ensure every sub-concept has at least one neighbor connection
                     # If any sub-concept was omitted in rewired_edges, link it to the first available neighbor

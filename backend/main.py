@@ -204,6 +204,39 @@ def get_node(node_id: str):
     }
 
 
+@app.delete("/api/nodes/{node_id}")
+def delete_node_endpoint(node_id: str):
+    """Deletes a node and all incoming/outgoing incident edges from the knowledge graph."""
+    node = db_engine.get_node(node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    # 1. Delete all edges connected to this node (both incoming and outgoing)
+    edges = db_engine.get_edges()
+    deleted_edge_count = 0
+    for e in edges:
+        if e.source_id == node_id or e.target_id == node_id:
+            db_engine.delete_edge(e.id)
+            deleted_edge_count += 1
+
+    # 2. Delete the node itself
+    db_engine.delete_node(node_id)
+
+    # 3. If root document node, delete from documents collection
+    if node.is_root_node and hasattr(db_engine, "db") and db_engine.db is not None:
+        try:
+            db_engine.db["documents"].delete_one({"_id": node_id})
+        except Exception:
+            pass
+
+    return {
+        "status": "success",
+        "deleted_node_id": node_id,
+        "deleted_edge_count": deleted_edge_count,
+        "message": f"Successfully deleted node '{node.title}' and {deleted_edge_count} connected edges.",
+    }
+
+
 # --- Project Workspaces ---
 @app.get("/api/projects")
 def get_projects():

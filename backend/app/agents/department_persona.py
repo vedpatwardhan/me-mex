@@ -403,7 +403,8 @@ You may ONLY select from the candidate_id values above.
             # STEP 2: Pure Semantic Sub-Concept Formulation
             # Invariant: Sub-concept formulation operates purely on the rich titles, descriptions,
             # and relations of connected neighbor concepts without leaking verbose raw passage texts.
-            neighbor_concepts_payload = []
+            immutable_evidence_concepts = []
+            existing_domain_hubs = []
             for nb in neighbors:
                 nb_id = nb.get("neighbor_id")
                 nb_node = (
@@ -412,15 +413,19 @@ You may ONLY select from the candidate_id values above.
                     else None
                 )
                 if nb_node:
-                    neighbor_concepts_payload.append(
-                        {
-                            "id": nb_node.id,
-                            "title": nb_node.title,
-                            "description": nb_node.description,
-                            "relation_to_hub": nb.get("relation_type", "RELEVANT_TO"),
-                            "direction": nb.get("direction", "incoming"),
-                        }
-                    )
+                    entry = {
+                        "id": nb_node.id,
+                        "title": nb_node.title,
+                        "description": nb_node.description,
+                        "is_immutable": nb_node.is_immutable,
+                        "node_type": nb_node.node_type,
+                        "relation_to_hub": nb.get("relation_type", "RELEVANT_TO"),
+                        "direction": nb.get("direction", "incoming"),
+                    }
+                    if nb_node.is_immutable:
+                        immutable_evidence_concepts.append(entry)
+                    else:
+                        existing_domain_hubs.append(entry)
 
             system_split = load_prompt(
                 "persona_reorganize_split",
@@ -430,12 +435,16 @@ You may ONLY select from the candidate_id values above.
             user_split = f"""
 Target Over-Clustered Mutable Concept Hub: '{target_node.title}' (ID: {target_node.id})
 Current Description: {target_node.description}
-Total Connected Neighbor Concepts: {len(neighbor_concepts_payload)}
+Total Connected Neighbor Concepts: {len(immutable_evidence_concepts) + len(existing_domain_hubs)}
 
-Connected Neighbor Concepts Clustered Around '{target_node.title}':
-{json.dumps(neighbor_concepts_payload, indent=2)}
+[PRIORITY 1: Newly Attached Immutable Concepts ({len(immutable_evidence_concepts)} items)]:
+{json.dumps(immutable_evidence_concepts, indent=2)}
+
+[PRIORITY 2: Existing Mutable Domain Hubs ({len(existing_domain_hubs)} items)]:
+{json.dumps(existing_domain_hubs, indent=2)}
 
 Group these connected concept themes into 3-4 focused intermediate sub-concepts.
+Ensure the newly formulated sub-concepts specifically accommodate and cluster the Newly Attached Immutable Concepts.
 """
             sub_concepts = []
             try:
@@ -474,6 +483,22 @@ Group these connected concept themes into 3-4 focused intermediate sub-concepts.
                 print(skip_evt["message"])
                 continue
 
+            # Emit split formulation completed event
+            split_evt = {
+                "event": "reorg_split_completed",
+                "persona_id": self.department_id,
+                "department_name": self.department_name,
+                "node_id": target_node.id,
+                "node_title": target_node.title,
+                "sub_concepts_count": len(sub_concepts),
+                "sub_concepts": sub_concepts,
+                "message": f"[{self.department_name}] Step 2 Completed: Formulated {len(sub_concepts)} sub-concepts for '{target_node.title}': {[s.get('title') for s in sub_concepts]}",
+                "timestamp": time.time(),
+            }
+            emitted_events.append(split_evt)
+            event_queue.push(project_id, split_evt)
+            print(split_evt["message"])
+
             # STEP 3: Neighbor Edge Re-Wiring (Iterate over ALL direct neighbors)
             system_rewire = load_prompt(
                 "persona_reorganize_rewire",
@@ -487,10 +512,15 @@ Formulated Sub-Concepts Available for Connection:
 {json.dumps(sub_concepts, indent=2)}
 
 Complete List of Direct Neighbor Nodes to Re-Wire:
-{json.dumps(neighbors, indent=2)}
+[Newly Attached Immutable Concepts ({len(immutable_evidence_concepts)})]:
+{json.dumps(immutable_evidence_concepts, indent=2)}
+
+[Existing Mutable Domain Hubs ({len(existing_domain_hubs)})]:
+{json.dumps(existing_domain_hubs, indent=2)}
 
 1. Assign EVERY direct neighbor node to AT LEAST ONE sub-concept alias (multiple if semantically relevant).
-2. Ensure EVERY formulated sub-concept alias is connected to AT LEAST ONE neighbor node. No sub-concept should remain idle.
+2. Prioritize wiring all immutable concepts to their matching sub-concepts.
+3. Ensure EVERY formulated sub-concept alias is connected to AT LEAST ONE neighbor node. No sub-concept should remain idle.
 """
             rewired_edges = []
             try:
@@ -513,6 +543,22 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
                 raise RuntimeError(
                     f"[{self.department_name}] Step 3 Neighbor edge re-wiring failed for {target_node.id}: {e}"
                 ) from e
+
+            # Emit rewiring completed event
+            rewire_evt = {
+                "event": "reorg_rewire_completed",
+                "persona_id": self.department_id,
+                "department_name": self.department_name,
+                "node_id": target_node.id,
+                "node_title": target_node.title,
+                "rewired_edges_count": len(rewired_edges),
+                "rewired_edges": rewired_edges,
+                "message": f"[{self.department_name}] Step 3 Completed: Formulated {len(rewired_edges)} re-wired edge assignments for '{target_node.title}'.",
+                "timestamp": time.time(),
+            }
+            emitted_events.append(rewire_evt)
+            event_queue.push(project_id, rewire_evt)
+            print(rewire_evt["message"])
 
             reorg_commands.append(
                 {

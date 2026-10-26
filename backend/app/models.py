@@ -325,6 +325,7 @@ class ReorgDiscoveryPayload(BaseModel):
 
 
 class SubConceptItem(BaseModel):
+    sub_id_alias: str
     title: str
     description: str
 
