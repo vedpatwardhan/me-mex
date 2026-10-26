@@ -14,6 +14,18 @@ The pipeline is working end-to-end for ingestion of an arxiv paper and adding it
 
 ---
 
+## 🚀 Running the App
+
+```bash
+# run the backend app (assuming the MongoDB server is already running)
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+# run the frontend
+npm run dev
+```
+
+---
+
 ## 📚 Master Documentation Index
 
 All master technical specs, research syntheses, and product roadmaps are consolidated in the `docs/` directory:
