@@ -8,6 +8,7 @@ from pydantic import BaseModel
 T = TypeVar("T", bound=BaseModel)
 
 from app.config import settings
+from app.services.logger import logger, console
 
 # Configuration for vLLM Server on Colab / Remote
 COLAB_VLLM_URL = settings.COLAB_VLLM_URL
@@ -199,21 +200,16 @@ class LLMGateway:
             raw_content = "".join(collected_chunks)
             vllm_reasoning = "".join(collected_reasoning)
 
-            try:
-                from app.services.logger import console
-
-                if vllm_reasoning:
+            if vllm_reasoning:
+                console.print(
+                    f"      [dim]🧠 Model reasoning trace generated: {len(vllm_reasoning)} chars[/dim]"
+                )
+            elif enable_reasoning:
+                parsed = self.parse_reasoning_output(raw_content)
+                if parsed["thinking"]:
                     console.print(
-                        f"      [dim]🧠 Model reasoning trace generated: {len(vllm_reasoning)} chars[/dim]"
+                        f"      [dim]🧠 Parsed [THINK] reasoning trace: {len(parsed['thinking'])} chars[/dim]"
                     )
-                elif enable_reasoning:
-                    parsed = self.parse_reasoning_output(raw_content)
-                    if parsed["thinking"]:
-                        console.print(
-                            f"      [dim]🧠 Parsed [THINK] reasoning trace: {len(parsed['thinking'])} chars[/dim]"
-                        )
-            except Exception as log_err:
-                print(f"[LLMGateway WARNING] Failed to render reasoning log: {log_err}")
 
             if vllm_reasoning:
                 return strip_emojis(raw_content.strip())
@@ -223,12 +219,7 @@ class LLMGateway:
                 return strip_emojis(parsed["final_response"])
             return strip_emojis(raw_content.strip())
         except Exception as e:
-            try:
-                from app.services.logger import logger
-
-                logger.error_box("LLMGateway Request Failed", str(e))
-            except Exception:
-                print(f"[LLMGateway EXCEPTION] LLM completion request failed: {e}")
+            logger.error_box("LLMGateway Request Failed", str(e))
             raise ConnectionError(f"vLLM Server unreachable or error ({e})")
 
     def generate_structured_completion(

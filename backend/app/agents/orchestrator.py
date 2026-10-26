@@ -31,6 +31,7 @@ from app.models import (
 from app.agents.department_persona import (
     DepartmentPersonaAgent,
 )
+from app.services.logger import logger
 from app.services.event_queue import event_queue
 from app.services.graph_analytics import graph_analytics
 from app.services.llm_gateway import llm_gateway
@@ -453,20 +454,13 @@ class ExecutiveOrchestrator:
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Path 1: CONVERSATION (Single-Step Direct Response straightaway)."""
-        try:
-            from app.services.logger import logger
-
-            logger.phase_header(
-                "💬 PATH 1: DIRECT CONVERSATIONAL FLOW",
-                f"Project: {project_id} • Prompt: '{query[:80]}...'"
-                if len(query) > 80
-                else f"Project: {project_id} • Prompt: '{query}'",
-                style="magenta",
-            )
-        except Exception as log_err:
-            print(
-                f"[ExecutiveOrchestrator WARNING] Failed to render conversation phase header: {log_err}"
-            )
+        logger.phase_header(
+            "💬 PATH 1: DIRECT CONVERSATIONAL FLOW",
+            f"Project: {project_id} • Prompt: '{query[:80]}...'"
+            if len(query) > 80
+            else f"Project: {project_id} • Prompt: '{query}'",
+            style="magenta",
+        )
 
         start_evt = {
             "event": "conversation_start",
@@ -528,18 +522,11 @@ class ExecutiveOrchestrator:
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Path 2: RETRIEVAL (Step 1: Partitioned Hub Traversal -> Step 2: Relevance Evaluation -> Final Conversation)."""
-        try:
-            from app.services.logger import logger
-
-            logger.phase_header(
-                "🔍 PATH 2: RETRIEVAL & SUB-GRAPH TRAVERSAL",
-                f"Project: {project_id} • Query: '{query}'",
-                style="green",
-            )
-        except Exception as log_err:
-            print(
-                f"[ExecutiveOrchestrator WARNING] Failed to render retrieval phase header: {log_err}"
-            )
+        logger.phase_header(
+            "🔍 PATH 2: RETRIEVAL & SUB-GRAPH TRAVERSAL",
+            f"Project: {project_id} • Query: '{query}'",
+            style="green",
+        )
 
         hub_discover_evt = {
             "event": "persona_traversal_start",
@@ -643,18 +630,11 @@ class ExecutiveOrchestrator:
         source_url = target_info.get("source_url")
         raw_payload = target_info.get("raw_text")
 
-        try:
-            from app.services.logger import logger
-
-            logger.phase_header(
-                "📥 PATH 3: DOCUMENT INGESTION PIPELINE",
-                f"Project: {project_id} • Source: {source_url or 'Raw Text Payload'}",
-                style="cyan",
-            )
-        except Exception as log_err:
-            print(
-                f"[ExecutiveOrchestrator WARNING] Failed to render ingestion phase header: {log_err}"
-            )
+        logger.phase_header(
+            "📥 PATH 3: DOCUMENT INGESTION PIPELINE",
+            f"Project: {project_id} • Source: {source_url or 'Raw Text Payload'}",
+            style="cyan",
+        )
 
         # Step 1: Document Acquisition & Content Assembly
         # Ingestion requires a source_url (HTTP/HTTPS URL or file:// filesystem path).

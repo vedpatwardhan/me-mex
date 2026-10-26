@@ -1,6 +1,7 @@
 import time
 from typing import Dict, List, Any
 from app.models import ProjectEventRecord
+from app.services.logger import logger
 
 
 class EphemeralEventQueue:
@@ -32,14 +33,7 @@ class EphemeralEventQueue:
             self.queues[project_id] = self.queues[project_id][-self.default_limit :]
 
         # --- Smart Backend Terminal Event Logger via Rich ---
-        try:
-            from app.services.logger import logger
-
-            logger.log_event(project_id, event_type, event_data)
-        except Exception:
-            # Fallback to plain print if rich logging encounters any unexpected error
-            if event_type != "token_chunk":
-                print(f"📡 [EVENT:{project_id}] {event_type}", flush=True)
+        logger.log_event(project_id, event_type, event_data)
 
     def get_events(
         self, project_id: str = "global", limit: int = 15
