@@ -2,7 +2,10 @@ import os
 import re
 import json
 import httpx
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Type, TypeVar
+from pydantic import BaseModel
+
+T = TypeVar("T", bound=BaseModel)
 
 from app.config import settings
 
@@ -227,6 +230,58 @@ class LLMGateway:
             except Exception:
                 print(f"[LLMGateway EXCEPTION] LLM completion request failed: {e}")
             raise ConnectionError(f"vLLM Server unreachable or error ({e})")
+
+    def generate_structured_completion(
+        self,
+        messages: List[Dict[str, Any]],
+        response_model: Type[T],
+        temperature: float = 0.1,
+        max_tokens: int = 4096,
+        max_retries: int = 2,
+        enable_reasoning: bool = False,
+    ) -> T:
+        """Invokes LLM with strict JSON Schema constraints and validates output against response_model.
+
+        Leverages OpenAI-compatible response_format and vLLM guided_json for grammar-constrained decoding.
+        Implements an automatic 2-attempt retry loop on JSON validation or parse failures.
+        """
+        schema = response_model.model_json_schema()
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": response_model.__name__,
+                "strict": True,
+                "schema": schema,
+            },
+        }
+
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                raw_res = self.generate_chat_completion(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_format=response_format,
+                    guided_json=schema,
+                    enable_reasoning=enable_reasoning,
+                )
+                return response_model.model_validate_json(raw_res)
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    print(
+                        f"[LLMGateway] Structured generation for {response_model.__name__} failed ({e}). "
+                        f"Retrying (attempt {attempt + 1}/{max_retries})..."
+                    )
+                    continue
+                print(
+                    f"[LLMGateway ERROR] Structured completion for {response_model.__name__} failed after "
+                    f"{max_retries} attempts: {last_error}"
+                )
+                raise RuntimeError(
+                    f"Structured completion failed for {response_model.__name__} after {max_retries} attempts: {last_error}"
+                ) from last_error
 
     async def stream_chat_completion(
         self,

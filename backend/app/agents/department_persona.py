@@ -18,6 +18,12 @@ from app.models import (
     GraphNode,
     GraphEdge,
     ConceptHubCandidate,
+    PersonaRouteRelevancePayload,
+    ReorgDiscoveryPayload,
+    ReorgSplitPayload,
+    ReorgRewirePayload,
+    PersonaIngestionCommandsPayload,
+    PersonaExplorationPayload,
 )
 from app.services.llm_gateway import llm_gateway
 from app.services.event_queue import event_queue
@@ -133,15 +139,15 @@ class DepartmentPersonaAgent:
             messages.append({"role": "user", "content": prompt_payload})
 
             try:
-                res = llm_gateway.generate_chat_completion(
+                payload = llm_gateway.generate_structured_completion(
                     messages,
+                    response_model=PersonaExplorationPayload,
                     temperature=0.2,
                     max_tokens=512,
-                    response_format={"type": "json_object"},
+                    max_retries=2,
                     enable_reasoning=False,
                 )
-                data = json.loads(res)
-                selected_ids = data.get("selected_neighbor_ids", [])
+                selected_ids = payload.selected_neighbor_ids
                 next_frontier = [
                     nid for nid in selected_ids if nid in candidate_neighbors
                 ]
@@ -313,18 +319,18 @@ You may ONLY select from the candidate_id values above.
 """
         candidate_ids = []
         try:
-            res_discover = llm_gateway.generate_chat_completion(
+            payload_discover = llm_gateway.generate_structured_completion(
                 [
                     {"role": "system", "content": system_discover},
                     {"role": "user", "content": user_discover},
                 ],
+                response_model=ReorgDiscoveryPayload,
                 temperature=0.2,
                 max_tokens=1024,
-                response_format={"type": "json_object"},
+                max_retries=2,
                 enable_reasoning=False,
             )
-            data_discover = json.loads(res_discover)
-            candidate_ids = data_discover.get("candidate_concept_ids", [])
+            candidate_ids = payload_discover.candidate_concept_ids
         except Exception as e:
             print(f"[{self.department_name}] Reorg discovery error: {e}")
             raise RuntimeError(
@@ -433,18 +439,18 @@ Group these connected concept themes into 3-4 focused intermediate sub-concepts.
 """
             sub_concepts = []
             try:
-                res_split = llm_gateway.generate_chat_completion(
+                payload_split = llm_gateway.generate_structured_completion(
                     [
                         {"role": "system", "content": system_split},
                         {"role": "user", "content": user_split},
                     ],
+                    response_model=ReorgSplitPayload,
                     temperature=0.2,
                     max_tokens=2048,
-                    response_format={"type": "json_object"},
+                    max_retries=2,
                     enable_reasoning=False,
                 )
-                data_split = json.loads(res_split)
-                sub_concepts = data_split.get("sub_concepts", [])
+                sub_concepts = [s.model_dump() for s in payload_split.sub_concepts]
             except Exception as e:
                 print(
                     f"[{self.department_name}] Step 2 Sub-concept formulation error for {target_node.id}: {e}"
@@ -488,18 +494,18 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
 """
             rewired_edges = []
             try:
-                res_rewire = llm_gateway.generate_chat_completion(
+                payload_rewire = llm_gateway.generate_structured_completion(
                     [
                         {"role": "system", "content": system_rewire},
                         {"role": "user", "content": user_rewire},
                     ],
+                    response_model=ReorgRewirePayload,
                     temperature=0.2,
                     max_tokens=4096,
-                    response_format={"type": "json_object"},
+                    max_retries=2,
                     enable_reasoning=False,
                 )
-                data_rewire = json.loads(res_rewire)
-                rewired_edges = data_rewire.get("rewired_edges", [])
+                rewired_edges = [r.model_dump() for r in payload_rewire.rewired_edges]
             except Exception as e:
                 print(
                     f"[{self.department_name}] Step 3 Neighbor edge re-wiring error for {target_node.id}: {e}"
@@ -576,15 +582,15 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
         messages.append({"role": "user", "content": prompt_str})
 
         try:
-            res = llm_gateway.generate_chat_completion(
+            payload_ingest = llm_gateway.generate_structured_completion(
                 messages,
+                response_model=PersonaIngestionCommandsPayload,
                 temperature=0.2,
                 max_tokens=4096,
-                response_format={"type": "json_object"},
+                max_retries=2,
                 enable_reasoning=False,
             )
-            data = json.loads(res)
-            raw_cmds = data.get("commands", [])
+            raw_cmds = [c.model_dump() for c in payload_ingest.commands]
             return {
                 "department_id": self.department_id,
                 "department_name": self.department_name,
@@ -633,18 +639,18 @@ If no specialized domain hub fits, you MUST select the 'Everything' hub.
 """
         selected_hub_ids = []
         try:
-            res_route = llm_gateway.generate_chat_completion(
+            payload_route = llm_gateway.generate_structured_completion(
                 [
                     {"role": "system", "content": system_route},
                     {"role": "user", "content": user_route},
                 ],
+                response_model=PersonaRouteRelevancePayload,
                 temperature=0.1,
                 max_tokens=512,
-                response_format={"type": "json_object"},
+                max_retries=2,
                 enable_reasoning=False,
             )
-            data_route = json.loads(res_route)
-            selected_hub_ids = data_route.get("selected_hub_ids", [])
+            selected_hub_ids = payload_route.selected_hub_ids
         except Exception as e:
             print(f"[DepartmentPersonaAgent] Persona relevance routing error: {e}")
             selected_hub_ids = []

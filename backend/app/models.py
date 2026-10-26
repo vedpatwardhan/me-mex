@@ -268,3 +268,88 @@ class PersonaIngestionCommand(BaseModel):
     ]
     concept: Optional[ConceptCommandData] = None
     edge: Optional[EdgeCommandData] = None
+
+
+# 11. Canonical Structured Output Models for Backend LLM Calls
+
+
+class IntentClassificationPayload(BaseModel):
+    intent: Literal["CONVERSATION", "RETRIEVAL", "INGESTION"]
+    doc_type: Optional[str] = None
+    source_url: Optional[str] = None
+    raw_text: Optional[str] = None
+
+
+class ConceptExtractionItem(BaseModel):
+    idx: int
+    title: str
+    description: str
+
+
+class PassageConceptsPayload(BaseModel):
+    concepts: List[ConceptExtractionItem]
+
+
+class CanonicalConceptItem(BaseModel):
+    title: str
+    description: str
+    passage_ids: List[str] = Field(default_factory=list)
+
+
+class ConsolidatedConceptsPayload(BaseModel):
+    doc_description: str
+    doc_type: Optional[str] = None
+    concepts: List[CanonicalConceptItem]
+
+
+class LinkingCommand(BaseModel):
+    action: Literal["LINK_CONCEPTS"]
+    source_id: str
+    target_id: str
+    relationship_type: str = "SUBSET_OF"
+    description: str
+
+
+class CollectiveLinkingPayload(BaseModel):
+    commands: List[LinkingCommand]
+
+
+class PersonaRouteRelevancePayload(BaseModel):
+    selected_hub_ids: List[str]
+    reasoning: Optional[str] = None
+
+
+class ReorgDiscoveryPayload(BaseModel):
+    candidate_concept_ids: List[str] = Field(default_factory=list)
+    reasoning: Optional[str] = None
+
+
+class SubConceptItem(BaseModel):
+    title: str
+    description: str
+
+
+class ReorgSplitPayload(BaseModel):
+    sub_concepts: List[SubConceptItem]
+
+
+class RewireEdgeItem(BaseModel):
+    neighbor_id: str
+    connect_to_sub_alias: str
+    relation_type: str = "SUBSET_OF"
+    description: str = ""
+
+
+class ReorgRewirePayload(BaseModel):
+    rewired_edges: List[RewireEdgeItem]
+
+
+class PersonaIngestionCommandsPayload(BaseModel):
+    commands: List[PersonaIngestionCommand]
+
+
+class PersonaExplorationPayload(BaseModel):
+    synthesized_insight: Optional[str] = None
+    selected_neighbor_ids: List[str] = Field(default_factory=list)
+    rationale: Optional[str] = None
+    relevant_node_ids: List[str] = Field(default_factory=list)

@@ -7,6 +7,7 @@ Your job is to thoroughly analyze the provided text alongside the user's intent 
   - If the passage is brief, concise, or focuses on a single key finding/idea (e.g. a short post, note, or specific observation), extract **1 concept** (or at most 2).
   - If the passage is substantive with multiple distinct methodologies, components, or findings, extract **2 to 3 concepts** (maximum 3 concepts per passage).
 - Do NOT artificially invent secondary concepts if the passage only warrants one. Focus strictly on novel, specific methodologies, mechanisms, or findings from this passage—do NOT extract broad generic meta-topics (e.g. 'Introduction', 'Overview', 'Technical Details').
+- In 'title' and 'description' fields, use single quotes ('...') or backticks (`...`) for internal terms, equations, or quotes; NEVER use unescaped double quotes inside JSON string values.
 
 Return JSON format:
 {

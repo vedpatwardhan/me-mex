@@ -23,6 +23,10 @@ from app.models import (
     GraphEdge,
     PassageRecord,
     DocumentRecord,
+    IntentClassificationPayload,
+    PassageConceptsPayload,
+    ConsolidatedConceptsPayload,
+    CollectiveLinkingPayload,
 )
 from app.agents.department_persona import (
     DepartmentPersonaAgent,
@@ -234,17 +238,17 @@ class ExecutiveOrchestrator:
         )
         try:
             t0 = time.time()
-            res = self.llm.generate_chat_completion(
+            payload = self.llm.generate_structured_completion(
                 messages,
+                response_model=PassageConceptsPayload,
                 temperature=0.2,
-                max_tokens=1536,
-                response_format={"type": "json_object"},
+                max_tokens=2048,
+                max_retries=2,
                 enable_reasoning=False,
             )
             duration = round(time.time() - t0, 2)
-            data = json.loads(res)
             return {
-                "concepts": data.get("concepts", []),
+                "concepts": [c.model_dump() for c in payload.concepts],
                 "duration_seconds": duration,
             }
         except Exception as e:
@@ -290,22 +294,20 @@ class ExecutiveOrchestrator:
 
         try:
             t0 = time.time()
-            res = self.llm.generate_chat_completion(
+            payload = self.llm.generate_structured_completion(
                 messages,
+                response_model=ConsolidatedConceptsPayload,
                 temperature=0.2,
                 max_tokens=4096,
-                response_format={"type": "json_object"},
+                max_retries=2,
                 enable_reasoning=False,
             )
             duration = round(time.time() - t0, 2)
-            data = json.loads(res)
             return {
-                "doc_description": data.get(
-                    "doc_description",
-                    f"Consolidated knowledge document for '{doc_title}'.",
-                ),
-                "doc_type": data.get("doc_type", "paper"),
-                "concepts": data.get("concepts", []),
+                "doc_description": payload.doc_description
+                or f"Consolidated knowledge document for '{doc_title}'.",
+                "doc_type": payload.doc_type or "paper",
+                "concepts": [c.model_dump() for c in payload.concepts],
                 "duration_seconds": duration,
             }
         except Exception as e:
@@ -337,19 +339,19 @@ class ExecutiveOrchestrator:
 
         try:
             t0 = time.time()
-            res = self.llm.generate_chat_completion(
+            payload = self.llm.generate_structured_completion(
                 messages,
+                response_model=IntentClassificationPayload,
                 temperature=0.0,
                 max_tokens=1024,
-                response_format={"type": "json_object"},
+                max_retries=2,
                 enable_reasoning=False,
             )
             duration = round(time.time() - t0, 2)
-            data = json.loads(res)
-            raw_intent = data.get("intent", "CONVERSATION")
+            raw_intent = payload.intent
 
             if raw_intent == "INGESTION":
-                doc_type = data.get("doc_type")
+                doc_type = payload.doc_type
                 if not doc_type:
                     raise ValueError(
                         "Classified INGESTION intent but 'doc_type' is missing from LLM output."
@@ -357,8 +359,8 @@ class ExecutiveOrchestrator:
                 return {
                     "intent": "INGESTION",
                     "doc_type": doc_type,
-                    "source_url": data.get("source_url"),
-                    "raw_text": data.get("raw_text"),
+                    "source_url": payload.source_url,
+                    "raw_text": payload.raw_text,
                     "duration_seconds": duration,
                 }
 
@@ -776,13 +778,22 @@ class ExecutiveOrchestrator:
 
         async def _extract_chunk(p_id: str, chunk_str: str, chunk_idx: int):
             async with extraction_sem:
-                extraction = await asyncio.to_thread(
-                    self._extract_concepts_from_passage,
-                    chunk_str,
-                    title,
-                    query,
-                    chat_history,
-                )
+                extraction = None
+                try:
+                    extraction = await asyncio.to_thread(
+                        self._extract_concepts_from_passage,
+                        chunk_str,
+                        title,
+                        query,
+                        chat_history,
+                    )
+                except Exception as chunk_err:
+                    print(
+                        f"[ExecutiveOrchestrator] Warning: Passage chunk [{chunk_idx + 1}/{len(passage_chunks)}] "
+                        f"extraction encountered error after retries: {chunk_err}. Degrading gracefully for this chunk."
+                    )
+                    extraction = {"concepts": [], "duration_seconds": 0.0}
+
                 c_count = len(extraction.get("concepts", []))
                 c_titles = [
                     c.get("title", "")
@@ -1166,18 +1177,18 @@ INVARIANTS TO ENFORCE:
 """
         collective_commands = []
         try:
-            res_collective = self.llm.generate_chat_completion(
+            payload_collective = self.llm.generate_structured_completion(
                 [
                     {"role": "system", "content": system_collective},
                     {"role": "user", "content": user_collective},
                 ],
+                response_model=CollectiveLinkingPayload,
                 temperature=0.2,
                 max_tokens=4096,
-                response_format={"type": "json_object"},
+                max_retries=2,
                 enable_reasoning=False,
             )
-            data_collective = json.loads(res_collective)
-            collective_commands = data_collective.get("commands", [])
+            collective_commands = [c.model_dump() for c in payload_collective.commands]
         except Exception as e:
             print(f"[ExecutiveOrchestrator] Collective ingestion linking error: {e}")
             collective_commands = []
