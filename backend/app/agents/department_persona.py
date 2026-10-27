@@ -41,6 +41,51 @@ class DepartmentPersonaAgent:
         self.department_name = f"Persona Specialist: {hub_node.title}"
         self.last_explored_nodes: List[GraphNode] = [hub_node]
 
+    @staticmethod
+    def _get_adjacency_map(project_id: str) -> Dict[str, List[GraphEdge]]:
+        """Constructs an undirected adjacency map of edges for the given project."""
+        all_edges = db_engine.get_edges(project_id)
+        adj_map: Dict[str, List[GraphEdge]] = defaultdict(list)
+        for e in all_edges:
+            adj_map[e.source_id].append(e)
+            adj_map[e.target_id].append(e)
+        return adj_map
+
+    @classmethod
+    def get_candidate_neighbors(
+        cls,
+        frontier_ids: List[str],
+        adj_map: Dict[str, List[GraphEdge]],
+        visited_ids: set,
+        partition_node_ids: Optional[set] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Discovers unvisited valid non-root neighbors connected to current frontier nodes."""
+        candidate_neighbors: Dict[str, Dict[str, Any]] = {}
+        for f_id in frontier_ids:
+            f_node = db_engine.get_node(f_id)
+            if f_node and f_node.is_root_node:
+                continue
+
+            for e in adj_map.get(f_id, []):
+                neighbor_id = e.target_id if e.source_id == f_id else e.source_id
+                if partition_node_ids and neighbor_id not in partition_node_ids:
+                    continue
+
+                if (
+                    neighbor_id not in visited_ids
+                    and neighbor_id not in candidate_neighbors
+                ):
+                    neighbor_node = db_engine.get_node(neighbor_id)
+                    if neighbor_node and not neighbor_node.is_root_node:
+                        candidate_neighbors[neighbor_id] = {
+                            "id": neighbor_node.id,
+                            "title": neighbor_node.title,
+                            "body": neighbor_node.description,
+                            "relation_desc": e.description,
+                            "node_type": neighbor_node.node_type,
+                        }
+        return candidate_neighbors
+
     def explore_concept_hub(
         self,
         query: str,
@@ -55,11 +100,7 @@ class DepartmentPersonaAgent:
         Iteratively expands frontier nodes up to max_depth=3. Blocks further traversal past Root Nodes.
         Emits node_touched telemetry events to animate the visual canvas.
         """
-        all_edges = db_engine.get_edges(project_id)
-        adj_map: Dict[str, List[GraphEdge]] = defaultdict(list)
-        for e in all_edges:
-            adj_map[e.source_id].append(e)
-            adj_map[e.target_id].append(e)
+        adj_map = self._get_adjacency_map(project_id)
 
         visited_node_ids = set([self.hub_node.id])
         current_frontier = [self.hub_node.id]
@@ -84,33 +125,12 @@ class DepartmentPersonaAgent:
                 break
 
             # Find all unvisited candidate neighbors connected to current frontier nodes
-            candidate_neighbors: Dict[str, Dict[str, Any]] = {}
-            for f_id in current_frontier:
-                # Root Node Traversal Blocking: Root Nodes provide summary context, but block expanding further hops
-                f_node = db_engine.get_node(f_id)
-                if f_node and f_node.is_root_node:
-                    continue
-
-                for e in adj_map.get(f_id, []):
-                    neighbor_id = e.target_id if e.source_id == f_id else e.source_id
-
-                    # Filter by mutually exclusive partition if specified
-                    if partition_node_ids and neighbor_id not in partition_node_ids:
-                        continue
-
-                    if (
-                        neighbor_id not in visited_node_ids
-                        and neighbor_id not in candidate_neighbors
-                    ):
-                        neighbor_node = db_engine.get_node(neighbor_id)
-                        if neighbor_node:
-                            candidate_neighbors[neighbor_id] = {
-                                "id": neighbor_node.id,
-                                "title": neighbor_node.title,
-                                "body": neighbor_node.description,
-                                "relation_desc": e.description,
-                                "node_type": neighbor_node.node_type,
-                            }
+            candidate_neighbors = self.get_candidate_neighbors(
+                frontier_ids=current_frontier,
+                adj_map=adj_map,
+                visited_ids=visited_node_ids,
+                partition_node_ids=partition_node_ids,
+            )
 
             if not candidate_neighbors:
                 break
@@ -651,21 +671,81 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
                 f"[{self.department_name}] Persona cross-linking ingestion failed: {e}"
             ) from e
 
+    @classmethod
+    def get_hub_preview_subconcepts(
+        cls,
+        hub_id: str,
+        adj_map: Dict[str, List[GraphEdge]],
+        max_depth: int = 2,
+        max_items: int = 15,
+    ) -> List[Dict[str, Any]]:
+        """Collects a preview of sub-concepts connected to a hub up to max_depth using common neighbor exploration."""
+        visited_sub_ids = {hub_id}
+        frontier = [hub_id]
+        depth_subconcepts = []
+
+        for cur_depth in range(1, max_depth + 1):
+            candidates = cls.get_candidate_neighbors(
+                frontier_ids=frontier,
+                adj_map=adj_map,
+                visited_ids=visited_sub_ids,
+            )
+            if not candidates:
+                break
+
+            frontier = []
+            for n_id, n_data in candidates.items():
+                visited_sub_ids.add(n_id)
+                frontier.append(n_id)
+                depth_subconcepts.append(
+                    {
+                        "title": n_data["title"],
+                        "depth": cur_depth,
+                        "relation": n_data["relation_desc"],
+                    }
+                )
+                if len(depth_subconcepts) >= max_items:
+                    break
+            if len(depth_subconcepts) >= max_items:
+                break
+
+        return depth_subconcepts
+
     @staticmethod
     def filter_relevant_hubs(
         doc_title: str,
         intra_doc_nodes: List[GraphNode],
         candidate_hubs: List[GraphNode],
+        project_id: str = "global",
+        preview_depth: int = 2,
     ) -> List[str]:
-        """Pre-check relevance filtering evaluating candidate persona hubs against extracted concepts.
+        """Pre-check relevance filtering evaluating candidate persona hubs against
+        extracted concepts.
 
+        Enriches candidate hubs with depth-2 sub-concepts for enhanced semantic
+        resolution.
         Selects 1 to 3 candidate hubs that have genuine domain relevance.
         Guarantees fallback to the 'Everything' hub if no specialized domain hub fits.
         """
-        candidate_hubs_payload = [
-            {"id": h.id, "title": h.title, "description": h.description}
-            for h in candidate_hubs
-        ]
+        adj_map = DepartmentPersonaAgent._get_adjacency_map(project_id)
+
+        candidate_hubs_payload = []
+        for h in candidate_hubs:
+            depth_subconcepts = DepartmentPersonaAgent.get_hub_preview_subconcepts(
+                hub_id=h.id,
+                adj_map=adj_map,
+                max_depth=preview_depth,
+                max_items=15,
+            )
+            hub_dict = {
+                "id": h.id,
+                "title": h.title,
+                "description": h.description,
+            }
+            if depth_subconcepts:
+                hub_dict["connected_subconcepts"] = depth_subconcepts
+            candidate_hubs_payload.append(hub_dict)
+
         intra_concepts_payload = [
             {"id": n.id, "title": n.title, "description": n.description}
             for n in intra_doc_nodes
@@ -677,7 +757,7 @@ Incoming Document: '{doc_title}'
 Newly Extracted Concepts ({len(intra_concepts_payload)} items):
 {json.dumps(intra_concepts_payload, indent=2)}
 
-Candidate Persona Domain Hubs ({len(candidate_hubs_payload)} items):
+Candidate Persona Domain Hubs with Local Sub-Concepts ({len(candidate_hubs_payload)} items):
 {json.dumps(candidate_hubs_payload, indent=2)}
 
 Select 1 to 3 candidate hubs that have genuine domain relevance to host or connect with these concepts.

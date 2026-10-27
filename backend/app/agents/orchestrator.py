@@ -877,6 +877,7 @@ class ExecutiveOrchestrator:
             doc_title=title,
             intra_doc_nodes=intra_doc_nodes,
             candidate_hubs=[h.node for h in top_hubs],
+            project_id=project_id,
         )
 
         # Filter active departments to ONLY the selected hubs
