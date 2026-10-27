@@ -20,10 +20,10 @@ def test_classify_intent_conversation():
         print("  ⏭️ test_classify_intent_conversation [SKIPPED - vLLM Server Offline]")
         return
     res = orchestrator.classify_intent("Hello, good morning!", chat_history=[])
-    assert res["intent"] == "CONVERSATION"
-    assert res["doc_type"] is None
-    assert res["source_url"] is None
-    assert res["raw_text"] is None
+    assert res.intent == "CONVERSATION"
+    assert res.doc_type is None
+    assert res.source_url is None
+    assert res.raw_text is None
 
 
 @pytest.mark.vllm
@@ -35,10 +35,10 @@ def test_classify_intent_retrieval():
     res = orchestrator.classify_intent(
         "Explain latent world models vs pixel world models", chat_history=[]
     )
-    assert res["intent"] == "RETRIEVAL"
-    assert res["doc_type"] is None
-    assert res["source_url"] is None
-    assert res["raw_text"] is None
+    assert res.intent == "RETRIEVAL"
+    assert res.doc_type is None
+    assert res.source_url is None
+    assert res.raw_text is None
 
 
 @pytest.mark.vllm
@@ -50,8 +50,8 @@ def test_classify_intent_ingestion():
     res = orchestrator.classify_intent(
         "https://arxiv.org/pdf/2605.11550 paper abstract", chat_history=[]
     )
-    assert res["intent"] == "INGESTION"
-    assert res["doc_type"] in ("paper", "blog", "post")
+    assert res.intent == "INGESTION"
+    assert res.doc_type in ("paper", "blog", "post")
 
 
 @pytest.mark.vllm
@@ -72,10 +72,10 @@ def test_classify_intent_with_chat_history():
     res = orchestrator.classify_intent(
         "Compare this with diffusion policies", chat_history=history
     )
-    assert res["intent"] == "RETRIEVAL"
-    assert res["doc_type"] is None
-    assert res["source_url"] is None
-    assert res["raw_text"] is None
+    assert res.intent == "RETRIEVAL"
+    assert res.doc_type is None
+    assert res.source_url is None
+    assert res.raw_text is None
 
 
 @pytest.mark.vllm
@@ -88,9 +88,9 @@ def test_classify_intent_dual_payload():
         "Include this document https://arxiv.org/pdf/2605.11550 because it proposes a novel skeletal loss formulation.",
         chat_history=[],
     )
-    assert res["intent"] == "INGESTION"
-    assert res["doc_type"] == "paper"
-    assert res["source_url"] == "https://arxiv.org/pdf/2605.11550"
+    assert res.intent == "INGESTION"
+    assert res.doc_type == "paper"
+    assert res.source_url == "https://arxiv.org/pdf/2605.11550"
 
 
 def test_consolidate_extracted_concepts():
@@ -101,7 +101,7 @@ def test_consolidate_extracted_concepts():
         query="Test query",
         chat_history=[],
     )
-    assert res["concepts"] == []
+    assert res.concepts == []
 
 
 @pytest.mark.vllm

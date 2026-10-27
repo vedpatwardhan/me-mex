@@ -16,7 +16,7 @@ import uuid
 import time
 import asyncio
 from collections import defaultdict
-from typing import List, Dict, Any, AsyncGenerator, Generator, Optional
+from typing import List, Dict, Any, AsyncGenerator, Generator, Optional, Union
 from app.db import db_engine
 from app.models import (
     GraphNode,
@@ -225,7 +225,7 @@ class ExecutiveOrchestrator:
         doc_title: str,
         query: str,
         chat_history: List[Dict[str, str]],
-    ) -> Dict[str, Any]:
+    ) -> PassageConceptsPayload:
         """Performs LLM pass across a passage chunk to extract atomic concept nodes and qualitative relation edges."""
         system_prompt = load_prompt("passage_concept_extraction", doc_title=doc_title)
         messages = [{"role": "system", "content": system_prompt}]
@@ -237,28 +237,14 @@ class ExecutiveOrchestrator:
                 "content": f"User Query Context: {query}\n\nPassage Chunk ({doc_title}):\n{passage_text}",
             }
         )
-        try:
-            t0 = time.time()
-            payload = self.llm.generate_structured_completion(
-                messages,
-                response_model=PassageConceptsPayload,
-                temperature=0.2,
-                max_tokens=2048,
-                max_retries=2,
-                enable_reasoning=False,
-            )
-            duration = round(time.time() - t0, 2)
-            return {
-                "concepts": [c.model_dump() for c in payload.concepts],
-                "duration_seconds": duration,
-            }
-        except Exception as e:
-            print(
-                f"[ExecutiveOrchestrator] Passage concept extraction failed for '{doc_title}': {e}"
-            )
-            raise RuntimeError(
-                f"Passage concept extraction failed for '{doc_title}': {e}"
-            ) from e
+        return self.llm.generate_structured_completion(
+            messages,
+            response_model=PassageConceptsPayload,
+            temperature=0.2,
+            max_tokens=2048,
+            max_retries=2,
+            enable_reasoning=False,
+        )
 
     def consolidate_extracted_concepts(
         self,
@@ -266,10 +252,14 @@ class ExecutiveOrchestrator:
         doc_title: str,
         query: str,
         chat_history: List[Dict[str, str]],
-    ) -> Dict[str, Any]:
+    ) -> ConsolidatedConceptsPayload:
         """Consolidates raw passage concepts into document-specific canonical concepts in a single lean pass."""
         if not raw_extracted_concepts:
-            return {"concepts": []}
+            return ConsolidatedConceptsPayload(
+                doc_description=f"Empty knowledge document for '{doc_title}'.",
+                doc_type="paper",
+                concepts=[],
+            )
 
         system_prompt = load_prompt("consolidate_concepts", doc_title=doc_title)
         messages = [{"role": "system", "content": system_prompt}]
@@ -293,36 +283,18 @@ class ExecutiveOrchestrator:
         )
         messages.append({"role": "user", "content": payload_content})
 
-        try:
-            t0 = time.time()
-            payload = self.llm.generate_structured_completion(
-                messages,
-                response_model=ConsolidatedConceptsPayload,
-                temperature=0.2,
-                max_tokens=4096,
-                max_retries=2,
-                enable_reasoning=False,
-            )
-            duration = round(time.time() - t0, 2)
-            return {
-                "doc_description": payload.doc_description
-                or f"Consolidated knowledge document for '{doc_title}'.",
-                "doc_type": payload.doc_type or "paper",
-                "concepts": [c.model_dump() for c in payload.concepts],
-                "duration_seconds": duration,
-            }
-        except Exception as e:
-            print(
-                f"\n[ExecutiveOrchestrator] !!! CONCEPT CONSOLIDATION FAILURE !!!\n  Error: {e}\n"
-            )
-            # Strict fail-fast: do not dump raw concepts or compensate with hacky fallbacks
-            raise RuntimeError(
-                f"Failed to consolidate concepts for '{doc_title}': {e}"
-            ) from e
+        return self.llm.generate_structured_completion(
+            messages,
+            response_model=ConsolidatedConceptsPayload,
+            temperature=0.2,
+            max_tokens=4096,
+            max_retries=2,
+            enable_reasoning=False,
+        )
 
     def classify_intent(
         self, query: str, chat_history: List[Dict[str, str]]
-    ) -> Dict[str, Any]:
+    ) -> IntentClassificationPayload:
         """Classifies user input into CONVERSATION, RETRIEVAL, or INGESTION path in a single pass."""
         system_prompt = load_prompt("classify_intent")
 
@@ -338,44 +310,21 @@ class ExecutiveOrchestrator:
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": query})
 
-        try:
-            t0 = time.time()
-            payload = self.llm.generate_structured_completion(
-                messages,
-                response_model=IntentClassificationPayload,
-                temperature=0.0,
-                max_tokens=1024,
-                max_retries=2,
-                enable_reasoning=False,
+        payload = self.llm.generate_structured_completion(
+            messages,
+            response_model=IntentClassificationPayload,
+            temperature=0.0,
+            max_tokens=1024,
+            max_retries=2,
+            enable_reasoning=False,
+        )
+
+        if payload.intent == "INGESTION" and not payload.doc_type:
+            raise ValueError(
+                "Classified INGESTION intent but 'doc_type' is missing from LLM output."
             )
-            duration = round(time.time() - t0, 2)
-            raw_intent = payload.intent
 
-            if raw_intent == "INGESTION":
-                doc_type = payload.doc_type
-                if not doc_type:
-                    raise ValueError(
-                        "Classified INGESTION intent but 'doc_type' is missing from LLM output."
-                    )
-                return {
-                    "intent": "INGESTION",
-                    "doc_type": doc_type,
-                    "source_url": payload.source_url,
-                    "raw_text": payload.raw_text,
-                    "duration_seconds": duration,
-                }
-
-            # CONVERSATION or RETRIEVAL
-            return {
-                "intent": raw_intent,
-                "doc_type": None,
-                "source_url": None,
-                "raw_text": None,
-                "duration_seconds": duration,
-            }
-        except Exception as e:
-            print(f"[ExecutiveOrchestrator] classify_intent error: {e}")
-            raise RuntimeError(f"User intent classification failed: {e}") from e
+        return payload
 
     @staticmethod
     def _sanitize_chat_history(
@@ -400,52 +349,74 @@ class ExecutiveOrchestrator:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Central conversational entry point routing user input dynamically across the 3 execution paths."""
         chat_history = self._sanitize_chat_history(chat_history)
-        try:
-            intent_result = self.classify_intent(query, chat_history)
-            intent = intent_result["intent"]
-            intent_duration = intent_result.get("duration_seconds")
 
-            intent_evt = {
-                "event": "intent_classified",
-                "intent": intent,
-                "doc_type": intent_result.get("doc_type"),
-                "source_url": intent_result.get("source_url"),
-                "duration_seconds": intent_duration,
-                "message": f"Executive Orchestrator evaluated user input intent: '{intent}'",
-                "timestamp": time.time(),
-            }
-            self.event_queue.push(project_id, intent_evt)
-            yield intent_evt
+        async def _run_pipeline() -> AsyncGenerator[Dict[str, Any], None]:
+            try:
+                t0_intent = time.time()
+                intent_payload = self.classify_intent(query, chat_history)
+                intent_duration = round(time.time() - t0_intent, 2)
+                intent = intent_payload.intent
 
-            if intent == "CONVERSATION":
-                async for event in self.execute_conversation_flow(
-                    query, chat_history, project_id=project_id
-                ):
-                    yield event
-            elif intent == "INGESTION":
-                async for event in self.execute_ingestion_flow(
-                    query=query,
-                    chat_history=chat_history,
-                    target_info=intent_result,
-                    project_id=project_id,
-                ):
-                    yield event
-            else:
-                async for event in self.execute_retrieval_flow(
-                    query=query,
-                    chat_history=chat_history,
-                    project_id=project_id,
-                ):
-                    yield event
-        except Exception as e:
-            err_evt = {
-                "event": "error",
-                "error": str(e),
-                "message": f"Orchestrator encountered an error: {str(e)}",
-                "timestamp": time.time(),
-            }
-            self.event_queue.push(project_id, err_evt)
-            yield err_evt
+                yield {
+                    "event": "intent_classified",
+                    "intent": intent,
+                    "doc_type": intent_payload.doc_type,
+                    "source_url": intent_payload.source_url,
+                    "duration_seconds": intent_duration,
+                    "message": f"Executive Orchestrator evaluated user input intent: '{intent}'",
+                    "timestamp": time.time(),
+                }
+
+                if intent == "CONVERSATION":
+                    async for event in self.execute_conversation_flow(
+                        query, chat_history, project_id=project_id
+                    ):
+                        yield event
+                elif intent == "INGESTION":
+                    async for event in self.execute_ingestion_flow(
+                        query=query,
+                        chat_history=chat_history,
+                        target_info=intent_payload,
+                        project_id=project_id,
+                    ):
+                        yield event
+                else:
+                    async for event in self.execute_retrieval_flow(
+                        query=query,
+                        chat_history=chat_history,
+                        project_id=project_id,
+                    ):
+                        yield event
+            except Exception as e:
+                logger.error_box(
+                    "Pipeline Error", f"Error during query '{query[:50]}': {e}"
+                )
+                yield {
+                    "event": "error",
+                    "error": str(e),
+                    "message": f"Orchestrator encountered an error: {str(e)}",
+                    "timestamp": time.time(),
+                }
+                fallback_prompt = (
+                    f"An error occurred while handling the request ('{query}'): {str(e)}. "
+                    "Briefly explain the issue to the user and suggest next steps."
+                )
+                try:
+                    async for event in self.execute_conversation_flow(
+                        fallback_prompt, chat_history, project_id=project_id
+                    ):
+                        yield event
+                except Exception as fallback_err:
+                    yield {
+                        "event": "chat_complete",
+                        "final_answer": f"I encountered an error while processing your request: {str(e)}",
+                        "timestamp": time.time(),
+                    }
+
+        async for item in _run_pipeline():
+            if isinstance(item, dict) and "event" in item:
+                self.event_queue.push(project_id, item)
+            yield item
 
     async def execute_conversation_flow(
         self,
@@ -462,13 +433,11 @@ class ExecutiveOrchestrator:
             style="magenta",
         )
 
-        start_evt = {
+        yield {
             "event": "conversation_start",
             "message": "Executive Orchestrator responding directly via conversational mode...",
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, start_evt)
-        yield start_evt
 
         recent_events = self.event_queue.get_events(project_id=project_id, limit=15)
         events_summary = ""
@@ -492,7 +461,7 @@ class ExecutiveOrchestrator:
 
         # Stream tokens progressively
         full_tokens = []
-        async for token in self.llm.stream_chat_completion(messages, max_tokens=1024):
+        async for token in self.llm.stream_chat_completion(messages, max_tokens=512):
             full_tokens.append(token)
             yield {
                 "event": "token_chunk",
@@ -504,16 +473,14 @@ class ExecutiveOrchestrator:
         if not direct_response:
             # Fallback to direct synchronous generation if streaming returns empty
             direct_response = self.llm.generate_chat_completion(
-                messages, max_tokens=1024
+                messages, max_tokens=512
             )
 
-        complete_evt = {
+        yield {
             "event": "chat_complete",
             "final_answer": direct_response,
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, complete_evt)
-        yield complete_evt
 
     async def execute_retrieval_flow(
         self,
@@ -528,13 +495,11 @@ class ExecutiveOrchestrator:
             style="green",
         )
 
-        hub_discover_evt = {
+        yield {
             "event": "persona_traversal_start",
             "message": f"Executive Orchestrator identifying dynamic concept hubs in project '{project_id}' for query: '{query}'",
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, hub_discover_evt)
-        yield hub_discover_evt
 
         # Discover top concept hubs via rustworkx unweighted centrality
         top_hubs = self.analytics.get_top_concept_hubs(
@@ -545,13 +510,11 @@ class ExecutiveOrchestrator:
         ]
 
         if not active_departments:
-            no_dept_evt = {
+            yield {
                 "event": "no_personas_active",
                 "message": "No active concept hubs found in database yet. Falling back to direct conversation.",
                 "timestamp": time.time(),
             }
-            self.event_queue.push(project_id, no_dept_evt)
-            yield no_dept_evt
             async for event in self.execute_conversation_flow(
                 query, chat_history, project_id=project_id
             ):
@@ -565,7 +528,7 @@ class ExecutiveOrchestrator:
         )
 
         for dept in active_departments:
-            start_evt = {
+            yield {
                 "event": "persona_traversal_start",
                 "department_id": dept.department_id,
                 "department_name": dept.department_name,
@@ -573,8 +536,6 @@ class ExecutiveOrchestrator:
                 "message": f"Specialist Persona for '{dept.hub_node.title}' traversing adjacent concept edges...",
                 "timestamp": time.time(),
             }
-            self.event_queue.push(project_id, start_evt)
-            yield start_evt
 
         async def _traverse_dept(dept):
             partition_ids = set(department_communities.get(dept.hub_node.id, []))
@@ -595,23 +556,19 @@ class ExecutiveOrchestrator:
         department_findings = []
         for dept, finding in traversal_results:
             department_findings.append(finding)
-            evt_active = {
+            yield {
                 "event": "persona_traversal_active",
                 "department_id": dept.department_id,
                 "department_name": dept.department_name,
                 "traversed_node_ids": finding["traversed_node_ids"],
                 "timestamp": time.time(),
             }
-            self.event_queue.push(project_id, evt_active)
-            yield evt_active
 
-        retrieval_summary_evt = {
+        yield {
             "event": "retrieval_summary",
             "message": f"Graph Retrieval completed across {len(active_departments)} concept departments for query: '{query}'",
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, retrieval_summary_evt)
-        yield retrieval_summary_evt
 
         # Final Step: Culminate in conversation response stream
         async for event in self.execute_conversation_flow(
@@ -623,12 +580,20 @@ class ExecutiveOrchestrator:
         self,
         query: str,
         chat_history: List[Dict[str, str]],
-        target_info: Dict[str, Any],
+        target_info: Union[Dict[str, Any], IntentClassificationPayload],
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Path 3: INGESTION (Step 1: Fetch & Intra-Doc Graph -> Step 2: Hub Traversal, Relevance Eval, Linking & Reorganization -> Final Conversation)."""
-        source_url = target_info.get("source_url")
-        raw_payload = target_info.get("raw_text")
+        source_url = (
+            target_info.source_url
+            if isinstance(target_info, IntentClassificationPayload)
+            else target_info.get("source_url")
+        )
+        raw_payload = (
+            target_info.raw_text
+            if isinstance(target_info, IntentClassificationPayload)
+            else target_info.get("raw_text")
+        )
 
         logger.phase_header(
             "📥 PATH 3: DOCUMENT INGESTION PIPELINE",
@@ -653,7 +618,12 @@ class ExecutiveOrchestrator:
 
         doc_res = self.tools.fetch_document(source_url)
         fetch_status = doc_res.get("status", "SUCCESS")
-        doc_type = doc_res.get("doc_type", target_info.get("doc_type") or "document")
+        declared_doc_type = (
+            target_info.doc_type
+            if isinstance(target_info, IntentClassificationPayload)
+            else target_info.get("doc_type")
+        )
+        doc_type = doc_res.get("doc_type", declared_doc_type or "document")
         page_count = doc_res.get("page_count")
         fetched_content = ""
         debug_file_path = ""
@@ -673,7 +643,7 @@ class ExecutiveOrchestrator:
                 "error", "Document could not be retrieved from source."
             )
 
-        evt_fetched = {
+        yield {
             "event": "document_fetched",
             "source_url": source_url,
             "title": title or "Unretrievable Document",
@@ -684,8 +654,6 @@ class ExecutiveOrchestrator:
             "page_count": page_count,
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, evt_fetched)
-        yield evt_fetched
 
         # Step 2: SINGLE UNIFIED ERROR HANDLING & CONVERSATION TRANSITION
         if not fetched_content:
@@ -712,15 +680,13 @@ class ExecutiveOrchestrator:
             else fetched_content
         )
 
-        tool_evt = {
+        yield {
             "event": "orchestrator_tool_call",
             "tool_name": "ingest_document_tool",
             "args": {"title": title, "source_url": source_url},
             "message": f"Executive Orchestrator invoking document ingestion pipeline for '{title}'...",
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, tool_evt)
-        yield tool_evt
 
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
         doc_rec = DocumentRecord(
@@ -742,15 +708,13 @@ class ExecutiveOrchestrator:
             self.db.upsert_passage(p_rec)
             passage_ids.append(p_id)
 
-        evt_chunks = {
+        yield {
             "event": "passages_chunked",
             "doc_id": doc_id,
             "doc_title": title,
             "chunk_count": len(passage_chunks),
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, evt_chunks)
-        yield evt_chunks
 
         # Extract Raw Passage Concepts across chunks with bounded concurrency & Consolidate into Intra-Document Concepts
         raw_extracted_concepts: List[Dict[str, Any]] = []
@@ -758,29 +722,17 @@ class ExecutiveOrchestrator:
 
         async def _extract_chunk(p_id: str, chunk_str: str, chunk_idx: int):
             async with extraction_sem:
-                extraction = None
-                try:
-                    extraction = await asyncio.to_thread(
-                        self._extract_concepts_from_passage,
-                        chunk_str,
-                        title,
-                        query,
-                        chat_history,
-                    )
-                except Exception as chunk_err:
-                    print(
-                        f"[ExecutiveOrchestrator] Warning: Passage chunk [{chunk_idx + 1}/{len(passage_chunks)}] "
-                        f"extraction encountered error after retries: {chunk_err}. Degrading gracefully for this chunk."
-                    )
-                    extraction = {"concepts": [], "duration_seconds": 0.0}
-
-                c_count = len(extraction.get("concepts", []))
-                c_titles = [
-                    c.get("title", "")
-                    for c in extraction.get("concepts", [])
-                    if c.get("title")
-                ]
-                duration = extraction.get("duration_seconds")
+                t0_chunk = time.time()
+                extraction = await asyncio.to_thread(
+                    self._extract_concepts_from_passage,
+                    chunk_str,
+                    title,
+                    query,
+                    chat_history,
+                )
+                chunk_duration = round(time.time() - t0_chunk, 2)
+                c_count = len(extraction.concepts)
+                c_titles = [c.title for c in extraction.concepts if c.title]
                 evt_prog = {
                     "event": "passage_extraction_progress",
                     "doc_id": doc_id,
@@ -788,59 +740,29 @@ class ExecutiveOrchestrator:
                     "total_chunks": len(passage_chunks),
                     "concepts_extracted": c_count,
                     "concept_titles": c_titles,
-                    "duration_seconds": duration,
+                    "duration_seconds": chunk_duration,
                     "timestamp": time.time(),
                 }
-                self.event_queue.push(project_id, evt_prog)
                 return p_id, extraction, evt_prog
 
-        try:
-            tasks = [
-                asyncio.create_task(_extract_chunk(p_id, chunk_str, idx))
-                for idx, (p_id, chunk_str) in enumerate(
-                    zip(passage_ids, passage_chunks)
+        tasks = [
+            asyncio.create_task(_extract_chunk(p_id, chunk_str, idx))
+            for idx, (p_id, chunk_str) in enumerate(zip(passage_ids, passage_chunks))
+        ]
+        for fut in asyncio.as_completed(tasks):
+            p_id, extraction, evt_prog = await fut
+            yield evt_prog  # Stream progress event immediately in real-time!
+            for c in extraction.concepts:
+                raw_extracted_concepts.append(
+                    {
+                        "idx": c.idx,
+                        "title": c.title,
+                        "description": c.description or "",
+                        "passage_ids": [p_id],
+                    }
                 )
-            ]
-            for fut in asyncio.as_completed(tasks):
-                p_id, extraction, evt_prog = await fut
-                yield evt_prog  # Stream progress event immediately in real-time!
-                for c in extraction.get("concepts", []):
-                    raw_extracted_concepts.append(
-                        {
-                            "idx": c["idx"],
-                            "title": c["title"],
-                            "description": c.get("description", ""),
-                            "passage_ids": [p_id],
-                        }
-                    )
-        except Exception as e:
-            err_msg = f"Document ingestion aborted: Concept extraction from passages failed for '{title}'. Details: {str(e)}"
-            print(f"[ExecutiveOrchestrator] {err_msg}")
-            evt_fail = {
-                "event": "extraction_failed",
-                "doc_id": doc_id,
-                "doc_title": title,
-                "error": str(e),
-                "timestamp": time.time(),
-            }
-            self.event_queue.push(project_id, evt_fail)
-            yield evt_fail
-            evt_err = {
-                "event": "error",
-                "error": err_msg,
-                "timestamp": time.time(),
-            }
-            self.event_queue.push(project_id, evt_err)
-            yield evt_err
-            async for conv_event in self.execute_conversation_flow(
-                f"I attempted to ingest '{title}' from {source_url}, but the concept extraction process failed with an error: {str(e)}. No nodes or edges were added to the graph.",
-                chat_history,
-                project_id=project_id,
-            ):
-                yield conv_event
-            return
 
-        evt_extracted = {
+        yield {
             "event": "passages_extracted",
             "doc_id": doc_id,
             "doc_title": title,
@@ -848,77 +770,48 @@ class ExecutiveOrchestrator:
             "total_raw_concepts": len(raw_extracted_concepts),
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, evt_extracted)
-        yield evt_extracted
 
-        evt_consol_start = {
+        yield {
             "event": "consolidation_start",
             "doc_id": doc_id,
             "doc_title": title,
             "raw_concept_count": len(raw_extracted_concepts),
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, evt_consol_start)
-        yield evt_consol_start
 
-        try:
-            consolidated_result = await asyncio.to_thread(
-                self.consolidate_extracted_concepts,
-                raw_extracted_concepts,
-                title,
-                query,
-                chat_history,
-            )
-        except Exception as e:
-            err_msg = f"Document ingestion aborted: Concept consolidation failed for '{title}'. Details: {str(e)}"
-            print(f"[ExecutiveOrchestrator] {err_msg}")
-            evt_fail = {
-                "event": "consolidation_failed",
-                "doc_id": doc_id,
-                "doc_title": title,
-                "error": str(e),
-                "timestamp": time.time(),
-            }
-            self.event_queue.push(project_id, evt_fail)
-            yield evt_fail
-            evt_err = {
-                "event": "error",
-                "error": err_msg,
-                "timestamp": time.time(),
-            }
-            self.event_queue.push(project_id, evt_err)
-            yield evt_err
-            async for conv_event in self.execute_conversation_flow(
-                f"I attempted to ingest '{title}' from {source_url}, but the concept consolidation process failed with an error: {str(e)}. No nodes or edges were added to the graph.",
-                chat_history,
-                project_id=project_id,
-            ):
-                yield conv_event
-            return
+        t0_consol = time.time()
+        consolidated_result = await asyncio.to_thread(
+            self.consolidate_extracted_concepts,
+            raw_extracted_concepts,
+            title,
+            query,
+            chat_history,
+        )
+        consol_duration = round(time.time() - t0_consol, 2)
 
-        consolidated_concepts = consolidated_result.get("concepts", [])
-        canonical_titles = [
-            c.get("title", "") for c in consolidated_concepts if c.get("title")
-        ]
+        consolidated_concepts = consolidated_result.concepts
+        canonical_titles = [c.title for c in consolidated_concepts if c.title]
 
-        evt_consol_complete = {
+        yield {
             "event": "consolidation_complete",
             "doc_id": doc_id,
             "doc_title": title,
             "canonical_concepts_count": len(consolidated_concepts),
             "canonical_concepts": canonical_titles,
-            "duration_seconds": consolidated_result.get("duration_seconds"),
+            "duration_seconds": consol_duration,
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, evt_consol_complete)
-        yield evt_consol_complete
 
         proj_list = ["global"]
         if project_id and project_id != "global":
             proj_list.append(project_id)
 
         # Determine specific Document Root subtype (strictly required from intent classification)
-        doc_type = target_info.get("doc_type")
+        doc_type = (
+            target_info.doc_type
+            if isinstance(target_info, IntentClassificationPayload)
+            else target_info.get("doc_type")
+        )
         if not doc_type:
             raise ValueError(
                 "Ingestion execution aborted: 'doc_type' is strictly required for ingestion and cannot be missing or None."
@@ -930,9 +823,8 @@ class ExecutiveOrchestrator:
             _id=root_node_id,
             node_type=doc_type,
             title=title,
-            description=consolidated_result.get(
-                "doc_description", f"Document summary for {title}."
-            ),
+            description=consolidated_result.doc_description
+            or f"Document summary for {title}.",
             passage_ids=passage_ids,
             project_ids=proj_list,
             metadata={
@@ -943,7 +835,7 @@ class ExecutiveOrchestrator:
         )
         self.db.upsert_node(root_node)
 
-        evt_root_created = {
+        yield {
             "event": "root_node_created",
             "root_node_id": root_node_id,
             "node_type": doc_type,
@@ -951,8 +843,6 @@ class ExecutiveOrchestrator:
             "source_url": source_url,
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, evt_root_created)
-        yield evt_root_created
 
         intra_doc_nodes = []
         for c in consolidated_concepts:
@@ -960,9 +850,9 @@ class ExecutiveOrchestrator:
             intra_node = GraphNode(
                 _id=c_id,
                 node_type="CONCEPT",
-                title=c.get("title", "Extracted Concept"),
-                description=c.get("description", ""),
-                passage_ids=c.get("passage_ids", passage_ids[:1]),
+                title=c.title or "Extracted Concept",
+                description=c.description or "",
+                passage_ids=c.passage_ids or passage_ids[:1],
                 project_ids=proj_list,
                 metadata={"immutable": True, "root_node_id": root_node_id},  # IMMUTABLE
             )
@@ -979,21 +869,19 @@ class ExecutiveOrchestrator:
             )
             self.db.upsert_edge(rel_edge)
 
-        evt_intra_created = {
+        yield {
             "event": "intra_concepts_created",
             "root_node_id": root_node_id,
             "count": len(intra_doc_nodes),
             "edges_count": len(intra_doc_nodes),
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, evt_intra_created)
-        yield evt_intra_created
 
         # Step 2: Sub-Graph Traversal, Candidate Hub Assembly & Relevance Routing
         top_hubs = self.analytics.get_top_concept_hubs(
             project_id=project_id, max_k=self.max_k_hubs
         )
-        evt_hubs = {
+        yield {
             "event": "hubs_calculated",
             "hubs": [
                 {"id": h.id, "title": h.title, "score": round(h.centrality_score, 4)}
@@ -1002,8 +890,6 @@ class ExecutiveOrchestrator:
             "count": len(top_hubs),
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, evt_hubs)
-        yield evt_hubs
 
         # Phase 1: Pre-Check Persona Relevance Filtering (delegated to DepartmentPersonaAgent)
         selected_hub_ids = DepartmentPersonaAgent.filter_relevant_hubs(
@@ -1039,7 +925,6 @@ class ExecutiveOrchestrator:
             ),
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, evt_route_done)
         yield evt_route_done
         print(f"[ExecutiveOrchestrator] {evt_route_done['message']}")
 
@@ -1048,7 +933,7 @@ class ExecutiveOrchestrator:
         department_communities = self.analytics.partition_department_communities(
             project_id=project_id, hubs=top_hub_nodes, max_depth=5
         )
-        evt_parts = {
+        yield {
             "event": "partitions_calculated",
             "partitions": {
                 dept.department_name: list(
@@ -1058,8 +943,6 @@ class ExecutiveOrchestrator:
             },
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, evt_parts)
-        yield evt_parts
 
         # Phase 2: Parallel Partitioned Sub-Graph Traversal for active personas
         collective_explored_trees: Dict[str, Dict[str, Any]] = {}
@@ -1087,15 +970,13 @@ class ExecutiveOrchestrator:
             for touch_evt in traversal_finding.get("emitted_events", []):
                 yield touch_evt
 
-            evt_active = {
+            yield {
                 "event": "persona_traversal_active",
                 "department_id": dept.department_id,
                 "department_name": dept.department_name,
                 "traversed_node_ids": traversal_finding["traversed_node_ids"],
                 "timestamp": time.time(),
             }
-            self.event_queue.push(project_id, evt_active)
-            yield evt_active
 
             # Store explored nodes per department for collective linking and post-reorganization
             dept_nodes_dict = {
@@ -1245,7 +1126,6 @@ INVARIANTS TO ENFORCE:
                 cmd["persona_id"] = collective_explored_trees[dept_id]["department_id"]
             evt = self.ingestion_engine.execute_single_command(cmd, title, proj_list)
             if evt:
-                self.event_queue.push(project_id, evt)
                 yield evt
 
         # Phase 4: Consolidated Post-Linking Macro-Reorganization
@@ -1262,7 +1142,6 @@ INVARIANTS TO ENFORCE:
             )
 
             for reorg_evt in reorg_res.get("emitted_events", []):
-                self.event_queue.push(project_id, reorg_evt)
                 yield reorg_evt
 
             for cmd in reorg_res.get("commands", []):
@@ -1272,10 +1151,9 @@ INVARIANTS TO ENFORCE:
                     cmd, title, proj_list
                 )
                 if evt:
-                    self.event_queue.push(project_id, evt)
                     yield evt
 
-        summary_evt = {
+        yield {
             "event": "ingestion_completed",
             "doc_id": doc_id,
             "title": title,
@@ -1283,8 +1161,6 @@ INVARIANTS TO ENFORCE:
             "message": f"Document '{title}' successfully ingested and merged into knowledge graph.",
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, summary_evt)
-        yield summary_evt
 
         # Final Step: Culminate in conversation response stream
         ingest_query = f"I just ingested document '{title}'. Summarize key additions and integrated graph concepts."
