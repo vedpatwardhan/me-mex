@@ -16,6 +16,14 @@ Analyze which candidate neighbor concepts are relevant and worth exploring deepe
 
 Return JSON format:
 {{
-  "selected_neighbor_ids": ["concept_id_1", "concept_id_3"],
-  "rationale": "Brief explanation of why these nodes were selected for deeper expansion."
+  "selected_neighbors": [
+    {
+      "node_id": "concept_id_1",
+      "rationale": "Directly explains the mathematical dynamics formulation needed for this domain."
+    },
+    {
+      "node_id": "concept_id_3",
+      "rationale": "Provides complementary state representation bounds for planning."
+    }
+  ]
 }}

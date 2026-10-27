@@ -883,23 +883,19 @@ class ExecutiveOrchestrator:
         # Filter active departments to ONLY the selected hubs
         selected_hub_set = set(selected_hub_ids)
         active_departments = [
-            DepartmentPersonaAgent(hub_node, score)
-            for hub_node, score in top_hubs
-            if hub_node.id in selected_hub_set
+            DepartmentPersonaAgent(h.node, h.centrality_score)
+            for h in top_hubs
+            if h.id in selected_hub_set
         ]
-        if not active_departments and top_hubs:
-            active_departments = [
-                DepartmentPersonaAgent(top_hubs[0][0], top_hubs[0][1])
-            ]
 
         evt_route_done = {
             "event": "persona_routing_completed",
             "active_hub_ids": [d.hub_node.id for d in active_departments],
             "active_hub_titles": [d.hub_node.title for d in active_departments],
             "bypassed_hub_titles": [
-                h[0].title
+                h.title
                 for h in top_hubs
-                if h[0].id not in {d.hub_node.id for d in active_departments}
+                if h.id not in {d.hub_node.id for d in active_departments}
             ],
             "message": (
                 f"Persona routing completed: activated {len(active_departments)} domain"

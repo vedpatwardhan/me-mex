@@ -349,8 +349,13 @@ class PersonaIngestionCommandsPayload(BaseModel):
     commands: List[PersonaIngestionCommand]
 
 
+class SelectedNeighborItem(BaseModel):
+    node_id: str
+    rationale: str = ""
+
+
 class PersonaExplorationPayload(BaseModel):
     synthesized_insight: Optional[str] = None
+    selected_neighbors: List[SelectedNeighborItem] = Field(default_factory=list)
+    # Backward compatibility / fallback if a model outputs flat list
     selected_neighbor_ids: List[str] = Field(default_factory=list)
-    rationale: Optional[str] = None
-    relevant_node_ids: List[str] = Field(default_factory=list)

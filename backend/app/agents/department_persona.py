@@ -163,14 +163,24 @@ class DepartmentPersonaAgent:
                     messages,
                     response_model=PersonaExplorationPayload,
                     temperature=0.2,
-                    max_tokens=512,
+                    max_tokens=1024,
                     max_retries=2,
                     enable_reasoning=False,
                 )
-                selected_ids = payload.selected_neighbor_ids
-                next_frontier = [
-                    nid for nid in selected_ids if nid in candidate_neighbors
-                ]
+                # Map neighbor ID to its specific rationale
+                neighbor_rationales: Dict[str, str] = {}
+                if payload.selected_neighbors:
+                    for item in payload.selected_neighbors:
+                        if item.node_id in candidate_neighbors:
+                            neighbor_rationales[item.node_id] = item.rationale
+                elif payload.selected_neighbor_ids:
+                    for nid in payload.selected_neighbor_ids:
+                        if nid in candidate_neighbors:
+                            neighbor_rationales[
+                                nid
+                            ] = "Relevant domain concept selected for exploration."
+
+                next_frontier = list(neighbor_rationales.keys())
             except Exception as e:
                 print(f"[{self.department_name}] Subgraph expansion error: {e}")
                 raise RuntimeError(
@@ -182,6 +192,7 @@ class DepartmentPersonaAgent:
                 n_node = db_engine.get_node(nid)
                 if n_node:
                     explored_nodes_map[nid] = n_node
+                    rationale = neighbor_rationales.get(nid, "")
                     # Emit real-time telemetry event
                     evt = {
                         "event": "node_touched",
@@ -189,7 +200,12 @@ class DepartmentPersonaAgent:
                         "persona_name": self.department_name,
                         "node_id": n_node.id,
                         "node_title": n_node.title,
-                        "message": f"Concept '{n_node.title}' explored at hop {depth} by {self.department_name}.",
+                        "rationale": rationale,
+                        "message": (
+                            f"Concept '{n_node.title}' explored at hop {depth}: {rationale}"
+                            if rationale
+                            else f"Concept '{n_node.title}' explored at hop {depth} by {self.department_name}."
+                        ),
                         "timestamp": time.time(),
                     }
                     event_queue.push(project_id, evt)
