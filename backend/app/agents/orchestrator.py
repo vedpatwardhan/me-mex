@@ -373,11 +373,25 @@ class ExecutiveOrchestrator:
                     ):
                         yield event
                 elif intent == "INGESTION":
+                    last_doc_title = None
                     async for event in self.execute_ingestion_flow(
                         query=query,
                         chat_history=chat_history,
                         target_info=intent_payload,
                         project_id=project_id,
+                    ):
+                        if event.get("event") == "ingestion_completed":
+                            last_doc_title = event.get("title")
+                        yield event
+
+                    # Single conversational summary upon successful ingestion
+                    summary_query = (
+                        f"I just ingested document '{last_doc_title}'. Summarize key additions and integrated graph concepts."
+                        if last_doc_title
+                        else f"Summarize key additions from the recently ingested document for: {query}"
+                    )
+                    async for event in self.execute_conversation_flow(
+                        summary_query, chat_history, project_id=project_id
                     ):
                         yield event
                 else:
@@ -580,20 +594,12 @@ class ExecutiveOrchestrator:
         self,
         query: str,
         chat_history: List[Dict[str, str]],
-        target_info: Union[Dict[str, Any], IntentClassificationPayload],
+        target_info: IntentClassificationPayload,
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Path 3: INGESTION (Step 1: Fetch & Intra-Doc Graph -> Step 2: Hub Traversal, Relevance Eval, Linking & Reorganization -> Final Conversation)."""
-        source_url = (
-            target_info.source_url
-            if isinstance(target_info, IntentClassificationPayload)
-            else target_info.get("source_url")
-        )
-        raw_payload = (
-            target_info.raw_text
-            if isinstance(target_info, IntentClassificationPayload)
-            else target_info.get("raw_text")
-        )
+        source_url = target_info.source_url
+        raw_payload = target_info.raw_text
 
         logger.phase_header(
             "📥 PATH 3: DOCUMENT INGESTION PIPELINE",
@@ -605,25 +611,14 @@ class ExecutiveOrchestrator:
         # Ingestion requires a source_url (HTTP/HTTPS URL or file:// filesystem path).
         # raw_payload is contextual commentary and NEVER a substitute for the file contents!
         if not source_url:
-            print("[ExecutiveOrchestrator] Ingestion aborted: No source_url provided.")
-            fail_query = (
+            raise ValueError(
                 "No document source URL or file path was provided for ingestion. "
                 "Please provide a valid URL or local file path (e.g. file:///path/to/doc.pdf)."
             )
-            async for event in self.execute_conversation_flow(
-                fail_query, chat_history, project_id=project_id
-            ):
-                yield event
-            return
 
         doc_res = self.tools.fetch_document(source_url)
         fetch_status = doc_res.get("status", "SUCCESS")
-        declared_doc_type = (
-            target_info.doc_type
-            if isinstance(target_info, IntentClassificationPayload)
-            else target_info.get("doc_type")
-        )
-        doc_type = doc_res.get("doc_type", declared_doc_type or "document")
+        doc_type = doc_res.get("doc_type", target_info.doc_type or "document")
         page_count = doc_res.get("page_count")
         fetched_content = ""
         debug_file_path = ""
@@ -650,27 +645,17 @@ class ExecutiveOrchestrator:
             "char_count": len(fetched_content),
             "debug_file_path": debug_file_path,
             "status": "SUCCESS" if not fetch_error else "ERROR",
+            "error": fetch_error,
             "doc_type": doc_type,
             "page_count": page_count,
             "timestamp": time.time(),
         }
 
-        # Step 2: SINGLE UNIFIED ERROR HANDLING & CONVERSATION TRANSITION
+        # Step 2: SINGLE UNIFIED ERROR HANDLING
         if not fetched_content:
-            print(
-                f"[ExecutiveOrchestrator] Document ingestion failed for '{source_url}': {fetch_error}. Aborting to conversation."
+            raise RuntimeError(
+                f"Document could not be retrieved from '{source_url}': {fetch_error}"
             )
-            fail_query = (
-                f"I attempted to ingest the document at '{source_url}', "
-                f"but downloading and extracting content failed ({fetch_error}). "
-                "Inform the user clearly that the document could not be retrieved "
-                "from this URL or file path and suggest checking the source."
-            )
-            async for event in self.execute_conversation_flow(
-                fail_query, chat_history, project_id=project_id
-            ):
-                yield event
-            return
 
         # Assemble full content: document content is primary, user notes attach as context
         full_content = (
@@ -807,11 +792,7 @@ class ExecutiveOrchestrator:
             proj_list.append(project_id)
 
         # Determine specific Document Root subtype (strictly required from intent classification)
-        doc_type = (
-            target_info.doc_type
-            if isinstance(target_info, IntentClassificationPayload)
-            else target_info.get("doc_type")
-        )
+        doc_type = target_info.doc_type
         if not doc_type:
             raise ValueError(
                 "Ingestion execution aborted: 'doc_type' is strictly required for ingestion and cannot be missing or None."
@@ -1161,13 +1142,6 @@ INVARIANTS TO ENFORCE:
             "message": f"Document '{title}' successfully ingested and merged into knowledge graph.",
             "timestamp": time.time(),
         }
-
-        # Final Step: Culminate in conversation response stream
-        ingest_query = f"I just ingested document '{title}'. Summarize key additions and integrated graph concepts."
-        async for event in self.execute_conversation_flow(
-            ingest_query, chat_history, project_id=project_id
-        ):
-            yield event
 
 
 orchestrator = ExecutiveOrchestrator()

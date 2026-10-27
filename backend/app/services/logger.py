@@ -151,9 +151,16 @@ class RichLogger:
                 meta_parts.append(f"{chars:,} chars")
             meta_str = f" ({', '.join(meta_parts)})" if meta_parts else ""
 
-            console.print(
-                f"{proj_badge}   ├─ 📄 [bold cyan]Document Fetched[/bold cyan]: [underline]{url}[/underline]{meta_str}"
-            )
+            status = event_data.get("status", "SUCCESS")
+            error = event_data.get("error")
+            if status == "ERROR" or error:
+                console.print(
+                    f"{proj_badge}   ├─ ❌ [bold red]Document Fetch Failed[/bold red]: [underline]{url}[/underline] - [red]{error or 'Retrieval failed'}[/red]"
+                )
+            else:
+                console.print(
+                    f"{proj_badge}   ├─ 📄 [bold cyan]Document Fetched[/bold cyan]: [underline]{url}[/underline]{meta_str}"
+                )
             if filename:
                 console.print(
                     f"      │   • cached to: [dim]temp_downloads/{filename}[/dim]"

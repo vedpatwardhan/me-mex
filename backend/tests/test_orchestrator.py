@@ -417,34 +417,56 @@ async def test_execute_ingestion_flow_fails_fast_on_fetch_error_without_substitu
         orchestrator.llm, "stream_chat_completion", mock_stream_chat_completion
     )
 
-    target_info = {
-        "intent": "INGESTION",
-        "doc_type": "paper",
-        "source_url": "file:///path/does/not/exist/missing_paper.pdf",
-        "raw_text": "Here are my commentary notes about spatial policies.",
-    }
+    from app.models import IntentClassificationPayload
+
+    target_info = IntentClassificationPayload(
+        intent="INGESTION",
+        doc_type="paper",
+        source_url="file:///path/does/not/exist/missing_paper.pdf",
+        raw_text="Here are my commentary notes about spatial policies.",
+    )
 
     events = []
-    async for evt in orchestrator.execute_ingestion_flow(
-        query="ingest this file",
-        chat_history=[],
-        target_info=target_info,
-        project_id="test_proj_fail_fast",
-    ):
-        events.append(evt)
+    with pytest.raises(RuntimeError, match="Document could not be retrieved"):
+        async for evt in orchestrator.execute_ingestion_flow(
+            query="ingest this file",
+            chat_history=[],
+            target_info=target_info,
+            project_id="test_proj_fail_fast",
+        ):
+            events.append(evt)
 
-    # First event should be document_fetched with status ERROR
+    # First event yielded before exception should be document_fetched with status ERROR and error message populated
     fetch_evts = [e for e in events if e.get("event") == "document_fetched"]
     assert len(fetch_evts) == 1
     assert fetch_evts[0]["status"] == "ERROR"
     assert fetch_evts[0]["title"] == "Unretrievable Document"
+    assert fetch_evts[0]["error"] is not None
 
-    # Should have aborted to conversation rather than creating passages or calling ingest_document_tool
+    # Should have aborted without creating passages or calling ingest_document_tool
     tool_evts = [e for e in events if e.get("event") == "orchestrator_tool_call"]
     assert len(tool_evts) == 0
 
-    conversation_evts = [e for e in events if e.get("event") == "conversation_start"]
-    assert len(conversation_evts) == 1
+    # Test top-level coordination: process_user_message catches the failure and delegates to conversation flow
+    coordinator_events = []
+    # Mock classify_intent to return target_info
+    monkeypatch.setattr(
+        orchestrator, "classify_intent", lambda *args, **kwargs: target_info
+    )
+    async for evt in orchestrator.process_user_message(
+        query="ingest this file",
+        chat_history=[],
+        project_id="test_proj_fail_fast",
+    ):
+        coordinator_events.append(evt)
+
+    # Coordinator emits pipeline error and runs conversation flow
+    err_evts = [e for e in coordinator_events if e.get("event") == "error"]
+    assert len(err_evts) == 1
+    conv_evts = [
+        e for e in coordinator_events if e.get("event") == "conversation_start"
+    ]
+    assert len(conv_evts) == 1
 
 
 @pytest.mark.asyncio
