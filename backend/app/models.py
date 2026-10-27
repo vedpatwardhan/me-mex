@@ -54,6 +54,10 @@ class GraphNode(BaseModel):
             return True
         return False
 
+    def to_prompt_dict(self) -> Dict[str, str]:
+        """Returns clean representation (id, title, description) for LLM prompts."""
+        return {"id": self.id, "title": self.title, "description": self.description}
+
 
 class ConceptHubCandidate(BaseModel):
     """
@@ -302,12 +306,37 @@ class ConsolidatedConceptsPayload(BaseModel):
     concepts: List[CanonicalConceptItem]
 
 
-class LinkingCommand(BaseModel):
-    action: Literal["LINK_CONCEPTS"]
+class ExploredDomainContext(BaseModel):
+    """Typed context for an explored department persona domain."""
+
+    department_id: str
+    department_name: str
+    hub_node: GraphNode
+    explored_nodes: List[GraphNode] = Field(default_factory=list)
+
+
+class EdgeCommandPayload(BaseModel):
     source_id: str
     target_id: str
-    relationship_type: str = "SUBSET_OF"
-    description: str
+    relation_type: str = "RELEVANT_TO"
+    description: str = ""
+    domain_hub_id: Optional[str] = None
+
+
+class ConceptEditPayload(BaseModel):
+    id: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+
+class LinkingCommand(BaseModel):
+    action: Literal[
+        "CREATE_EDGE", "CONNECT_DIRECT", "CONSTRUCT_EDGE", "EDIT_CONCEPT"
+    ] = "CREATE_EDGE"
+    edge: Optional[EdgeCommandPayload] = None
+    concept: Optional[ConceptEditPayload] = None
+    department_name: Optional[str] = None
+    persona_id: Optional[str] = None
 
 
 class CollectiveLinkingPayload(BaseModel):

@@ -27,6 +27,7 @@ from app.models import (
     PassageConceptsPayload,
     ConsolidatedConceptsPayload,
     CollectiveLinkingPayload,
+    ExploredDomainContext,
 )
 from app.agents.department_persona import (
     DepartmentPersonaAgent,
@@ -923,7 +924,7 @@ class ExecutiveOrchestrator:
         }
 
         # Phase 2: Parallel Partitioned Sub-Graph Traversal for active personas
-        collective_explored_trees: Dict[str, Dict[str, Any]] = {}
+        collective_explored_trees: Dict[str, ExploredDomainContext] = {}
 
         for dept in active_departments:
             yield {
@@ -961,42 +962,28 @@ class ExecutiveOrchestrator:
                 n.id: n for n in traversal_finding.get("explored_nodes", [])
             }
             dept_nodes_dict[dept.hub_node.id] = dept.hub_node
-            collective_explored_trees[dept.hub_node.id] = {
-                "department_id": dept.department_id,
-                "department_name": dept.department_name,
-                "hub_node": dept.hub_node,
-                "explored_nodes": list(dept_nodes_dict.values()),
-            }
+            collective_explored_trees[dept.hub_node.id] = ExploredDomainContext(
+                department_id=dept.department_id,
+                department_name=dept.department_name,
+                hub_node=dept.hub_node,
+                explored_nodes=list(dept_nodes_dict.values()),
+            )
 
         # Phase 3: Collective Multi-Hub Ingestion Linking (Radial Invariant & Surjective Coverage)
-        intra_concepts_payload = [
-            {"id": n.id, "title": n.title, "description": n.description}
-            for n in intra_doc_nodes
+        intra_concepts_payload = [n.to_prompt_dict() for n in intra_doc_nodes]
+        available_domains_payload = [
+            {
+                "domain_hub_id": d_info.hub_node.id,
+                "domain_name": d_info.department_name,
+                "central_hub_node": d_info.hub_node.to_prompt_dict(),
+                "intermediate_explored_concepts": [
+                    n.to_prompt_dict()
+                    for n in d_info.explored_nodes
+                    if n.id != d_info.hub_node.id
+                ],
+            }
+            for d_info in collective_explored_trees.values()
         ]
-        available_domains_payload = []
-        for h_id, d_info in collective_explored_trees.items():
-            h_node = d_info["hub_node"]
-            exp_nodes = d_info["explored_nodes"]
-            available_domains_payload.append(
-                {
-                    "domain_hub_id": h_node.id,
-                    "domain_name": d_info["department_name"],
-                    "central_hub_node": {
-                        "id": h_node.id,
-                        "title": h_node.title,
-                        "description": h_node.description,
-                    },
-                    "intermediate_explored_concepts": [
-                        {
-                            "id": n.id,
-                            "title": n.title,
-                            "description": n.description,
-                        }
-                        for n in exp_nodes
-                        if n.id != h_node.id
-                    ],
-                }
-            )
 
         system_collective = load_prompt("collective_ingestion_linking")
         user_collective = f"""
@@ -1040,7 +1027,7 @@ INVARIANTS TO ENFORCE:
         # Pre-populate domain lookup map: node_id -> domain_hub_id
         node_to_domain_map: dict[str, str] = {}
         for h_id, d_info in collective_explored_trees.items():
-            for n in d_info["explored_nodes"]:
+            for n in d_info.explored_nodes:
                 node_to_domain_map[n.id] = h_id
 
         for cmd in collective_commands:
@@ -1098,10 +1085,10 @@ INVARIANTS TO ENFORCE:
             tgt = cmd.get("edge", {}).get("target_id")
             dept_id = node_to_domain_map.get(tgt)
             if dept_id and dept_id in collective_explored_trees:
-                cmd["department_name"] = collective_explored_trees[dept_id][
-                    "department_name"
-                ]
-                cmd["persona_id"] = collective_explored_trees[dept_id]["department_id"]
+                cmd["department_name"] = collective_explored_trees[
+                    dept_id
+                ].department_name
+                cmd["persona_id"] = collective_explored_trees[dept_id].department_id
             evt = self.ingestion_engine.execute_single_command(cmd, title, proj_list)
             if evt:
                 yield evt
@@ -1109,8 +1096,9 @@ INVARIANTS TO ENFORCE:
         # Phase 4: Consolidated Post-Linking Macro-Reorganization
         # Runs ONCE after all edges are established into MongoDB
         for dept in active_departments:
-            dept_explored = collective_explored_trees.get(dept.hub_node.id, {}).get(
-                "explored_nodes", [dept.hub_node]
+            dept_context = collective_explored_trees.get(dept.hub_node.id)
+            dept_explored = (
+                dept_context.explored_nodes if dept_context else [dept.hub_node]
             )
             reorg_res = await asyncio.to_thread(
                 dept.reorganize_concept_hub,
