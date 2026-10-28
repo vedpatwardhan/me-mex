@@ -136,16 +136,12 @@ class DepartmentPersonaAgent:
                 break
 
             # Evaluate candidate neighbors with persona LLM
-            prompt_payload = f"""
-            Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
-            User Query / Context: "{query}"
-            Current Hop Level: {depth} / {max_depth}
+            prompt_payload = f"""Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
+User Query / Context: "{query}"
+Current Hop Level: {depth} / {max_depth}
 
-            Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
-            {json.dumps(list(candidate_neighbors.values()), indent=2)}
-
-            Evaluate which neighbor concepts are relevant and worth exploring deeper for this query.
-            """
+Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
+{json.dumps(list(candidate_neighbors.values()), indent=2)}"""
             messages = [
                 {
                     "role": "system",
@@ -346,13 +342,8 @@ class DepartmentPersonaAgent:
         system_discover = load_prompt(
             "persona_reorganize_discover", department_name=self.department_name
         )
-        user_discover = f"""
-Candidate Mutable Concept Hubs Eligible for Subdivision ({len(qualifying_nodes)} candidate(s)):
-{json.dumps(nodes_payload, indent=2)}
-
-Select candidate_id values for any concept hubs that combine distinct sub-themes requiring intermediate subdivision.
-You may ONLY select from the candidate_id values above.
-"""
+        user_discover = f"""Candidate Mutable Concept Hubs Eligible for Subdivision ({len(qualifying_nodes)} candidate(s)):
+{json.dumps(nodes_payload, indent=2)}"""
         candidate_ids = []
         try:
             payload_discover = llm_gateway.generate_structured_completion(
@@ -468,8 +459,7 @@ You may ONLY select from the candidate_id values above.
                 department_name=self.department_name,
                 node_id=target_node.id,
             )
-            user_split = f"""
-Target Over-Clustered Mutable Concept Hub: '{target_node.title}' (ID: {target_node.id})
+            user_split = f"""Target Over-Clustered Mutable Concept Hub: '{target_node.title}' (ID: {target_node.id})
 Current Description: {target_node.description}
 Total Connected Neighbor Concepts: {len(immutable_evidence_concepts) + len(existing_domain_hubs)}
 
@@ -477,11 +467,7 @@ Total Connected Neighbor Concepts: {len(immutable_evidence_concepts) + len(exist
 {json.dumps(immutable_evidence_concepts, indent=2)}
 
 [PRIORITY 2: Existing Mutable Domain Hubs ({len(existing_domain_hubs)} items)]:
-{json.dumps(existing_domain_hubs, indent=2)}
-
-Group these connected concept themes into 3-4 focused intermediate sub-concepts.
-Ensure the newly formulated sub-concepts specifically accommodate and cluster the Newly Attached Immutable Concepts.
-"""
+{json.dumps(existing_domain_hubs, indent=2)}"""
             sub_concepts = []
             try:
                 payload_split = llm_gateway.generate_structured_completion(
@@ -541,8 +527,7 @@ Ensure the newly formulated sub-concepts specifically accommodate and cluster th
                 department_name=self.department_name,
                 node_id=target_node.id,
             )
-            user_rewire = f"""
-Target Concept Hub: '{target_node.title}' (ID: {target_node.id})
+            user_rewire = f"""Target Concept Hub: '{target_node.title}' (ID: {target_node.id})
 
 Formulated Sub-Concepts Available for Connection:
 {json.dumps(sub_concepts, indent=2)}
@@ -552,12 +537,7 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
 {json.dumps(immutable_evidence_concepts, indent=2)}
 
 [Existing Mutable Domain Hubs ({len(existing_domain_hubs)})]:
-{json.dumps(existing_domain_hubs, indent=2)}
-
-1. Assign EVERY direct neighbor node to AT LEAST ONE sub-concept alias (multiple if semantically relevant).
-2. Prioritize wiring all immutable concepts to their matching sub-concepts.
-3. Ensure EVERY formulated sub-concept alias is connected to AT LEAST ONE neighbor node. No sub-concept should remain idle.
-"""
+{json.dumps(existing_domain_hubs, indent=2)}"""
             rewired_edges = []
             try:
                 payload_rewire = llm_gateway.generate_structured_completion(
@@ -768,17 +748,12 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
         ]
 
         system_route = load_prompt("persona_route_relevance")
-        user_route = f"""
-Incoming Document: '{doc_title}'
+        user_route = f"""Incoming Document: '{doc_title}'
 Newly Extracted Concepts ({len(intra_concepts_payload)} items):
 {json.dumps(intra_concepts_payload, indent=2)}
 
 Candidate Persona Domain Hubs with Local Sub-Concepts ({len(candidate_hubs_payload)} items):
-{json.dumps(candidate_hubs_payload, indent=2)}
-
-Select 1 to 3 candidate hubs that have genuine domain relevance to host or connect with these concepts.
-If no specialized domain hub fits, you MUST select the 'Everything' hub.
-"""
+{json.dumps(candidate_hubs_payload, indent=2)}"""
         selected_hub_ids = []
         try:
             payload_route = llm_gateway.generate_structured_completion(

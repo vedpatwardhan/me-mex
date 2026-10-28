@@ -12,7 +12,7 @@ Rules:
 2. If a candidate is a Root Node (paper/blog/transcript summary), read its summary for provenance context, but do NOT select it for further hop expansions.
 
 Given your current explored knowledge base and candidate neighbor concepts:
-Analyze which candidate neighbor concepts are relevant and worth exploring deeper.
+Analyze which candidate neighbor concepts are relevant and worth exploring deeper for this query.
 
 Return JSON format:
 {{

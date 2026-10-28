@@ -986,21 +986,14 @@ class ExecutiveOrchestrator:
         ]
 
         system_collective = load_prompt("collective_ingestion_linking")
-        user_collective = f"""
-Document Title: '{title}'
+        user_collective = f"""Document Title: '{title}'
 User Query: "{query}"
 
 Newly Extracted Intra-Document Concepts ({len(intra_concepts_payload)} items, IMMUTABLE):
 {json.dumps(intra_concepts_payload, indent=2)}
 
 Available Active Persona Domains and Explored Sub-Graph Nodes:
-{json.dumps(available_domains_payload, indent=2)}
-
-INVARIANTS TO ENFORCE:
-1. RADIAL TREE INVARIANT: For any single persona domain, each newly extracted concept can connect to AT MOST ONE node (the single most specific semantic match). Never connect to an intermediate node and also to the central hub.
-2. SURJECTIVE COVERAGE: Every newly extracted concept MUST connect to AT LEAST ONE node across the available domains.
-3. SELECTIVE ATTACHMENT: Connect concepts ONLY to domains where they genuinely belong.
-"""
+{json.dumps(available_domains_payload, indent=2)}"""
         collective_commands = []
         try:
             payload_collective = self.llm.generate_structured_completion(
