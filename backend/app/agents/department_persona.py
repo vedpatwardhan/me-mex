@@ -778,17 +778,9 @@ Candidate Persona Domain Hubs with Local Sub-Concepts ({len(candidate_hubs_paylo
             print(f"[DepartmentPersonaAgent] Persona relevance routing error: {e}")
             selected_hub_ids = []
 
-        # Enforce universal fallback: if empty or unselected, fallback to 'Everything' or first top hub
+        # Enforce universal fallback: if empty or unselected, fallback to 'Everything'
         if not selected_hub_ids:
-            genesis_candidate = next(
-                (
-                    h.id
-                    for h in candidate_hubs
-                    if h.title.strip().lower() == "everything"
-                ),
-                candidate_hubs[0].id if candidate_hubs else None,
-            )
-            if genesis_candidate:
-                selected_hub_ids = [genesis_candidate]
+            genesis_candidate = db_engine.get_genesis_node(project_id)
+            selected_hub_ids = [genesis_candidate.id]
 
         return selected_hub_ids

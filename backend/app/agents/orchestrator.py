@@ -1066,17 +1066,19 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
             for cmd in filtered_commands
             if cmd.get("edge", {}).get("source_id")
         }
-        fallback_hub = active_departments[0].hub_node
+
+        # Fallback target: strictly prioritize primordial Genesis ('Everything') hub
+        genesis_hub = self.db.get_genesis_node(project_id)
         for intra in intra_doc_nodes:
             if intra.id not in connected_concepts:
                 filtered_commands.append(
                     {
                         "action": "CREATE_EDGE",
-                        "department_name": active_departments[0].department_name,
-                        "persona_id": active_departments[0].department_id,
+                        "department_name": genesis_hub.title,
+                        "persona_id": genesis_hub.id,
                         "edge": {
                             "source_id": intra.id,
-                            "target_id": fallback_hub.id,
+                            "target_id": genesis_hub.id,
                             "relation_type": "RELEVANT_TO",
                             "description": "Fallback foundational connection ensuring complete graph connectivity.",
                         },

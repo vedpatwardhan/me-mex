@@ -130,6 +130,17 @@ class GraphMemexDatabase:
         else:
             return self.mem_nodes.get(node_id)
 
+    def get_genesis_node(self, project_id: Optional[str] = None) -> Optional[GraphNode]:
+        """Returns the primordial Universal Genesis Concept Node ('Everything')."""
+        nodes = self.get_nodes(project_id)
+        for n in nodes:
+            if (
+                n.metadata.get("is_genesis") is True
+                or n.title.strip().lower() == "everything"
+            ):
+                return n
+        return None
+
     # --- Edge Operations ---
     def upsert_edge(self, edge: GraphEdge):
         if self.use_mongo:

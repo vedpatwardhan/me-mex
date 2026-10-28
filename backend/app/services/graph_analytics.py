@@ -205,15 +205,7 @@ class GraphAnalyticsWorker:
                     break
 
         # GUARANTEE: The primordial Universal Genesis node ('Everything') must ALWAYS be present in candidate hubs
-        genesis_node = next(
-            (
-                n
-                for n in mutable_concept_hubs
-                if n.title.strip().lower() == "everything"
-                or n.metadata.get("is_genesis") is True
-            ),
-            None,
-        )
+        genesis_node = db_engine.get_genesis_node(project_id)
         if genesis_node:
             selected_ids = {h.id for h in selected_hubs}
             if genesis_node.id not in selected_ids:
