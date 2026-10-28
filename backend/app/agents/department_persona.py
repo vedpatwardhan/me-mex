@@ -162,6 +162,7 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
                     max_tokens=1024,
                     max_retries=2,
                     enable_reasoning=False,
+                    caller=f"DepartmentPersonaAgent[{self.department_name}].subgraph_expansion",
                 )
                 # Map neighbor ID to its specific rationale
                 neighbor_rationales: Dict[str, str] = {}
@@ -356,6 +357,7 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
                 max_tokens=1024,
                 max_retries=2,
                 enable_reasoning=False,
+                caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_discover",
             )
             candidate_ids = payload_discover.candidate_concept_ids
         except Exception as e:
@@ -480,6 +482,7 @@ Total Connected Neighbor Concepts: {len(immutable_evidence_concepts) + len(exist
                     max_tokens=2048,
                     max_retries=2,
                     enable_reasoning=False,
+                    caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_split",
                 )
                 sub_concepts = [s.model_dump() for s in payload_split.sub_concepts]
             except Exception as e:
@@ -550,6 +553,7 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
                     max_tokens=4096,
                     max_retries=2,
                     enable_reasoning=False,
+                    caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_rewire",
                 )
                 rewired_edges = [r.model_dump() for r in payload_rewire.rewired_edges]
             except Exception as e:
@@ -651,6 +655,7 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
                 max_tokens=4096,
                 max_retries=2,
                 enable_reasoning=False,
+                caller=f"DepartmentPersonaAgent[{self.department_name}].persona_ingestion",
             )
             raw_cmds = [c.model_dump() for c in payload_ingest.commands]
             return {
@@ -766,6 +771,7 @@ Candidate Persona Domain Hubs with Local Sub-Concepts ({len(candidate_hubs_paylo
                 max_tokens=512,
                 max_retries=2,
                 enable_reasoning=False,
+                caller="DepartmentPersonaAgent.filter_relevant_hubs",
             )
             selected_hub_ids = payload_route.selected_hub_ids
         except Exception as e:

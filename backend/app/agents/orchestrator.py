@@ -36,6 +36,7 @@ from app.services.logger import logger
 from app.services.event_queue import event_queue
 from app.services.graph_analytics import graph_analytics
 from app.services.llm_gateway import llm_gateway
+from app.services.llm_tracer import llm_tracer
 from app.tools.search_tools import search_tools
 from app.prompts import load_prompt
 from app.services.graph_ingestion_engine import graph_ingestion_engine
@@ -245,6 +246,7 @@ class ExecutiveOrchestrator:
             max_tokens=2048,
             max_retries=2,
             enable_reasoning=False,
+            caller="ExecutiveOrchestrator.extract_concepts_from_passage",
         )
 
     def consolidate_extracted_concepts(
@@ -291,6 +293,7 @@ class ExecutiveOrchestrator:
             max_tokens=4096,
             max_retries=2,
             enable_reasoning=False,
+            caller="ExecutiveOrchestrator.consolidate_extracted_concepts",
         )
 
     def classify_intent(
@@ -318,6 +321,7 @@ class ExecutiveOrchestrator:
             max_tokens=1024,
             max_retries=2,
             enable_reasoning=False,
+            caller="ExecutiveOrchestrator.classify_intent",
         )
 
         if payload.intent == "INGESTION" and not payload.doc_type:
@@ -350,6 +354,7 @@ class ExecutiveOrchestrator:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Central conversational entry point routing user input dynamically across the 3 execution paths."""
         chat_history = self._sanitize_chat_history(chat_history)
+        llm_tracer.start_session(session_prefix="turn")
 
         async def _run_pipeline() -> AsyncGenerator[Dict[str, Any], None]:
             try:
@@ -476,7 +481,9 @@ class ExecutiveOrchestrator:
 
         # Stream tokens progressively
         full_tokens = []
-        async for token in self.llm.stream_chat_completion(messages, max_tokens=512):
+        async for token in self.llm.stream_chat_completion(
+            messages, max_tokens=512, caller="ExecutiveOrchestrator.conversation"
+        ):
             full_tokens.append(token)
             yield {
                 "event": "token_chunk",
@@ -488,7 +495,9 @@ class ExecutiveOrchestrator:
         if not direct_response:
             # Fallback to direct synchronous generation if streaming returns empty
             direct_response = self.llm.generate_chat_completion(
-                messages, max_tokens=512
+                messages,
+                max_tokens=512,
+                caller="ExecutiveOrchestrator.conversation_fallback",
             )
 
         yield {
@@ -1006,6 +1015,7 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
                 max_tokens=4096,
                 max_retries=2,
                 enable_reasoning=False,
+                caller="ExecutiveOrchestrator.collective_linking",
             )
             collective_commands = [c.model_dump() for c in payload_collective.commands]
         except Exception as e:
@@ -1025,7 +1035,7 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
 
         for cmd in collective_commands:
             action = cmd.get("action")
-            if action in ["CREATE_EDGE", "CONNECT_DIRECT", "CONSTRUCT_EDGE"]:
+            if action == "CREATE_EDGE":
                 edge = cmd.get("edge", {})
                 src = edge.get("source_id")
                 tgt = edge.get("target_id")

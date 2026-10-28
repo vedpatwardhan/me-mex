@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import httpx
 from typing import List, Dict, Any, Optional, Type, TypeVar
 from pydantic import BaseModel
@@ -9,6 +10,7 @@ T = TypeVar("T", bound=BaseModel)
 
 from app.config import settings
 from app.services.logger import logger, console
+from app.services.llm_tracer import llm_tracer
 
 # Configuration for vLLM Server on Colab / Remote
 COLAB_VLLM_URL = settings.COLAB_VLLM_URL
@@ -140,8 +142,11 @@ class LLMGateway:
         response_format: Optional[Dict[str, Any]] = None,
         guided_json: Optional[Dict[str, Any]] = None,
         enable_reasoning: bool = True,
+        caller: Optional[str] = None,
+        trace: bool = True,
     ) -> str:
         """Call vLLM OpenAI-compatible endpoint with optional reasoning prompt formatting & structured output decoding."""
+        start_time = time.perf_counter()
         url = f"{self.base_url}/chat/completions"
         formatted_messages = (
             self.prepare_reasoning_messages(messages) if enable_reasoning else messages
@@ -211,14 +216,43 @@ class LLMGateway:
                         f"      [dim]🧠 Parsed [THINK] reasoning trace: {len(parsed['thinking'])} chars[/dim]"
                     )
 
+            final_text = ""
             if vllm_reasoning:
-                return strip_emojis(raw_content.strip())
-
-            if enable_reasoning:
+                final_text = strip_emojis(raw_content.strip())
+            elif enable_reasoning:
                 parsed = self.parse_reasoning_output(raw_content)
-                return strip_emojis(parsed["final_response"])
-            return strip_emojis(raw_content.strip())
+                final_text = strip_emojis(parsed["final_response"])
+            else:
+                final_text = strip_emojis(raw_content.strip())
+
+            elapsed = time.perf_counter() - start_time
+            if trace:
+                llm_tracer.log_call(
+                    caller=caller,
+                    model=self.model,
+                    messages=messages,
+                    duration_seconds=elapsed,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_raw=raw_content,
+                    response_parsed=final_text,
+                    status="SUCCESS",
+                )
+
+            return final_text
         except Exception as e:
+            elapsed = time.perf_counter() - start_time
+            if trace:
+                llm_tracer.log_call(
+                    caller=caller,
+                    model=self.model,
+                    messages=messages,
+                    duration_seconds=elapsed,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    status="FAILED",
+                    error=str(e),
+                )
             logger.error_box("LLMGateway Request Failed", str(e))
             raise ConnectionError(f"vLLM Server unreachable or error ({e})")
 
@@ -230,12 +264,14 @@ class LLMGateway:
         max_tokens: int = 4096,
         max_retries: int = 2,
         enable_reasoning: bool = False,
+        caller: Optional[str] = None,
     ) -> T:
         """Invokes LLM with strict JSON Schema constraints and validates output against response_model.
 
         Leverages OpenAI-compatible response_format and vLLM guided_json for grammar-constrained decoding.
         Implements an automatic 2-attempt retry loop on JSON validation or parse failures.
         """
+        start_time = time.perf_counter()
         schema = response_model.model_json_schema()
         response_format = {
             "type": "json_schema",
@@ -247,6 +283,7 @@ class LLMGateway:
         }
 
         last_error = None
+        raw_res = None
         for attempt in range(1, max_retries + 1):
             try:
                 raw_res = self.generate_chat_completion(
@@ -256,8 +293,24 @@ class LLMGateway:
                     response_format=response_format,
                     guided_json=schema,
                     enable_reasoning=enable_reasoning,
+                    trace=False,
                 )
-                return response_model.model_validate_json(raw_res)
+                validated_model = response_model.model_validate_json(raw_res)
+                elapsed = time.perf_counter() - start_time
+                llm_tracer.log_call(
+                    caller=caller,
+                    model=self.model,
+                    messages=messages,
+                    duration_seconds=elapsed,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_raw=raw_res,
+                    response_parsed=validated_model.model_dump(),
+                    response_model_name=response_model.__name__,
+                    attempts=attempt,
+                    status="SUCCESS",
+                )
+                return validated_model
             except Exception as e:
                 last_error = e
                 if attempt < max_retries:
@@ -270,6 +323,20 @@ class LLMGateway:
                     f"[LLMGateway ERROR] Structured completion for {response_model.__name__} failed after "
                     f"{max_retries} attempts: {last_error}"
                 )
+                elapsed = time.perf_counter() - start_time
+                llm_tracer.log_call(
+                    caller=caller,
+                    model=self.model,
+                    messages=messages,
+                    duration_seconds=elapsed,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_raw=raw_res,
+                    response_model_name=response_model.__name__,
+                    attempts=attempt,
+                    status="FAILED",
+                    error=str(last_error),
+                )
                 raise RuntimeError(
                     f"Structured completion failed for {response_model.__name__} after {max_retries} attempts: {last_error}"
                 ) from last_error
@@ -281,8 +348,10 @@ class LLMGateway:
         max_tokens: int = 1024,
         top_p: float = 0.95,
         enable_reasoning: bool = False,
+        caller: Optional[str] = None,
     ):
         """Asynchronously stream response tokens from vLLM, yielding clean sanitized deltas."""
+        start_time = time.perf_counter()
         url = f"{self.base_url}/chat/completions"
         formatted_messages = (
             self.prepare_reasoning_messages(messages) if enable_reasoning else messages
@@ -303,32 +372,62 @@ class LLMGateway:
             "User-Agent": "Me-Mex-Client",
         }
 
-        async with httpx.AsyncClient(
-            timeout=60.0, headers=headers, trust_env=False
-        ) as client:
-            async with client.stream("POST", url, json=payload) as response:
-                if response.status_code != 200:
-                    error_text = await response.aread()
-                    raise ConnectionError(
-                        f"vLLM stream error {response.status_code}: {error_text.decode('utf-8', errors='ignore')}"
-                    )
+        collected_tokens = []
+        try:
+            async with httpx.AsyncClient(
+                timeout=60.0, headers=headers, trust_env=False
+            ) as client:
+                async with client.stream("POST", url, json=payload) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        raise ConnectionError(
+                            f"vLLM stream error {response.status_code}: {error_text.decode('utf-8', errors='ignore')}"
+                        )
 
-                async for line in response.aiter_lines():
-                    line = line.strip()
-                    if not line or line == "data: [DONE]":
-                        continue
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        try:
-                            chunk = json.loads(data_str)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                sanitized = strip_emojis(content)
-                                if sanitized:
-                                    yield sanitized
-                        except json.JSONDecodeError:
+                    async for line in response.aiter_lines():
+                        line = line.strip()
+                        if not line or line == "data: [DONE]":
                             continue
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                            try:
+                                chunk = json.loads(data_str)
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    sanitized = strip_emojis(content)
+                                    if sanitized:
+                                        collected_tokens.append(sanitized)
+                                        yield sanitized
+                            except json.JSONDecodeError:
+                                pass
+
+            elapsed = time.perf_counter() - start_time
+            full_response = "".join(collected_tokens)
+            llm_tracer.log_call(
+                caller=caller,
+                model=self.model,
+                messages=messages,
+                duration_seconds=elapsed,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_raw=full_response,
+                response_parsed=full_response,
+                status="SUCCESS",
+            )
+        except Exception as e:
+            elapsed = time.perf_counter() - start_time
+            llm_tracer.log_call(
+                caller=caller,
+                model=self.model,
+                messages=messages,
+                duration_seconds=elapsed,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                status="FAILED",
+                error=str(e),
+            )
+            raise
 
 
 llm_gateway = LLMGateway()

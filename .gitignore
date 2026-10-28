@@ -22,6 +22,7 @@ __pycache__/
 
 # Logs
 *.log
+backend/logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

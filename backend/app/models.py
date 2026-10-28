@@ -330,9 +330,7 @@ class ConceptEditPayload(BaseModel):
 
 
 class LinkingCommand(BaseModel):
-    action: Literal[
-        "CREATE_EDGE", "CONNECT_DIRECT", "CONSTRUCT_EDGE", "EDIT_CONCEPT"
-    ] = "CREATE_EDGE"
+    action: Literal["CREATE_EDGE", "EDIT_CONCEPT"] = "CREATE_EDGE"
     edge: Optional[EdgeCommandPayload] = None
     concept: Optional[ConceptEditPayload] = None
     department_name: Optional[str] = None
