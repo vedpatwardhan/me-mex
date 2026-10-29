@@ -290,9 +290,6 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
             "timestamp": time.time(),
         }
         emitted_events.append(evt_disc_start)
-        print(
-            f"[{self.department_name}] Step 3 Reorganization started: {evt_disc_start['message']}"
-        )
 
         # Early exit if no mutable nodes qualify for reorganization
         if not qualifying_nodes:
@@ -310,7 +307,6 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
                 "timestamp": time.time(),
             }
             emitted_events.append(evt_disc_done)
-            print(disc_msg)
             return {"commands": [], "emitted_events": emitted_events}
 
         # STEP 1: Discovery Phase (Identify candidate mutable concept nodes)
@@ -391,7 +387,6 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
             "timestamp": time.time(),
         }
         emitted_events.append(evt_disc_done)
-        print(disc_msg)
 
         reorg_commands: List[Dict[str, Any]] = []
 
@@ -409,7 +404,6 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
                     "timestamp": time.time(),
                 }
                 emitted_events.append(skip_evt)
-                print(skip_evt["message"])
                 continue
 
             if target_node.is_immutable:
@@ -424,7 +418,6 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
                     "timestamp": time.time(),
                 }
                 emitted_events.append(skip_evt)
-                print(skip_evt["message"])
                 continue
 
             neighbors = neighbor_map.get(c_id, [])
@@ -505,7 +498,6 @@ Total Connected Neighbor Concepts: {len(immutable_evidence_concepts) + len(exist
                     "timestamp": time.time(),
                 }
                 emitted_events.append(skip_evt)
-                print(skip_evt["message"])
                 continue
 
             # Emit split formulation completed event
@@ -522,7 +514,6 @@ Total Connected Neighbor Concepts: {len(immutable_evidence_concepts) + len(exist
             }
             emitted_events.append(split_evt)
             event_queue.push(project_id, split_evt)
-            print(split_evt["message"])
 
             # STEP 3: Neighbor Edge Re-Wiring (Iterate over ALL direct neighbors)
             system_rewire = load_prompt(
@@ -578,7 +569,6 @@ Complete List of Direct Neighbor Nodes to Re-Wire:
             }
             emitted_events.append(rewire_evt)
             event_queue.push(project_id, rewire_evt)
-            print(rewire_evt["message"])
 
             reorg_commands.append(
                 {
