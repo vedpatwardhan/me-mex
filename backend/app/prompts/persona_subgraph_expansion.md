@@ -18,11 +18,11 @@ Return JSON format:
 {{
   "selected_neighbors": [
     {
-      "node_id": "concept_id_1",
+      "neighbor_index": 1,
       "rationale": "Directly explains the mathematical dynamics formulation needed for this domain."
     },
     {
-      "node_id": "concept_id_3",
+      "neighbor_index": 3,
       "rationale": "Provides complementary state representation bounds for planning."
     }
   ]

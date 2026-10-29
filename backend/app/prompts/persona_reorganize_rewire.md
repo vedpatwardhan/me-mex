@@ -27,13 +27,13 @@ Return JSON format strictly:
 {
   "rewired_edges": [
     {
-      "neighbor_id": "exact_neighbor_node_id_1",
+      "neighbor_index": 1,
       "connect_to_sub_alias": "sub_1",
       "relation_type": "RELEVANT_TO",
       "description": "Re-wired connection from neighbor to specific sub-concept."
     },
     {
-      "neighbor_id": "exact_neighbor_node_id_2",
+      "neighbor_index": 2,
       "connect_to_sub_alias": "sub_2",
       "relation_type": "RELEVANT_TO",
       "description": "Re-wired connection ensuring sub_2 is also covered."

@@ -101,3 +101,39 @@ def test_llm_tracer_fail_safe_on_invalid_directory():
     )
     # Fail-safe: must return None and NOT raise
     assert res is None
+
+
+def test_llm_tracer_concurrent_thread_numbering(tmp_path: Path):
+    """Verify that multiple threads logging concurrently get unique, monotonically increasing step indices."""
+    import concurrent.futures
+
+    tracer = LLMTracer(base_dir=tmp_path)
+    session_id = tracer.start_session("concurrent_test")
+
+    def _worker(worker_id: int):
+        return tracer.log_call(
+            caller=f"Worker_{worker_id}",
+            model="test-model",
+            messages=[{"role": "user", "content": f"msg_{worker_id}"}],
+            duration_seconds=0.01,
+            temperature=0.0,
+            max_tokens=10,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        paths = list(executor.map(_worker, range(10)))
+
+    assert len(paths) == 10
+    assert all(p is not None and p.exists() for p in paths)
+
+    # All generated file paths must be distinct (no overwrites)
+    unique_names = {p.name for p in paths}
+    assert len(unique_names) == 10
+
+    # Step indices in files must be 1..10
+    step_indices = set()
+    for p in paths:
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            step_indices.add(data["step_index"])
+    assert step_indices == set(range(1, 11))

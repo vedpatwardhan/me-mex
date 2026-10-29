@@ -3,6 +3,7 @@ import json
 import time
 import inspect
 import datetime
+import threading
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from contextvars import ContextVar
@@ -12,6 +13,11 @@ _current_session_id: ContextVar[Optional[str]] = ContextVar(
     "current_session_id", default=None
 )
 _current_step_counter: ContextVar[int] = ContextVar("current_step_counter", default=0)
+
+# Process-wide sequence counter and lock per session for thread-safe monotonic numbering
+_session_step_lock = threading.Lock()
+_session_step_counters: Dict[str, int] = {}
+_latest_active_session_id: Optional[str] = None
 
 BASE_TRACE_DIR = Path(
     os.getenv(
@@ -33,19 +39,28 @@ class LLMTracer:
 
     def start_session(self, session_prefix: str = "session") -> str:
         """Starts a new trace session and resets step counter for the current context."""
+        global _latest_active_session_id
         timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         session_id = (
             f"{session_prefix}_{timestamp_str}_{int(time.time() * 1000) % 10000:04d}"
         )
         _current_session_id.set(session_id)
         _current_step_counter.set(0)
+        with _session_step_lock:
+            _session_step_counters[session_id] = 0
+            _latest_active_session_id = session_id
         return session_id
 
     def get_session_id(self) -> str:
         """Retrieves or auto-initializes the current session ID."""
         sid = _current_session_id.get()
         if not sid:
-            sid = self.start_session("default")
+            with _session_step_lock:
+                sid = _latest_active_session_id
+            if sid:
+                _current_session_id.set(sid)
+            else:
+                sid = self.start_session("default")
         return sid
 
     def _resolve_caller(self, caller: Optional[str]) -> str:
@@ -95,8 +110,11 @@ class LLMTracer:
             resolved_caller = self._resolve_caller(caller)
             session_id = self.get_session_id()
 
-            # Increment step counter
-            step_idx = _current_step_counter.get() + 1
+            # Monotonically increment step counter across threads within the session
+            with _session_step_lock:
+                current_val = _session_step_counters.get(session_id, 0) + 1
+                _session_step_counters[session_id] = current_val
+                step_idx = current_val
             _current_step_counter.set(step_idx)
 
             date_str = datetime.datetime.now().strftime("%Y-%m-%d")

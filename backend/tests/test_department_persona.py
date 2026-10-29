@@ -296,11 +296,11 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
         sys_content = messages[0]["content"]
         if (
             "reorganize_discover" in sys_content
-            or "candidate_concept_ids" in sys_content
-            or "candidate_id" in sys_content
+            or "candidate_concept_indices" in sys_content
+            or "candidate_index" in sys_content
             or "candidates" in sys_content
         ):
-            return '{"candidates": [{"candidate_id": "hub_qualifying", "rationale": "Over-clustered hub combining distinct themes."}]}'
+            return '{"candidates": [{"candidate_index": 1, "rationale": "Over-clustered hub combining distinct themes."}]}'
         elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
             return json.dumps(
                 {
@@ -323,12 +323,12 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
                 {
                     "rewired_edges": [
                         {
-                            "neighbor_id": "neighbor_0",
+                            "neighbor_index": 1,
                             "connect_to_sub_alias": "sub_1",
                             "relation_type": "RELEVANT_TO",
                         },
                         {
-                            "neighbor_id": "neighbor_1",
+                            "neighbor_index": 2,
                             "connect_to_sub_alias": "sub_2",
                             "relation_type": "RELEVANT_TO",
                         },
@@ -413,10 +413,10 @@ def test_reorganize_concept_hub_mixed_decongested_skips_phase_2b(monkeypatch):
         sys_content = messages[0]["content"]
         if (
             "reorganize_discover" in sys_content
-            or "candidate_id" in sys_content
+            or "candidate_index" in sys_content
             or "candidates" in sys_content
         ):
-            return '{"candidates": [{"candidate_id": "hub_mixed_1", "rationale": "High degree mixed hub."}]}'
+            return '{"candidates": [{"candidate_index": 1, "rationale": "High degree mixed hub."}]}'
         elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
             if "leaf_outward" in messages[1]["content"]:
                 captured_modes.append("leaf_outward")
@@ -444,12 +444,12 @@ def test_reorganize_concept_hub_mixed_decongested_skips_phase_2b(monkeypatch):
                 {
                     "rewired_edges": [
                         {
-                            "neighbor_id": "imm_0",
+                            "neighbor_index": 1,
                             "connect_to_sub_alias": "sub_a",
                             "relation_type": "RELEVANT_TO",
                         },
                         {
-                            "neighbor_id": "imm_1",
+                            "neighbor_index": 2,
                             "connect_to_sub_alias": "sub_b",
                             "relation_type": "RELEVANT_TO",
                         },
@@ -543,10 +543,10 @@ def test_reorganize_concept_hub_mixed_overclustered_triggers_phase_2b(monkeypatc
         sys_content = messages[0]["content"]
         if (
             "reorganize_discover" in sys_content
-            or "candidate_id" in sys_content
+            or "candidate_index" in sys_content
             or "candidates" in sys_content
         ):
-            return '{"candidates": [{"candidate_id": "hub_mixed_2", "rationale": "High degree mixed hub."}]}'
+            return '{"candidates": [{"candidate_index": 1, "rationale": "High degree mixed hub."}]}'
         elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
             user_content = messages[1]["content"]
             if "leaf_outward" in user_content:
@@ -574,12 +574,12 @@ def test_reorganize_concept_hub_mixed_overclustered_triggers_phase_2b(monkeypatc
                 {
                     "rewired_edges": [
                         {
-                            "neighbor_id": "imm2_0",
+                            "neighbor_index": 1,
                             "connect_to_sub_alias": "sub_1",
                             "relation_type": "RELEVANT_TO",
                         },
                         {
-                            "neighbor_id": "mut2_0",
+                            "neighbor_index": 2,
                             "connect_to_sub_alias": "sub_2",
                             "relation_type": "RELEVANT_TO",
                         },

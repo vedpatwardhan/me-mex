@@ -37,6 +37,7 @@ from app.services.event_queue import event_queue
 from app.services.graph_analytics import graph_analytics
 from app.services.llm_gateway import llm_gateway
 from app.services.llm_tracer import llm_tracer
+from app.services.prompt_mapper import PromptIdMapper
 from app.tools.search_tools import search_tools
 from app.prompts import load_prompt
 from app.services.graph_ingestion_engine import graph_ingestion_engine
@@ -255,6 +256,7 @@ class ExecutiveOrchestrator:
         doc_title: str,
         query: str,
         chat_history: List[Dict[str, str]],
+        passage_mapper: Optional[PromptIdMapper] = None,
     ) -> ConsolidatedConceptsPayload:
         """Consolidates raw passage concepts into document-specific canonical concepts in a single lean pass."""
         if not raw_extracted_concepts:
@@ -269,15 +271,26 @@ class ExecutiveOrchestrator:
         if chat_history:
             messages.extend(chat_history[-4:])
 
-        # Clean/project raw concept payloads to eliminate prompt bloat while preserving all semantic information
-        lean_concepts = [
-            {
-                "title": c.get("title", ""),
-                "description": c.get("description", ""),
-                "passage_ids": c.get("passage_ids", []),
-            }
-            for c in raw_extracted_concepts
-        ]
+        # Clean/project raw concept payloads with integer passage_indices
+        lean_concepts = []
+        for c in raw_extracted_concepts:
+            p_ids = c.get("passage_ids", [])
+            p_indices = []
+            if passage_mapper:
+                p_indices = [
+                    passage_mapper.to_index(pid)
+                    for pid in p_ids
+                    if passage_mapper.to_index(pid) is not None
+                ]
+            else:
+                p_indices = [1]
+            lean_concepts.append(
+                {
+                    "title": c.get("title", ""),
+                    "description": c.get("description", ""),
+                    "passage_indices": p_indices,
+                }
+            )
 
         payload_content = (
             f"User Query Context: {query}\n\n"
@@ -693,6 +706,8 @@ class ExecutiveOrchestrator:
         self.db.upsert_document(doc_rec)
 
         # Store Out-of-Graph Passage Records with dynamic adaptive chunking (scaling 1-30 passages based on document length)
+        # and register them into a dedicated Passage Cache Map (passage_id <-> passage_index)
+        passage_mapper = PromptIdMapper(prefix="passage")
         passage_chunks = self._chunk_text(full_content)
         passage_ids = []
         for idx, chunk_str in enumerate(passage_chunks):
@@ -702,6 +717,7 @@ class ExecutiveOrchestrator:
             )
             self.db.upsert_passage(p_rec)
             passage_ids.append(p_id)
+            passage_mapper.register(p_id)
 
         yield {
             "event": "passages_chunked",
@@ -781,6 +797,7 @@ class ExecutiveOrchestrator:
             title,
             query,
             chat_history,
+            passage_mapper,
         )
         consol_duration = round(time.time() - t0_consol, 2)
 
@@ -838,12 +855,18 @@ class ExecutiveOrchestrator:
         intra_doc_nodes = []
         for c in consolidated_concepts:
             c_id = f"concept_{uuid.uuid4().hex[:8]}"
+            # Decode integer passage_indices back to real string passage_ids using the passage mapper
+            resolved_pids = [
+                passage_mapper.to_id(p_idx)
+                for p_idx in c.passage_indices
+                if passage_mapper.to_id(p_idx) is not None
+            ]
             intra_node = GraphNode(
                 _id=c_id,
                 node_type="CONCEPT",
                 title=c.title or "Extracted Concept",
                 description=c.description or "",
-                passage_ids=c.passage_ids or passage_ids[:1],
+                passage_ids=resolved_pids or passage_ids[:1],
                 project_ids=proj_list,
                 metadata={"immutable": True, "root_node_id": root_node_id},  # IMMUTABLE
             )
@@ -979,20 +1002,42 @@ class ExecutiveOrchestrator:
             )
 
         # Phase 3: Collective Multi-Hub Ingestion Linking (Radial Invariant & Surjective Coverage)
-        intra_concepts_payload = [n.to_prompt_dict() for n in intra_doc_nodes]
-        available_domains_payload = [
-            {
-                "domain_hub_id": d_info.hub_node.id,
-                "domain_name": d_info.department_name,
-                "central_hub_node": d_info.hub_node.to_prompt_dict(),
-                "intermediate_explored_concepts": [
-                    n.to_prompt_dict()
-                    for n in d_info.explored_nodes
-                    if n.id != d_info.hub_node.id
-                ],
-            }
-            for d_info in collective_explored_trees.values()
-        ]
+        # Dedicated Concept Cache Map for intra concepts and explored target nodes
+        linking_concept_mapper = PromptIdMapper(prefix="concept")
+
+        intra_concepts_payload = []
+        for n in intra_doc_nodes:
+            c_idx = linking_concept_mapper.register(n.id)
+            intra_concepts_payload.append(
+                {"concept_index": c_idx, "title": n.title, "description": n.description}
+            )
+
+        available_domains_payload = []
+        for d_info in collective_explored_trees.values():
+            hub_idx = linking_concept_mapper.register(d_info.hub_node.id)
+            intermediate_nodes_payload = []
+            for n in d_info.explored_nodes:
+                if n.id != d_info.hub_node.id:
+                    n_idx = linking_concept_mapper.register(n.id)
+                    intermediate_nodes_payload.append(
+                        {
+                            "target_index": n_idx,
+                            "title": n.title,
+                            "description": n.description,
+                        }
+                    )
+            available_domains_payload.append(
+                {
+                    "domain_hub_index": hub_idx,
+                    "domain_name": d_info.department_name,
+                    "central_hub_node": {
+                        "target_index": hub_idx,
+                        "title": d_info.hub_node.title,
+                        "description": d_info.hub_node.description,
+                    },
+                    "intermediate_explored_concepts": intermediate_nodes_payload,
+                }
+            )
 
         system_collective = load_prompt("collective_ingestion_linking")
         user_collective = f"""Document Title: '{title}'
@@ -1017,7 +1062,37 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
                 enable_reasoning=False,
                 caller="ExecutiveOrchestrator.collective_linking",
             )
-            collective_commands = [c.model_dump() for c in payload_collective.commands]
+            # Decode model integer indices back to string database IDs
+            for c in payload_collective.commands:
+                cmd_dict = {"action": c.action}
+                if c.action == "CREATE_EDGE" and c.edge:
+                    src_id = linking_concept_mapper.to_id(c.edge.source_index)
+                    tgt_id = linking_concept_mapper.to_id(c.edge.target_index)
+                    domain_id = (
+                        linking_concept_mapper.to_id(c.edge.domain_hub_index)
+                        if c.edge.domain_hub_index
+                        else None
+                    )
+                    if src_id and tgt_id:
+                        cmd_dict["edge"] = {
+                            "source_id": src_id,
+                            "target_id": tgt_id,
+                            "relation_type": c.edge.relation_type,
+                            "description": c.edge.description,
+                            "domain_hub_id": domain_id,
+                        }
+                        collective_commands.append(cmd_dict)
+                elif c.action == "EDIT_CONCEPT" and c.concept:
+                    real_concept_id = linking_concept_mapper.to_id(
+                        c.concept.concept_index
+                    )
+                    if real_concept_id:
+                        cmd_dict["concept"] = {
+                            "id": real_concept_id,
+                            "title": c.concept.title,
+                            "description": c.concept.description,
+                        }
+                        collective_commands.append(cmd_dict)
         except Exception as e:
             print(f"[ExecutiveOrchestrator] Collective ingestion linking error: {e}")
             collective_commands = []

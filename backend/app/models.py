@@ -297,7 +297,7 @@ class PassageConceptsPayload(BaseModel):
 class CanonicalConceptItem(BaseModel):
     title: str
     description: str
-    passage_ids: List[str] = Field(default_factory=list)
+    passage_indices: List[int] = Field(default_factory=list)
 
 
 class ConsolidatedConceptsPayload(BaseModel):
@@ -316,15 +316,15 @@ class ExploredDomainContext(BaseModel):
 
 
 class EdgeCommandPayload(BaseModel):
-    source_id: str
-    target_id: str
+    source_index: int
+    target_index: int
     relation_type: str = "RELEVANT_TO"
     description: str = ""
-    domain_hub_id: Optional[str] = None
+    domain_hub_index: Optional[int] = None
 
 
 class ConceptEditPayload(BaseModel):
-    id: str
+    concept_index: int
     title: Optional[str] = None
     description: Optional[str] = None
 
@@ -342,12 +342,12 @@ class CollectiveLinkingPayload(BaseModel):
 
 
 class PersonaRouteRelevancePayload(BaseModel):
-    selected_hub_ids: List[str]
+    selected_hub_indices: List[int]
     reasoning: Optional[str] = None
 
 
 class DiscoveredCandidateItem(BaseModel):
-    candidate_id: str
+    candidate_index: int
     rationale: str = ""
 
 
@@ -366,7 +366,7 @@ class ReorgSplitPayload(BaseModel):
 
 
 class RewireEdgeItem(BaseModel):
-    neighbor_id: str
+    neighbor_index: int
     connect_to_sub_alias: str
     relation_type: str = "SUBSET_OF"
     description: str = ""
@@ -381,7 +381,7 @@ class PersonaIngestionCommandsPayload(BaseModel):
 
 
 class SelectedNeighborItem(BaseModel):
-    node_id: str
+    neighbor_index: int
     rationale: str = ""
 
 

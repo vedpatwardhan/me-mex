@@ -200,6 +200,14 @@ Both Retrieval and Ingestion operate on a unified multi-agent pattern structured
        - The parent hub $H$ is **never deleted**, preserving the hierarchical anchor of the tree.
    - Because intra-document nodes are immutable and graph partitions are mutually exclusive, persona updates proceed completely independently without conflicts.
 
+### Integer Indexing Prompt Protocol & Dual-Cache Invariant
+To ensure robust, deterministic LLM interaction and completely eliminate character transposition/truncation errors with raw database IDs (e.g. MongoDB UUIDs/hex IDs), all prompt-boundary communications operate over clean, 1-based integer indices:
+- **Dual-Cache Isolation**: Two distinct, non-overlapping `PromptIdMapper` instances are maintained across agent lifecycles:
+  1. `passage_mapper`: Isolates passage chunk boundaries (`passage_id <-> int`).
+  2. `concept_mapper`: Isolates concept node boundaries (`concept_id <-> int`).
+- **Prompt Isolation Invariant**: Raw database string IDs are strictly stripped and replaced by integer indices (`passage_indices`, `candidate_index`, `neighbor_index`, `source_index`, `target_index`) inside structured prompts and output schemas (`ReorgDiscoveryPayload`, `ReorgRewirePayload`, `EdgeCommandPayload`, `CanonicalConceptItem`).
+- **Boundary Translation**: The agent orchestrator and persona agents dynamically project registered string IDs to integer indices before LLM generation and translate received integer indices back to canonical database IDs prior to executing mutations or persisting records.
+
 ---
 
 ## 5. WebGL UI/UX Specification & Visual Palette Mapping

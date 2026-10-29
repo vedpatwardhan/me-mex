@@ -13,8 +13,8 @@ ROUTING RULES:
 
 Return JSON format strictly:
 {
-  "selected_hub_ids": [
-    "exact_candidate_hub_id_1"
+  "selected_hub_indices": [
+    1
   ],
   "reasoning": "Brief justification for selected hubs and why unrelated hubs were bypassed."
 }

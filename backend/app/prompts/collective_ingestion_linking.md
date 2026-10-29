@@ -22,11 +22,11 @@ CRITICAL INGESTION & TOPOLOGY INVARIANTS:
 Command Actions Allowed:
 1. "CREATE_EDGE":
    - Connect an immutable intra-document concept to a target node in an explored domain.
-   - edge: {"source_id": "exact_intra_doc_concept_id", "target_id": "exact_target_node_id", "relation_type": "SUBSET_OF" | "SUPERSET_OF" | "RELEVANT_TO" | "BUILDS_UPON" | "SUPERSEDES" | "PARALLEL_TO" | "CONTRASTS_WITH", "description": "...", "domain_hub_id": "hub_id_of_this_domain"}
+   - edge: {"source_index": 1, "target_index": 2, "relation_type": "SUBSET_OF" | "SUPERSET_OF" | "RELEVANT_TO" | "BUILDS_UPON" | "SUPERSEDES" | "PARALLEL_TO" | "CONTRASTS_WITH", "description": "...", "domain_hub_index": 1}
 
 2. "EDIT_CONCEPT" (MUTABLE NODES ONLY):
    - Update or generalize an existing mutable domain concept node's title or description to absorb new evidence.
-   - concept: {"id": "mutable_domain_node_id", "title": "...", "description": "..."}
+   - concept: {"concept_index": 2, "title": "...", "description": "..."}
 
 Return JSON format strictly:
 {
@@ -34,11 +34,11 @@ Return JSON format strictly:
     {
       "action": "CREATE_EDGE",
       "edge": {
-        "source_id": "exact_intra_doc_concept_id",
-        "target_id": "exact_target_node_id",
+        "source_index": 1,
+        "target_index": 2,
         "relation_type": "RELEVANT_TO",
         "description": "Specific rationale connecting concept to target node.",
-        "domain_hub_id": "exact_domain_hub_id"
+        "domain_hub_index": 1
       }
     }
   ]

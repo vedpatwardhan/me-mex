@@ -27,6 +27,7 @@ from app.models import (
 )
 from app.services.llm_gateway import llm_gateway
 from app.services.event_queue import event_queue
+from app.services.prompt_mapper import PromptIdMapper
 from app.prompts import load_prompt
 from app.tools.search_tools import search_tools
 
@@ -136,12 +137,27 @@ class DepartmentPersonaAgent:
                 break
 
             # Evaluate candidate neighbors with persona LLM
+            # Concept Cache Map for Candidate Neighbors in subgraph expansion
+            expansion_mapper = PromptIdMapper(prefix="concept")
+            indexed_candidate_neighbors = []
+            for n_id, n_data in candidate_neighbors.items():
+                n_idx = expansion_mapper.register(n_id)
+                indexed_candidate_neighbors.append(
+                    {
+                        "neighbor_index": n_idx,
+                        "title": n_data.get("title", ""),
+                        "description": n_data.get("description", ""),
+                        "node_type": n_data.get("node_type", "concept"),
+                        "immutable": n_data.get("immutable", False),
+                    }
+                )
+
             prompt_payload = f"""Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
 User Query / Context: "{query}"
 Current Hop Level: {depth} / {max_depth}
 
-Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
-{json.dumps(list(candidate_neighbors.values()), indent=2)}"""
+Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items):
+{json.dumps(indexed_candidate_neighbors, indent=2)}"""
             messages = [
                 {
                     "role": "system",
@@ -164,12 +180,12 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
                     enable_reasoning=False,
                     caller=f"DepartmentPersonaAgent[{self.department_name}].subgraph_expansion",
                 )
-                # Map neighbor ID to its specific rationale
-                neighbor_rationales: Dict[str, str] = {
-                    item.node_id: item.rationale
-                    for item in payload.selected_neighbors
-                    if item.node_id in candidate_neighbors
-                }
+                # Decode integer neighbor_index back to real string node_id
+                neighbor_rationales: Dict[str, str] = {}
+                for item in payload.selected_neighbors:
+                    real_node_id = expansion_mapper.to_id(item.neighbor_index)
+                    if real_node_id and real_node_id in candidate_neighbors:
+                        neighbor_rationales[real_node_id] = item.rationale
                 next_frontier = list(neighbor_rationales.keys())
             except Exception as e:
                 print(f"[{self.department_name}] Subgraph expansion error: {e}")
@@ -230,18 +246,36 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
             mode=mode,
         )
 
+        # Concept Cache Map for target neighbors being rewired
+        rewire_concept_mapper = PromptIdMapper(prefix="concept")
+        indexed_neighbors_to_rewire = []
+        for nb in target_neighbors_to_rewire:
+            nb_idx = rewire_concept_mapper.register(nb["id"])
+            entry = dict(nb)
+            entry["neighbor_index"] = nb_idx
+            # Exclude raw internal string id from user prompt to prevent model confusion
+            entry.pop("id", None)
+            indexed_neighbors_to_rewire.append(entry)
+
         split_context_parts = [
             f"Target Over-Clustered Concept Hub: '{target_node.title}' (ID: {target_node.id})",
             f"Current Description: {target_node.description}",
             f"Reorganization Mode: {mode}",
-            f"Target Neighbors to Move Outward ({len(target_neighbors_to_rewire)} items):",
-            json.dumps(target_neighbors_to_rewire, indent=2),
+            f"Target Neighbors to Move Outward ({len(indexed_neighbors_to_rewire)} items):",
+            json.dumps(indexed_neighbors_to_rewire, indent=2),
         ]
         if negative_mutable_context:
+            indexed_negative_context = []
+            for mut_nb in negative_mutable_context:
+                mut_idx = rewire_concept_mapper.register(mut_nb["id"])
+                mut_entry = dict(mut_nb)
+                mut_entry["concept_index"] = mut_idx
+                mut_entry.pop("id", None)
+                indexed_negative_context.append(mut_entry)
             split_context_parts.extend(
                 [
-                    f"Existing Mutable Concepts (NEGATIVE CONTEXT - DO NOT DUPLICATE or REPHRASE, {len(negative_mutable_context)} items):",
-                    json.dumps(negative_mutable_context, indent=2),
+                    f"Existing Mutable Concepts (NEGATIVE CONTEXT - DO NOT DUPLICATE or REPHRASE, {len(indexed_negative_context)} items):",
+                    json.dumps(indexed_negative_context, indent=2),
                 ]
             )
         user_split = "\n\n".join(split_context_parts)
@@ -299,8 +333,8 @@ Reorganization Mode: {mode}
 Formulated Sub-Concepts Available for Connection:
 {json.dumps(formulated_subs, indent=2)}
 
-Target Neighbors to Re-Wire ({len(target_neighbors_to_rewire)} items):
-{json.dumps(target_neighbors_to_rewire, indent=2)}"""
+Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
+{json.dumps(indexed_neighbors_to_rewire, indent=2)}"""
 
         try:
             payload_rewire = llm_gateway.generate_structured_completion(
@@ -315,7 +349,19 @@ Target Neighbors to Re-Wire ({len(target_neighbors_to_rewire)} items):
                 enable_reasoning=False,
                 caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_rewire_{mode}",
             )
-            rewired = [r.model_dump() for r in payload_rewire.rewired_edges]
+            # Decode model integer neighbor_index back to real string neighbor_id
+            rewired = []
+            for r in payload_rewire.rewired_edges:
+                real_nb_id = rewire_concept_mapper.to_id(r.neighbor_index)
+                if real_nb_id:
+                    rewired.append(
+                        {
+                            "neighbor_id": real_nb_id,
+                            "connect_to_sub_alias": r.connect_to_sub_alias,
+                            "relation_type": r.relation_type,
+                            "description": r.description,
+                        }
+                    )
         except Exception as e:
             print(
                 f"[{self.department_name}] Step 3 Neighbor edge re-wiring error for {target_node.id} (mode={mode}): {e}"
@@ -441,24 +487,27 @@ Target Neighbors to Re-Wire ({len(target_neighbors_to_rewire)} items):
             return {"commands": [], "emitted_events": emitted_events}
 
         # STEP 1: Discovery Phase (Identify candidate mutable concept nodes)
-        # Only present valid qualifying mutable nodes as candidates to prevent LLM picking immutable neighbor IDs
-        nodes_payload = [
-            {
-                "candidate_id": n.id,
-                "title": n.title,
-                "description": n.description,
-                "connection_degree": degree_map.get(n.id, 0),
-                "connected_neighbor_context": [
-                    {
-                        "neighbor_title": nb["neighbor_title"],
-                        "relation": nb["relation_type"],
-                        "direction": nb["direction"],
-                    }
-                    for nb in neighbor_map.get(n.id, [])
-                ],
-            }
-            for n in qualifying_nodes
-        ]
+        # Dedicated Concept Cache Map for Discovery candidates
+        reorg_concept_mapper = PromptIdMapper(prefix="concept")
+        nodes_payload = []
+        for n in qualifying_nodes:
+            c_idx = reorg_concept_mapper.register(n.id)
+            nodes_payload.append(
+                {
+                    "candidate_index": c_idx,
+                    "title": n.title,
+                    "description": n.description,
+                    "connection_degree": degree_map.get(n.id, 0),
+                    "connected_neighbor_context": [
+                        {
+                            "neighbor_title": nb["neighbor_title"],
+                            "relation": nb["relation_type"],
+                            "direction": nb["direction"],
+                        }
+                        for nb in neighbor_map.get(n.id, [])
+                    ],
+                }
+            )
 
         system_discover = load_prompt(
             "persona_reorganize_discover", department_name=self.department_name
@@ -482,9 +531,11 @@ Target Neighbors to Re-Wire ({len(target_neighbors_to_rewire)} items):
                 enable_reasoning=False,
                 caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_discover",
             )
-            candidate_rationales = {
-                c.candidate_id: c.rationale for c in payload_discover.candidates
-            }
+            # Decode integer candidate_index back to real string candidate_id
+            for c in payload_discover.candidates:
+                real_cid = reorg_concept_mapper.to_id(c.candidate_index)
+                if real_cid and real_cid in node_map:
+                    candidate_rationales[real_cid] = c.rationale
             candidate_ids = list(candidate_rationales.keys())
         except Exception as e:
             print(f"[{self.department_name}] Reorg discovery error: {e}")
@@ -843,8 +894,12 @@ Target Neighbors to Re-Wire ({len(target_neighbors_to_rewire)} items):
         """
         adj_map = DepartmentPersonaAgent._get_adjacency_map(project_id)
 
+        # Concept Cache Map for routing: candidate hubs and intra-doc concepts
+        concept_mapper = PromptIdMapper(prefix="concept")
+
         candidate_hubs_payload = []
         for h in candidate_hubs:
+            hub_index = concept_mapper.register(h.id)
             depth_subconcepts = DepartmentPersonaAgent.get_hub_preview_subconcepts(
                 hub_id=h.id,
                 adj_map=adj_map,
@@ -852,7 +907,7 @@ Target Neighbors to Re-Wire ({len(target_neighbors_to_rewire)} items):
                 max_items=15,
             )
             hub_dict = {
-                "id": h.id,
+                "hub_index": hub_index,
                 "title": h.title,
                 "description": h.description,
             }
@@ -860,10 +915,12 @@ Target Neighbors to Re-Wire ({len(target_neighbors_to_rewire)} items):
                 hub_dict["connected_subconcepts"] = depth_subconcepts
             candidate_hubs_payload.append(hub_dict)
 
-        intra_concepts_payload = [
-            {"id": n.id, "title": n.title, "description": n.description}
-            for n in intra_doc_nodes
-        ]
+        intra_concepts_payload = []
+        for n in intra_doc_nodes:
+            c_idx = concept_mapper.register(n.id)
+            intra_concepts_payload.append(
+                {"concept_index": c_idx, "title": n.title, "description": n.description}
+            )
 
         system_route = load_prompt("persona_route_relevance")
         user_route = f"""Incoming Document: '{doc_title}'
@@ -886,7 +943,12 @@ Candidate Persona Domain Hubs with Local Sub-Concepts ({len(candidate_hubs_paylo
                 enable_reasoning=False,
                 caller="DepartmentPersonaAgent.filter_relevant_hubs",
             )
-            selected_hub_ids = payload_route.selected_hub_ids
+            # Decode returned integer hub indices back to string hub IDs
+            selected_hub_ids = [
+                concept_mapper.to_id(h_idx)
+                for h_idx in payload_route.selected_hub_indices
+                if concept_mapper.to_id(h_idx) is not None
+            ]
         except Exception as e:
             print(f"[DepartmentPersonaAgent] Persona relevance routing error: {e}")
             selected_hub_ids = []

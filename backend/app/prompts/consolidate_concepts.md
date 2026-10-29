@@ -20,7 +20,7 @@ Your task:
      - If the input contains 6 or fewer raw concepts (e.g. from short posts, notes, or few passages), do NOT artificially expand or force 6–10 concepts. Retain the natural number of distinct concepts (e.g. **1 to 5 canonical concepts**) based strictly on the input concepts.
      - Never invent or hallucinate new concepts not grounded in the input.
    - Synthesize individual passage descriptions into a concise, information-dense 1-2 sentence markdown description capturing the core technical substance.
-   - Aggregate all originating `passage_ids` lists for each consolidated concept into a unified `passage_ids` list.
+   - Aggregate all originating `passage_indices` (integers) for each consolidated concept into a unified `passage_indices` list.
 
 Return JSON format:
 {
@@ -28,10 +28,9 @@ Return JSON format:
   "doc_type": "paper",
   "concepts": [
     {
-      "idx": 0,
       "title": "Canonical Concept Title",
       "description": "Synthesized comprehensive markdown text retaining all details and nuances across matching passages.",
-      "passage_ids": ["pass_01", "pass_04"]
+      "passage_indices": [1, 4]
     }
   ]
 }

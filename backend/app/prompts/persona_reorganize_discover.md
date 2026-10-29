@@ -15,7 +15,7 @@ Return JSON format strictly:
 {
   "candidates": [
     {
-      "candidate_id": "exact_candidate_id_1",
+      "candidate_index": 1,
       "rationale": "High connection degree combining distinct planning representations with evaluation benchmarks."
     }
   ]
