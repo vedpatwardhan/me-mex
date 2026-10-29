@@ -181,10 +181,23 @@ Both Retrieval and Ingestion operate on a unified multi-agent pattern structured
 3. **Independent Graph Ingestion, Linking & 3-Step Concept Reorganization:**
    - Consolidated concepts are ingested as **Immutable Intra-Document Concepts** on the periphery of the spherical topology.
    - During persona ingestion, personas integrate intra-document concepts via **`CREATE_EDGE`** (connecting periphery concepts to core domain hubs) or **`EDIT_CONCEPT`** (updating mutable domain hubs).
-   - **3-Step Non-Destructive Concept Hub Reorganization**:
-     - **Step 1 (Discovery)**: Personas inspect their full assigned sub-graph community (nodes, mutability, edges, and connection degrees) to discover over-clustered or conflated mutable concept hubs.
-     - **Step 2 (Sub-Concept Formulation)**: Personas propose 3–4 focused sub-concepts around each over-clustered concept hub using grounded passage text chunks containing explicit `passage_id` keys. **No edge re-wiring or neighbor assignments occur in this step.** The original concept hub is preserved as an umbrella node, and sub-concepts link directly to it (`SUBSET_OF`).
-     - **Step 3 (Neighbor Edge Re-Wiring)**: In a dedicated separate step, personas iterate over the complete list of direct neighbor nodes previously connected to the over-clustered hub, assigning each neighbor node to connect to the single most appropriate newly created sub-concept alias.
+   - **Priority Immutable-First Outward Movement Concept Hub Reorganization**:
+     - **Step 1 (Candidate Screening & Discovery)**:
+       - Computes dynamic degree threshold $\tau = \max(3, \lfloor \text{p75}(\text{degrees}) \rfloor)$ across the graph.
+       - Discovers qualifying mutable hubs ($\text{deg}(H) \ge \tau$) and prompts the persona to produce structured candidate rationales.
+     - **Step 2 (Neighborhood Analysis & Linear Outward Partitioning)**:
+       - Direct neighbors $N(H)$ are classified into immutable leaves $N_{imm}$ and mutable concepts $N_{mut}$.
+       - Resolves **immutable neighbors first across all candidate hubs**:
+         1. **Immutable Leaves Outward Absorption (if $|N_{imm}| > 0$)**:
+            - *Purely Immutable ($|N_{mut}| == 0$)*: Leaves move outward into $k_{new} \ll |N_{imm}|$ intermediate mutable sub-concepts. Reorganization terminates.
+            - *Mixed ($|N_{mut}| > 0$, Phase 2a)*: Clusters raw evidence leaves into $k_{new}$ clean abstractions, passing existing mutable nodes as negative exclusion context to guarantee mutual exclusivity.
+            - *Dynamic Degree Shrinkage Re-Evaluation*: Post-2a degree $\text{deg}'(H) = |N_{mut}| + k_{new}$ is recalculated. If $\text{deg}'(H) < \tau$, the hub has decongested and reorganization completes cleanly (Phase 2b skipped). If $\text{deg}'(H) \ge \tau$, the newly formulated sub-concepts are added to $N_{mut}$ and fall through into step 2.
+         2. **Pure Mutable Outward Partition (Single Execution Pipeline)**:
+            - Executes across $N_{mut}$ (whether originally purely mutable or a mixed hub that fell through from step 1).
+            - Partitions the mutable abstractions outward without disturbing the underlying factual leaves.
+     - **Step 3 (Neighbor Edge Re-Wiring & Non-Destructive Invariant)**:
+       - Deletes direct edges from $H$ to rewired neighbors, connecting them to the new sub-concepts with new sub-concepts linked to $H$ via `SUBSET_OF`.
+       - The parent hub $H$ is **never deleted**, preserving the hierarchical anchor of the tree.
    - Because intra-document nodes are immutable and graph partitions are mutually exclusive, persona updates proceed completely independently without conflicts.
 
 ---

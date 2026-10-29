@@ -88,7 +88,15 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 └────────────────────────────────────────────────────────────────────────────────────────┘
  - Tool-Based Fetching & Construction: Executive Orchestrator calls `ingest_document_tool` when URLs/PDFs are pasted, storing text chunks in `passages` and building intra-document concept nodes.
  - Sub-Graph Traversal & Relevance Evaluation: Performs partitioned sub-graph traversal and relevance evaluation across concept hubs to determine optimal attachment points.
- - Multi-Hub Edge Attachment & Node Reorganization: Persona ingestion uses two direct options (`CREATE_EDGE` to link an immutable periphery concept to a domain hub, or `EDIT_CONCEPT` to update a domain hub). Macro node reorganization (`SPLIT_CONCEPT` / `reorganize_concept_hub`) executes a separated 3-step non-destructive loop (Discovery -> Grounded Sub-Concept Formulation -> Complete Neighbor Edge Re-Wiring), preserving the original concept hub as an umbrella node.
+ - Priority Immutable-First Outward Reorganization: Macro node reorganization (`SPLIT_CONCEPT` / `reorganize_concept_hub`) executes a priority immutable-first outward movement loop:
+     1. Candidate Screening: Evaluates high-degree hubs against dynamic threshold $\tau = \max(3, \lfloor \text{p75}(\text{degrees}) \rfloor)$ and generates candidate rationales.
+     2. Immutable Leaves Outward Absorption:
+        - If immutable leaves exist, clusters them into $k_{new} \ll |N_{immutable}|$ intermediate abstractions. In mixed mode, existing mutable concepts serve as negative exclusion context.
+        - Dynamic Degree Re-evaluation: Hub degree is recalculated ($\text{deg}'(H) = |N_{mut}| + k_{new}$). If $\text{deg}'(H) < \tau$, the hub has decongested and finishes. If still $\ge \tau$, the new sub-concepts join the mutable set.
+     3. Pure Mutable Outward Partition:
+        - Single execution path partitioning mutable concepts (whether originally pure mutable or a mixed hub that required further splitting).
+     4. Non-Destructive Invariant: The parent hub is always preserved as the umbrella concept anchoring the tree.
+ - Local LLM Telemetry Tracing: All LLM interactions (prompts, completions, parsed JSON, token latencies, and caller metadata) are logged locally to `backend/logs/llm_traces/runs/<date>/<session>/` via `LLMTracer`.
 ```
 
 ---

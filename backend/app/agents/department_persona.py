@@ -213,6 +213,137 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
             "emitted_events": emitted_events,
         }
 
+    def _execute_split_and_rewire(
+        self,
+        target_node: GraphNode,
+        mode: str,
+        target_neighbors_to_rewire: List[Dict[str, Any]],
+        project_id: str,
+        emitted_events: List[Dict[str, Any]],
+        negative_mutable_context: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Formulates intermediate sub-concepts (Step 2) and re-wires direct neighbor edges (Step 3)."""
+        system_split = load_prompt(
+            "persona_reorganize_split",
+            department_name=self.department_name,
+            node_id=target_node.id,
+            mode=mode,
+        )
+
+        split_context_parts = [
+            f"Target Over-Clustered Concept Hub: '{target_node.title}' (ID: {target_node.id})",
+            f"Current Description: {target_node.description}",
+            f"Reorganization Mode: {mode}",
+            f"Target Neighbors to Move Outward ({len(target_neighbors_to_rewire)} items):",
+            json.dumps(target_neighbors_to_rewire, indent=2),
+        ]
+        if negative_mutable_context:
+            split_context_parts.extend(
+                [
+                    f"Existing Mutable Concepts (NEGATIVE CONTEXT - DO NOT DUPLICATE or REPHRASE, {len(negative_mutable_context)} items):",
+                    json.dumps(negative_mutable_context, indent=2),
+                ]
+            )
+        user_split = "\n\n".join(split_context_parts)
+
+        try:
+            payload_split = llm_gateway.generate_structured_completion(
+                [
+                    {"role": "system", "content": system_split},
+                    {"role": "user", "content": user_split},
+                ],
+                response_model=ReorgSplitPayload,
+                temperature=0.2,
+                max_tokens=2048,
+                max_retries=2,
+                enable_reasoning=False,
+                caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_split_{mode}",
+            )
+            formulated_subs = [s.model_dump() for s in payload_split.sub_concepts]
+        except Exception as e:
+            print(
+                f"[{self.department_name}] Step 2 Sub-concept formulation error for {target_node.id} (mode={mode}): {e}"
+            )
+            raise RuntimeError(
+                f"[{self.department_name}] Step 2 Sub-concept formulation failed for {target_node.id} (mode={mode}): {e}"
+            ) from e
+
+        if not formulated_subs:
+            return None
+
+        split_event = {
+            "event": "reorg_split_completed",
+            "persona_id": self.department_id,
+            "department_name": self.department_name,
+            "node_id": target_node.id,
+            "node_title": target_node.title,
+            "reorg_mode": mode,
+            "sub_concepts_count": len(formulated_subs),
+            "sub_concepts": formulated_subs,
+            "message": f"[{self.department_name}] Step 2 ({mode}) Completed: Formulated {len(formulated_subs)} sub-concepts for '{target_node.title}': {[s.get('title') for s in formulated_subs]}",
+            "timestamp": time.time(),
+        }
+        emitted_events.append(split_event)
+        event_queue.push(project_id, split_event)
+
+        # Re-wiring step
+        system_rewire = load_prompt(
+            "persona_reorganize_rewire",
+            department_name=self.department_name,
+            node_id=target_node.id,
+            mode=mode,
+        )
+        user_rewire = f"""Target Concept Hub: '{target_node.title}' (ID: {target_node.id})
+Reorganization Mode: {mode}
+
+Formulated Sub-Concepts Available for Connection:
+{json.dumps(formulated_subs, indent=2)}
+
+Target Neighbors to Re-Wire ({len(target_neighbors_to_rewire)} items):
+{json.dumps(target_neighbors_to_rewire, indent=2)}"""
+
+        try:
+            payload_rewire = llm_gateway.generate_structured_completion(
+                [
+                    {"role": "system", "content": system_rewire},
+                    {"role": "user", "content": user_rewire},
+                ],
+                response_model=ReorgRewirePayload,
+                temperature=0.2,
+                max_tokens=4096,
+                max_retries=2,
+                enable_reasoning=False,
+                caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_rewire_{mode}",
+            )
+            rewired = [r.model_dump() for r in payload_rewire.rewired_edges]
+        except Exception as e:
+            print(
+                f"[{self.department_name}] Step 3 Neighbor edge re-wiring error for {target_node.id} (mode={mode}): {e}"
+            )
+            raise RuntimeError(
+                f"[{self.department_name}] Step 3 Neighbor edge re-wiring failed for {target_node.id} (mode={mode}): {e}"
+            ) from e
+
+        rewire_event = {
+            "event": "reorg_rewire_completed",
+            "persona_id": self.department_id,
+            "department_name": self.department_name,
+            "node_id": target_node.id,
+            "node_title": target_node.title,
+            "reorg_mode": mode,
+            "rewired_edges_count": len(rewired),
+            "rewired_edges": rewired,
+            "message": f"[{self.department_name}] Step 3 ({mode}) Completed: Formulated {len(rewired)} re-wired edges for '{target_node.title}'.",
+            "timestamp": time.time(),
+        }
+        emitted_events.append(rewire_event)
+        event_queue.push(project_id, rewire_event)
+
+        return {
+            "sub_concepts": formulated_subs,
+            "rewired_edges": rewired,
+        }
+
     def reorganize_concept_hub(
         self,
         explored_nodes: list[GraphNode] | None = None,
@@ -422,11 +553,9 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
 
             neighbors = neighbor_map.get(c_id, [])
 
-            # STEP 2: Pure Semantic Sub-Concept Formulation
-            # Invariant: Sub-concept formulation operates purely on the rich titles, descriptions,
-            # and relations of connected neighbor concepts without leaking verbose raw passage texts.
+            # Classify direct neighbors into immutable evidence concepts and mutable concepts
             immutable_evidence_concepts = []
-            existing_domain_hubs = []
+            mutable_concepts = []
             for nb in neighbors:
                 nb_id = nb.get("neighbor_id")
                 nb_node = (
@@ -447,137 +576,131 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
                     if nb_node.is_immutable:
                         immutable_evidence_concepts.append(entry)
                     else:
-                        existing_domain_hubs.append(entry)
+                        mutable_concepts.append(entry)
 
-            system_split = load_prompt(
-                "persona_reorganize_split",
-                department_name=self.department_name,
-                node_id=target_node.id,
-            )
-            user_split = f"""Target Over-Clustered Mutable Concept Hub: '{target_node.title}' (ID: {target_node.id})
-Current Description: {target_node.description}
-Total Connected Neighbor Concepts: {len(immutable_evidence_concepts) + len(existing_domain_hubs)}
-
-[PRIORITY 1: Newly Attached Immutable Concepts ({len(immutable_evidence_concepts)} items)]:
-{json.dumps(immutable_evidence_concepts, indent=2)}
-
-[PRIORITY 2: Existing Mutable Domain Hubs ({len(existing_domain_hubs)} items)]:
-{json.dumps(existing_domain_hubs, indent=2)}"""
-            sub_concepts = []
-            try:
-                payload_split = llm_gateway.generate_structured_completion(
-                    [
-                        {"role": "system", "content": system_split},
-                        {"role": "user", "content": user_split},
-                    ],
-                    response_model=ReorgSplitPayload,
-                    temperature=0.2,
-                    max_tokens=2048,
-                    max_retries=2,
-                    enable_reasoning=False,
-                    caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_split",
-                )
-                sub_concepts = [s.model_dump() for s in payload_split.sub_concepts]
-            except Exception as e:
-                print(
-                    f"[{self.department_name}] Step 2 Sub-concept formulation error for {target_node.id}: {e}"
-                )
-                raise RuntimeError(
-                    f"[{self.department_name}] Step 2 Sub-concept formulation failed for {target_node.id}: {e}"
-                ) from e
-
-            if not sub_concepts:
-                skip_evt = {
-                    "event": "reorg_candidate_skipped",
-                    "persona_id": self.department_id,
-                    "department_name": self.department_name,
-                    "concept_id": c_id,
-                    "node_title": target_node.title,
-                    "reason": "Sub-concept formulation returned 0 concepts",
-                    "message": f"[{self.department_name}] Skipped candidate '{target_node.title}': formulation produced 0 sub-concepts.",
-                    "timestamp": time.time(),
-                }
-                emitted_events.append(skip_evt)
+            total_neighbors = len(immutable_evidence_concepts) + len(mutable_concepts)
+            if total_neighbors == 0:
                 continue
 
-            # Emit split formulation completed event
-            split_evt = {
-                "event": "reorg_split_completed",
-                "persona_id": self.department_id,
-                "department_name": self.department_name,
-                "node_id": target_node.id,
-                "node_title": target_node.title,
-                "sub_concepts_count": len(sub_concepts),
-                "sub_concepts": sub_concepts,
-                "message": f"[{self.department_name}] Step 2 Completed: Formulated {len(sub_concepts)} sub-concepts for '{target_node.title}': {[s.get('title') for s in sub_concepts]}",
-                "timestamp": time.time(),
-            }
-            emitted_events.append(split_evt)
-            event_queue.push(project_id, split_evt)
-
-            # STEP 3: Neighbor Edge Re-Wiring (Iterate over ALL direct neighbors)
-            system_rewire = load_prompt(
-                "persona_reorganize_rewire",
-                department_name=self.department_name,
-                node_id=target_node.id,
-            )
-            user_rewire = f"""Target Concept Hub: '{target_node.title}' (ID: {target_node.id})
-
-Formulated Sub-Concepts Available for Connection:
-{json.dumps(sub_concepts, indent=2)}
-
-Complete List of Direct Neighbor Nodes to Re-Wire:
-[Newly Attached Immutable Concepts ({len(immutable_evidence_concepts)})]:
-{json.dumps(immutable_evidence_concepts, indent=2)}
-
-[Existing Mutable Domain Hubs ({len(existing_domain_hubs)})]:
-{json.dumps(existing_domain_hubs, indent=2)}"""
-            rewired_edges = []
-            try:
-                payload_rewire = llm_gateway.generate_structured_completion(
-                    [
-                        {"role": "system", "content": system_rewire},
-                        {"role": "user", "content": user_rewire},
-                    ],
-                    response_model=ReorgRewirePayload,
-                    temperature=0.2,
-                    max_tokens=4096,
-                    max_retries=2,
-                    enable_reasoning=False,
-                    caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_rewire",
+            # STEP 2 & 3: Immutable-First Neighborhood Routing
+            # 1. If any immutable leaves exist (|N_imm| > 0):
+            #    - Purely Immutable (|N_mut| == 0): Direct outward leaf clustering.
+            #    - Mixed (|N_mut| > 0): Phase 2a (Leaf Outward Movement with negative mutable context).
+            #      After rewiring, re-evaluate post-2a degree. If still >= threshold, the hub's mutable
+            #      neighborhood is updated so it naturally flows into the mutable split below.
+            if immutable_evidence_concepts:
+                mode = "pure_immutable" if not mutable_concepts else "leaf_outward"
+                phase_2a_res = self._execute_split_and_rewire(
+                    target_node=target_node,
+                    mode=mode,
+                    target_neighbors_to_rewire=immutable_evidence_concepts,
+                    project_id=project_id,
+                    emitted_events=emitted_events,
+                    negative_mutable_context=mutable_concepts
+                    if mutable_concepts
+                    else None,
                 )
-                rewired_edges = [r.model_dump() for r in payload_rewire.rewired_edges]
-            except Exception as e:
-                print(
-                    f"[{self.department_name}] Step 3 Neighbor edge re-wiring error for {target_node.id}: {e}"
+                if not phase_2a_res:
+                    skip_evt = {
+                        "event": "reorg_candidate_skipped",
+                        "persona_id": self.department_id,
+                        "department_name": self.department_name,
+                        "concept_id": c_id,
+                        "node_title": target_node.title,
+                        "reason": f"Sub-concept formulation returned 0 concepts ({mode})",
+                        "message": f"[{self.department_name}] Skipped candidate '{target_node.title}': {mode} produced 0 sub-concepts.",
+                        "timestamp": time.time(),
+                    }
+                    emitted_events.append(skip_evt)
+                    continue
+
+                reorg_commands.append(
+                    {
+                        "action": "SPLIT_CONCEPT",
+                        "concept_id": target_node.id,
+                        "sub_concepts": phase_2a_res["sub_concepts"],
+                        "rewired_edges": phase_2a_res["rewired_edges"],
+                    }
                 )
-                raise RuntimeError(
-                    f"[{self.department_name}] Step 3 Neighbor edge re-wiring failed for {target_node.id}: {e}"
-                ) from e
 
-            # Emit rewiring completed event
-            rewire_evt = {
-                "event": "reorg_rewire_completed",
-                "persona_id": self.department_id,
-                "department_name": self.department_name,
-                "node_id": target_node.id,
-                "node_title": target_node.title,
-                "rewired_edges_count": len(rewired_edges),
-                "rewired_edges": rewired_edges,
-                "message": f"[{self.department_name}] Step 3 Completed: Formulated {len(rewired_edges)} re-wired edge assignments for '{target_node.title}'.",
-                "timestamp": time.time(),
-            }
-            emitted_events.append(rewire_evt)
-            event_queue.push(project_id, rewire_evt)
+                # If there were no mutable concepts, reorganization for this hub is complete.
+                if not mutable_concepts:
+                    continue
 
-            reorg_commands.append(
-                {
-                    "action": "SPLIT_CONCEPT",
-                    "concept_id": target_node.id,
-                    "sub_concepts": sub_concepts,
-                    "rewired_edges": rewired_edges,
-                }
-            )
+                # In mixed mode: dynamically re-evaluate degree after leaf absorption.
+                post_2a_degree = len(mutable_concepts) + len(
+                    phase_2a_res["sub_concepts"]
+                )
+                if post_2a_degree < degree_threshold:
+                    decongest_evt = {
+                        "event": "reorg_hub_decongested",
+                        "persona_id": self.department_id,
+                        "department_name": self.department_name,
+                        "node_id": target_node.id,
+                        "node_title": target_node.title,
+                        "pre_degree": total_neighbors,
+                        "post_2a_degree": post_2a_degree,
+                        "threshold": degree_threshold,
+                        "message": (
+                            f"[{self.department_name}] Hub '{target_node.title}' successfully decongested "
+                            f"(degree: {total_neighbors} -> {post_2a_degree} < threshold {degree_threshold}). "
+                            f"Phase 2b skipped."
+                        ),
+                        "timestamp": time.time(),
+                    }
+                    emitted_events.append(decongest_evt)
+                    event_queue.push(project_id, decongest_evt)
+                    continue
+
+                # Hub remains over-clustered: absorb the newly created sub-concepts into the mutable set
+                # and fall through directly into the mutable split logic.
+                new_sub_nodes = [
+                    {
+                        "id": f"sub_{s.get('sub_id_alias', idx)}",
+                        "title": s.get("title"),
+                        "description": s.get("description"),
+                        "is_immutable": False,
+                        "node_type": "CONCEPT",
+                        "relation_to_hub": "SUBSET_OF",
+                        "direction": "incoming",
+                    }
+                    for idx, s in enumerate(phase_2a_res["sub_concepts"])
+                ]
+                mutable_concepts = mutable_concepts + new_sub_nodes
+
+            # 2. Purely Mutable Outward Split:
+            # Handles either:
+            # - Hubs that originally had ONLY mutable neighbors (|N_imm| == 0, Scenario B)
+            # - Mixed hubs where post-2a degree was still >= threshold (Phase 2b of Scenario C)
+            if mutable_concepts:
+                mut_res = self._execute_split_and_rewire(
+                    target_node=target_node,
+                    mode="mutable_partition",
+                    target_neighbors_to_rewire=mutable_concepts,
+                    project_id=project_id,
+                    emitted_events=emitted_events,
+                )
+                if mut_res:
+                    reorg_commands.append(
+                        {
+                            "action": "SPLIT_CONCEPT",
+                            "concept_id": target_node.id,
+                            "sub_concepts": mut_res["sub_concepts"],
+                            "rewired_edges": mut_res["rewired_edges"],
+                        }
+                    )
+                else:
+                    skip_evt = {
+                        "event": "reorg_candidate_skipped",
+                        "persona_id": self.department_id,
+                        "department_name": self.department_name,
+                        "concept_id": c_id,
+                        "node_title": target_node.title,
+                        "reason": "Mutable sub-concept formulation returned 0 concepts",
+                        "message": f"[{self.department_name}] Skipped candidate '{target_node.title}': mutable partition produced 0 sub-concepts.",
+                        "timestamp": time.time(),
+                    }
+                    emitted_events.append(skip_evt)
 
         return {"commands": reorg_commands, "emitted_events": emitted_events}
 

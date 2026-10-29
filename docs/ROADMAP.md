@@ -19,18 +19,21 @@ The roadmap bridges core engine implementation with real-time UI interactivity, 
  │                         THE 5-PHASE EXECUTION ROADMAP                                  │
  └────────────────────────────────────────────────────────────────────────────────────────┘
 
-  [ Goal 1: Core Engine & Substrate Implementation ] — IN PROGRESS
+  [ Goal 1: Core Engine & Substrate Implementation ] — COMPLETED
    ├── Ingestion Pipeline: Out-of-graph text chunk storage in `passages` collection
    ├── Clean 3-Element Topology: Root Nodes, Intra-Doc Concepts, Persona Domain Hubs, & Typed Edges
    ├── Node Mutability Enforcement: Root & Intra-Doc nodes (Immutable), Domain Hubs (Mutable)
    ├── 3 Gateway Execution Paths: Conversation (direct), Retrieval (2 pre-steps), Ingestion (2 pre-steps)
-   └── Mutually Exclusive Hub Partitioning: rustworkx unweighted eigenvector hub detection and reorganization
+   ├── Mutually Exclusive Hub Partitioning: rustworkx unweighted eigenvector hub detection
+   ├── Single-Source Genesis Hub: Primordial 'Everything' hub anchor across workspaces
+   └── Priority Immutable-First Outward Reorganization: Multi-phase leaf absorption, dynamic degree re-evaluation, and mutable partition
 
-  [ Goal 2: Comprehensive Backend Testing Pipeline ] — UPCOMING
-   ├── Unit Test Suite: MongoDB models, FastMCP search tools, Pydantic schema validation
+  [ Goal 2: Comprehensive Backend Testing & Telemetry ] — COMPLETED
+   ├── Unit Test Suite: 41+ passing tests with 2-worker isolation (`pytest -n 2`)
    ├── Project Isolation Tests: Scoped graph querying (`project_id`) & workspace chat history
-   ├── Persona Exploration & Reorganization Tests: Sub-graph partitioning & passage-grounded splitting
-   └── SSE Telemetry Verification: Fast non-reasoning intent classification & SSE event streams
+   ├── Persona Exploration & Reorganization Tests: Voronoi partitioning & outward leaf movement
+   ├── Fail-Fast Ingestion Coordination: Zero orphan document records on fetch failures
+   └── Full Local LLM Telemetry Tracing: Structured logging of prompts, completions, latencies, and caller IDs to `backend/logs/llm_traces/`
 
   [ Goal 3: Frontend Implementation & Visualizer Integration ] — UPCOMING
    ├── WebGL Force Graph Canvas: 2D force graph (`react-force-graph-2d`) with dynamic physics
