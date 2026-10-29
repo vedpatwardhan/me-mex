@@ -298,8 +298,9 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
             "reorganize_discover" in sys_content
             or "candidate_concept_ids" in sys_content
             or "candidate_id" in sys_content
+            or "candidates" in sys_content
         ):
-            return '{"candidate_concept_ids": ["hub_qualifying"]}'
+            return '{"candidates": [{"candidate_id": "hub_qualifying", "rationale": "Over-clustered hub combining distinct themes."}]}'
         elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
             return json.dumps(
                 {

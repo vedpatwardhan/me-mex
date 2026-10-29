@@ -165,18 +165,11 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
                     caller=f"DepartmentPersonaAgent[{self.department_name}].subgraph_expansion",
                 )
                 # Map neighbor ID to its specific rationale
-                neighbor_rationales: Dict[str, str] = {}
-                if payload.selected_neighbors:
-                    for item in payload.selected_neighbors:
-                        if item.node_id in candidate_neighbors:
-                            neighbor_rationales[item.node_id] = item.rationale
-                elif payload.selected_neighbor_ids:
-                    for nid in payload.selected_neighbor_ids:
-                        if nid in candidate_neighbors:
-                            neighbor_rationales[
-                                nid
-                            ] = "Relevant domain concept selected for exploration."
-
+                neighbor_rationales: Dict[str, str] = {
+                    item.node_id: item.rationale
+                    for item in payload.selected_neighbors
+                    if item.node_id in candidate_neighbors
+                }
                 next_frontier = list(neighbor_rationales.keys())
             except Exception as e:
                 print(f"[{self.department_name}] Subgraph expansion error: {e}")
@@ -343,9 +336,12 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
         system_discover = load_prompt(
             "persona_reorganize_discover", department_name=self.department_name
         )
-        user_discover = f"""Candidate Mutable Concept Hubs Eligible for Subdivision ({len(qualifying_nodes)} candidate(s)):
-{json.dumps(nodes_payload, indent=2)}"""
-        candidate_ids = []
+        user_discover = (
+            "Candidate Mutable Concept Hubs Eligible for Subdivision "
+            f"({len(qualifying_nodes)} candidate(s)):\n"
+            f"{json.dumps(nodes_payload, indent=2)}"
+        )
+        candidate_rationales: Dict[str, str] = {}
         try:
             payload_discover = llm_gateway.generate_structured_completion(
                 [
@@ -359,7 +355,10 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
                 enable_reasoning=False,
                 caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_discover",
             )
-            candidate_ids = payload_discover.candidate_concept_ids
+            candidate_rationales = {
+                c.candidate_id: c.rationale for c in payload_discover.candidates
+            }
+            candidate_ids = list(candidate_rationales.keys())
         except Exception as e:
             print(f"[{self.department_name}] Reorg discovery error: {e}")
             raise RuntimeError(
@@ -387,6 +386,7 @@ Candidate Unvisited Neighbor Concepts ({len(candidate_neighbors)} items):
             "department_name": self.department_name,
             "candidate_count": len(candidate_ids),
             "candidate_ids": candidate_ids,
+            "candidate_rationales": candidate_rationales,
             "message": disc_msg,
             "timestamp": time.time(),
         }

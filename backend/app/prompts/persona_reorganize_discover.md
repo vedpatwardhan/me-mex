@@ -13,7 +13,10 @@ SUB-GRAPH INSPECTION RULES:
 
 Return JSON format strictly:
 {
-  "candidate_concept_ids": [
-    "exact_candidate_id_1"
+  "candidates": [
+    {
+      "candidate_id": "exact_candidate_id_1",
+      "rationale": "High connection degree combining distinct planning representations with evaluation benchmarks."
+    }
   ]
 }

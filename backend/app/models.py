@@ -346,9 +346,13 @@ class PersonaRouteRelevancePayload(BaseModel):
     reasoning: Optional[str] = None
 
 
+class DiscoveredCandidateItem(BaseModel):
+    candidate_id: str
+    rationale: str = ""
+
+
 class ReorgDiscoveryPayload(BaseModel):
-    candidate_concept_ids: List[str] = Field(default_factory=list)
-    reasoning: Optional[str] = None
+    candidates: List[DiscoveredCandidateItem] = Field(default_factory=list)
 
 
 class SubConceptItem(BaseModel):
@@ -384,5 +388,3 @@ class SelectedNeighborItem(BaseModel):
 class PersonaExplorationPayload(BaseModel):
     synthesized_insight: Optional[str] = None
     selected_neighbors: List[SelectedNeighborItem] = Field(default_factory=list)
-    # Backward compatibility / fallback if a model outputs flat list
-    selected_neighbor_ids: List[str] = Field(default_factory=list)
