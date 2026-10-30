@@ -2,7 +2,7 @@
 
 > **Agentic Knowledge Graph & External Memory System**
 
-Me-Mex is an agentic external memory system designed to function as an extension of your brain for organizing, linking, and retrieving textual knowledge, including academic research papers, technical blogs, X posts and YouTube video transcripts—without manual note scrolling or cognitive overload.
+Me-Mex is an agentic external memory and RAG system designed for organizing, linking, and retrieving textual knowledge, including academic research papers, technical blogs, X posts and YouTube video transcripts—without manual note scrolling or cognitive overload.
 
 ---
 
