@@ -28,11 +28,15 @@ MODE: MUTABLE CONCEPT PARTITION (Purely Mutable Abstractions)
 
 GENERAL RULES:
 1. Distinct Sub-Concepts: Each proposed sub-concept must have a clear, specific title and a synthesized description explaining its domain focus.
-2. Parent Hub Update (Compulsory):
+2. Cardinality Compression Rule:
+   - Target Neighbors Being Clustered: {{ neighbor_count }} items.
+   - You MUST propose at least {{ min_allowed_sub_concepts }} and AT MOST {{ max_allowed_sub_concepts }} sub-concepts.
+   - {% if neighbor_count == 1 and mode == "leaf_outward" %}For this single immutable leaf (special case), propose exactly 1 intermediate sub-concept to absorb it.{% else %}This strict ceiling (bounded by n // 2 for n >= 2) guarantees topological compression and ensures each sub-concept absorbs multiple connected concepts.{% endif %}
+3. Parent Hub Update (Compulsory):
    - As sub-concepts are created and neighbors rewired to them, you MUST provide an updated `hub_title` and `hub_description` for the parent hub '{{ node_id }}'.
    - The updated title and description MUST accommodate all of the newly formed sub-concepts and reflect the broader umbrella domain anchoring them.
    - Exception: If the parent hub's current title is 'Everything', keep `hub_title` as 'Everything' (the primordial genesis anchor), but update its `hub_description` to accommodate the newly formed sub-domains.
-3. Sub-Clusters Only: Do NOT propose neighbor edge assignments or re-wiring in this step. Formulate sub-concepts and updated parent hub details only.
+4. Sub-Clusters Only: Do NOT propose neighbor edge assignments or re-wiring in this step. Formulate sub-concepts and updated parent hub details only.
 
 Return JSON format strictly:
 {

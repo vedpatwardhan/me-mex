@@ -758,3 +758,93 @@ def test_reorganize_concept_hub_updates_parent_hub_title_and_description(monkeyp
         updated_node.description
         == "Overarching domain accommodating perception, prediction, and control sub-concepts."
     )
+
+
+def test_reorganize_concept_hub_caps_subconcepts_to_half_degree(monkeypatch):
+    """Verify that formulated sub-concepts are strictly capped to max(2, n // 2) for compression."""
+    import json
+
+    project_id = "proj_cap_half_degree_test"
+    hub = GraphNode(
+        _id="hub_test_cap",
+        node_type="CONCEPT",
+        title="Over-clustered Hub",
+        description="Hub with 5 immutable leaves.",
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
+    db_engine.upsert_node(hub)
+
+    for i in range(5):
+        imm_node = GraphNode(
+            _id=f"imm_cap_{i}",
+            node_type="CONCEPT",
+            title=f"Leaf {i}",
+            project_ids=[project_id],
+            metadata={"immutable": True},
+        )
+        db_engine.upsert_node(imm_node)
+        db_engine.upsert_edge(
+            GraphEdge(
+                _id=f"edge_cap_{i}",
+                source_id=f"imm_cap_{i}",
+                target_id="hub_test_cap",
+                description="RELEVANT_TO",
+                project_ids=[project_id],
+            )
+        )
+
+    agent = DepartmentPersonaAgent(hub)
+
+    def mock_chat_completion(messages, **kwargs):
+        sys_content = messages[0]["content"]
+        if "reorganize_discover" in sys_content or "candidates" in sys_content:
+            return (
+                '{"candidates": [{"candidate_index": 1, "rationale": "Degree >= 5"}]}'
+            )
+        elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
+            # Model attempts to return 4 sub-concepts for 5 neighbors (which would violate n // 2 = 2)
+            return json.dumps(
+                {
+                    "hub_title": "Generalized Umbrella Hub",
+                    "hub_description": "Accommodating all sub-concepts.",
+                    "sub_concepts": [
+                        {
+                            "sub_id_alias": f"sub_{i}",
+                            "title": f"Sub {i}",
+                            "description": f"Desc {i}",
+                        }
+                        for i in range(4)
+                    ],
+                }
+            )
+        elif "reorganize_rewire" in sys_content or "rewired_edges" in sys_content:
+            return json.dumps(
+                {
+                    "rewired_edges": [
+                        {
+                            "neighbor_index": i + 1,
+                            "connect_to_sub_alias": f"sub_{i % 2}",
+                            "relation_type": "RELEVANT_TO",
+                        }
+                        for i in range(5)
+                    ]
+                }
+            )
+        return "{}"
+
+    from app.services.llm_gateway import llm_gateway
+
+    monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
+
+    res = agent.reorganize_concept_hub(
+        explored_nodes=[hub],
+        project_id=project_id,
+        degree_threshold=5,
+    )
+
+    assert len(res["commands"]) == 1
+    cmd = res["commands"][0]
+    assert cmd["action"] == "SPLIT_CONCEPT"
+    # For n = 5 neighbors, max allowed sub-concepts is 5 // 2 = 2
+    assert len(cmd["sub_concepts"]) == 2

@@ -243,11 +243,23 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         negative_mutable_context: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Formulates intermediate sub-concepts (Step 2) and re-wires direct neighbor edges (Step 3)."""
+        # Compute cardinality bounds for sub-concept formulation (n // 2 compression invariant)
+        n_neighbors = len(target_neighbors_to_rewire)
+        if mode == "leaf_outward" and n_neighbors == 1:
+            min_allowed_subs = 1
+            max_allowed_subs = 1
+        else:
+            min_allowed_subs = 2
+            max_allowed_subs = max(2, n_neighbors // 2)
+
         system_split = load_prompt(
             "persona_reorganize_split",
             department_name=self.department_name,
             node_id=target_node.id,
             mode=mode,
+            min_allowed_sub_concepts=min_allowed_subs,
+            max_allowed_sub_concepts=max_allowed_subs,
+            neighbor_count=n_neighbors,
         )
 
         # Concept Cache Map for target neighbors being rewired
@@ -298,6 +310,13 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_split_{mode}",
             )
             formulated_subs = [s.model_dump() for s in payload_split.sub_concepts]
+            # Programmatic compression guard: enforce max_allowed_subs ceiling
+            if len(formulated_subs) > max_allowed_subs:
+                print(
+                    f"[{self.department_name}] Capping formulated sub-concepts from "
+                    f"{len(formulated_subs)} to {max_allowed_subs} (n // 2 compression bound for {n_neighbors} neighbors)."
+                )
+                formulated_subs = formulated_subs[:max_allowed_subs]
         except Exception as e:
             print(
                 f"[{self.department_name}] Step 2 Sub-concept formulation error for {target_node.id} (mode={mode}): {e}"

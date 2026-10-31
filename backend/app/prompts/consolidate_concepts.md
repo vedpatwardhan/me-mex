@@ -16,8 +16,8 @@ Your task:
 
 2. CONSOLIDATE CONCEPTS:
    - Group raw concepts that refer to the same underlying idea, component, or methodology under a single canonical title:
-     - If the input contains more than 10 raw concepts (e.g. from a full paper or multi-passage report), consolidate and deduplicate them down to **6 to 10 canonical concepts**.
-     - If the input contains 6 or fewer raw concepts (e.g. from short posts, notes, or few passages), do NOT artificially expand or force 6–10 concepts. Retain the natural number of distinct concepts (e.g. **1 to 5 canonical concepts**) based strictly on the input concepts.
+     - If the input contains more than 10 raw concepts (e.g. from a full paper or multi-passage report), consolidate and deduplicate them down to **5 to 7 canonical concepts**.
+     - If the input contains 6 or fewer raw concepts (e.g. from short posts, notes, or few passages), do NOT artificially expand or force 5–7 concepts. Retain the natural number of distinct concepts (e.g. **1 to 3 canonical concepts**) based strictly on the input concepts.
      - Never invent or hallucinate new concepts not grounded in the input.
    - Synthesize individual passage descriptions into a concise, information-dense 1-2 sentence markdown description capturing the core technical substance.
    - Aggregate all originating `passage_indices` (integers) for each consolidated concept into a unified `passage_indices` list.
