@@ -28,11 +28,16 @@ MODE: MUTABLE CONCEPT PARTITION (Purely Mutable Abstractions)
 
 GENERAL RULES:
 1. Distinct Sub-Concepts: Each proposed sub-concept must have a clear, specific title and a synthesized description explaining its domain focus.
-2. Original Hub Preservation: The original hub '{{ node_id }}' is preserved as the higher-level umbrella concept anchoring the tree.
-3. Sub-Clusters Only: Do NOT propose neighbor edge assignments or re-wiring in this step. Formulate sub-concepts only.
+2. Parent Hub Update (Compulsory):
+   - As sub-concepts are created and neighbors rewired to them, you MUST provide an updated `hub_title` and `hub_description` for the parent hub '{{ node_id }}'.
+   - The updated title and description MUST accommodate all of the newly formed sub-concepts and reflect the broader umbrella domain anchoring them.
+   - Exception: If the parent hub's current title is 'Everything', keep `hub_title` as 'Everything' (the primordial genesis anchor), but update its `hub_description` to accommodate the newly formed sub-domains.
+3. Sub-Clusters Only: Do NOT propose neighbor edge assignments or re-wiring in this step. Formulate sub-concepts and updated parent hub details only.
 
 Return JSON format strictly:
 {
+  "hub_title": "Umbrella Domain Title Accommodating All Sub-Concepts",
+  "hub_description": "Comprehensive description accommodating all newly formed sub-concepts.",
   "sub_concepts": [
     {
       "sub_id_alias": "sub_1",

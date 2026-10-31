@@ -304,6 +304,8 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
         elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
             return json.dumps(
                 {
+                    "hub_title": "Everything",
+                    "hub_description": "Universal domain hub updated to accommodate all sub-concepts.",
                     "sub_concepts": [
                         {
                             "sub_id_alias": "sub_1",
@@ -315,7 +317,7 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
                             "title": "Sub 2",
                             "description": "Synthesized description of Sub 2.",
                         },
-                    ]
+                    ],
                 }
             )
         elif "reorganize_rewire" in sys_content or "rewired_edges" in sys_content:
@@ -425,6 +427,8 @@ def test_reorganize_concept_hub_mixed_decongested_skips_phase_2b(monkeypatch):
             # Return 2 sub-concepts for Phase 2a
             return json.dumps(
                 {
+                    "hub_title": "AI Foundations & Generative Models",
+                    "hub_description": "Overarching domain accommodating Sub A and Sub B.",
                     "sub_concepts": [
                         {
                             "sub_id_alias": "sub_a",
@@ -436,7 +440,7 @@ def test_reorganize_concept_hub_mixed_decongested_skips_phase_2b(monkeypatch):
                             "title": "Sub B",
                             "description": "Desc B",
                         },
-                    ]
+                    ],
                 }
             )
         elif "reorganize_rewire" in sys_content or "rewired_edges" in sys_content:
@@ -555,6 +559,8 @@ def test_reorganize_concept_hub_mixed_overclustered_triggers_phase_2b(monkeypatc
                 captured_modes.append("mutable_partition")
             return json.dumps(
                 {
+                    "hub_title": "High Degree Root Hub (Generalized)",
+                    "hub_description": "Overarching domain accommodating all child sub-concepts.",
                     "sub_concepts": [
                         {
                             "sub_id_alias": "sub_1",
@@ -566,7 +572,7 @@ def test_reorganize_concept_hub_mixed_overclustered_triggers_phase_2b(monkeypatc
                             "title": "Sub 2",
                             "description": "Desc 2",
                         },
-                    ]
+                    ],
                 }
             )
         elif "reorganize_rewire" in sys_content or "rewired_edges" in sys_content:
@@ -703,3 +709,52 @@ def test_department_persona_subgraph_expansion_blocks_immutable_frontier(monkeyp
     # Verify the defensive guard dropped the immutable node from traversal
     assert "imm_evidence" not in res["traversed_node_ids"]
     assert "mut_branch" in res["traversed_node_ids"]
+
+
+def test_reorganize_concept_hub_updates_parent_hub_title_and_description(monkeypatch):
+    """Verify that SPLIT_CONCEPT updates parent hub title & description to accommodate new sub-concepts."""
+    from app.services.graph_ingestion_engine import GraphIngestionEngine
+
+    project_id = "proj_hub_generalize_test"
+    parent_hub = GraphNode(
+        _id="hub_specialized",
+        node_type="CONCEPT",
+        title="Specific Narrow Dynamics",
+        description="Narrow description before reorganization.",
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
+    db_engine.upsert_node(parent_hub)
+
+    split_cmd = {
+        "action": "SPLIT_CONCEPT",
+        "concept_id": "hub_specialized",
+        "hub_title": "Comprehensive World Modeling Dynamics",
+        "hub_description": "Overarching domain accommodating perception, prediction, and control sub-concepts.",
+        "sub_concepts": [
+            {
+                "sub_id_alias": "sub_1",
+                "title": "Perceptual Modeling",
+                "description": "Sub-concept for perception.",
+            },
+            {
+                "sub_id_alias": "sub_2",
+                "title": "Action Refinement",
+                "description": "Sub-concept for action optimization.",
+            },
+        ],
+        "rewired_edges": [],
+    }
+
+    engine = GraphIngestionEngine()
+    engine.execute_single_command(
+        split_cmd, doc_title="Test Doc", proj_list=[project_id]
+    )
+
+    updated_node = db_engine.get_node("hub_specialized")
+    assert updated_node is not None
+    assert updated_node.title == "Comprehensive World Modeling Dynamics"
+    assert (
+        updated_node.description
+        == "Overarching domain accommodating perception, prediction, and control sub-concepts."
+    )

@@ -245,6 +245,16 @@ class GraphIngestionEngine:
                                 f"sub_alias: {sub_alias}, target_sub_id: {target_sub_id})"
                             )
 
+                    # Update parent hub title & description to accommodate new sub-concepts and broader scope
+                    new_title = item.get("hub_title")
+                    new_desc = item.get("hub_description")
+                    if new_title and target_node.title.lower() != "everything":
+                        target_node.title = new_title.strip()
+                    if new_desc:
+                        target_node.description = new_desc.strip()
+                    target_node.updated_at = time.time()
+                    self.db.upsert_node(target_node)
+
                     print(
                         f"[{dept_name}] Reorganization commit for '{target_node.title}': "
                         f"Created {len(sub_concepts)} sub-concepts, rewired {len(deleted_neighbors)} neighbors."

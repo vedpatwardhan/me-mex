@@ -362,6 +362,14 @@ class SubConceptItem(BaseModel):
 
 
 class ReorgSplitPayload(BaseModel):
+    hub_title: str = Field(
+        ...,
+        description="Updated umbrella title for the parent hub that accommodates all newly formed sub-concepts and their rewired relations.",
+    )
+    hub_description: str = Field(
+        ...,
+        description="Updated comprehensive description for the parent hub synthesizing its broader scope and accommodating all sub-concepts.",
+    )
     sub_concepts: List[SubConceptItem]
 
 

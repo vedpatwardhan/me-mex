@@ -390,6 +390,8 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
         event_queue.push(project_id, rewire_event)
 
         return {
+            "hub_title": payload_split.hub_title,
+            "hub_description": payload_split.hub_description,
             "sub_concepts": formulated_subs,
             "rewired_edges": rewired,
         }
@@ -673,6 +675,8 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                     {
                         "action": "SPLIT_CONCEPT",
                         "concept_id": target_node.id,
+                        "hub_title": phase_2a_res["hub_title"],
+                        "hub_description": phase_2a_res["hub_description"],
                         "sub_concepts": phase_2a_res["sub_concepts"],
                         "rewired_edges": phase_2a_res["rewired_edges"],
                     }
@@ -740,6 +744,8 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                         {
                             "action": "SPLIT_CONCEPT",
                             "concept_id": target_node.id,
+                            "hub_title": mut_res["hub_title"],
+                            "hub_description": mut_res["hub_description"],
                             "sub_concepts": mut_res["sub_concepts"],
                             "rewired_edges": mut_res["rewired_edges"],
                         }
