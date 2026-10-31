@@ -28,6 +28,7 @@ from app.models import (
     ConsolidatedConceptsPayload,
     CollectiveLinkingPayload,
     ExploredDomainContext,
+    TargetGeneralizationPayload,
 )
 from app.agents.department_persona import (
     DepartmentPersonaAgent,
@@ -1173,6 +1174,28 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
             if evt:
                 yield evt
 
+        # Phase 3.5: Targeted Generalization Pass on Affected Target Nodes
+        # Gathers all mutable target nodes that received new connections during this ingestion pass
+        # and generalizes their titles and descriptions to accommodate all connected concepts.
+        affected_target_ids = {
+            cmd.get("edge", {}).get("target_id")
+            for cmd in filtered_commands
+            if cmd.get("action") == "CREATE_EDGE"
+            and cmd.get("edge", {}).get("target_id")
+        }
+        mutable_targets = [
+            self.db.get_node(t_id)
+            for t_id in affected_target_ids
+            if self.db.get_node(t_id) and not self.db.get_node(t_id).is_immutable
+        ]
+
+        if mutable_targets:
+            async for gen_evt in self._generalize_affected_target_nodes(
+                mutable_targets=mutable_targets,
+                project_id=project_id,
+            ):
+                yield gen_evt
+
         # Phase 4: Consolidated Post-Linking Macro-Reorganization
         # Runs ONCE after all edges are established into MongoDB
         for dept in active_departments:
@@ -1207,6 +1230,111 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
             "message": f"Document '{title}' successfully ingested and merged into knowledge graph.",
             "timestamp": time.time(),
         }
+
+    async def _generalize_affected_target_nodes(
+        self,
+        mutable_targets: List[GraphNode],
+        project_id: str = "global",
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Synthesizes updated titles and descriptions for mutable concept nodes that received new connections during ingestion."""
+        if not mutable_targets:
+            return
+
+        all_edges = self.db.get_edges(project_id)
+        # Build adjacency for targets
+        adj_map: Dict[str, List[GraphEdge]] = defaultdict(list)
+        for e in all_edges:
+            adj_map[e.source_id].append(e)
+            adj_map[e.target_id].append(e)
+
+        gen_mapper = PromptIdMapper(prefix="target")
+        targets_payload = []
+        target_map: Dict[int, GraphNode] = {}
+
+        for node in mutable_targets:
+            n_idx = gen_mapper.register(node.id)
+            target_map[n_idx] = node
+
+            # Gather connected neighbors
+            neighbor_summaries = []
+            for edge in adj_map.get(node.id, []):
+                nb_id = edge.target_id if edge.source_id == node.id else edge.source_id
+                nb_node = self.db.get_node(nb_id)
+                if nb_node:
+                    neighbor_summaries.append(
+                        {
+                            "title": nb_node.title,
+                            "relation": edge.description or "CONNECTED_TO",
+                            "is_immutable": nb_node.is_immutable,
+                            "summary": nb_node.description[:150]
+                            if nb_node.description
+                            else "",
+                        }
+                    )
+
+            targets_payload.append(
+                {
+                    "node_index": n_idx,
+                    "current_title": node.title,
+                    "current_description": node.description,
+                    "is_genesis_node": node.title.lower() == "everything",
+                    "connected_concepts_count": len(neighbor_summaries),
+                    "connected_concepts": neighbor_summaries,
+                }
+            )
+
+        system_gen = load_prompt("target_node_generalization")
+        user_gen = f"""Target Nodes That Received New Ingestion Connections ({len(targets_payload)} nodes):
+{json.dumps(targets_payload, indent=2)}"""
+
+        try:
+            payload = await asyncio.to_thread(
+                self.llm.generate_structured_completion,
+                [
+                    {"role": "system", "content": system_gen},
+                    {"role": "user", "content": user_gen},
+                ],
+                response_model=TargetGeneralizationPayload,
+                temperature=0.2,
+                max_tokens=2048,
+                max_retries=2,
+                enable_reasoning=False,
+                caller="ExecutiveOrchestrator.generalize_affected_target_nodes",
+            )
+
+            for item in payload.generalizations:
+                target_node = target_map.get(item.node_index)
+                if not target_node:
+                    continue
+
+                old_title = target_node.title
+                # Invariant: If primordial 'Everything' node, keep title unchanged
+                if target_node.title.lower() != "everything" and item.updated_title:
+                    target_node.title = item.updated_title.strip()
+                if item.updated_description:
+                    target_node.description = item.updated_description.strip()
+
+                target_node.updated_at = time.time()
+                self.db.upsert_node(target_node)
+
+                evt = {
+                    "event": "node_touched",
+                    "persona_id": f"dept_{target_node.id}",
+                    "persona_name": f"Persona Specialist: {target_node.title}",
+                    "node_id": target_node.id,
+                    "node_title": target_node.title,
+                    "message": (
+                        f"Generalized concept '{target_node.title}' to accommodate newly attached concepts."
+                        if old_title == target_node.title
+                        else f"Generalized concept '{old_title}' -> '{target_node.title}' to accommodate newly attached concepts."
+                    ),
+                    "timestamp": time.time(),
+                }
+                event_queue.push(project_id, evt)
+                yield evt
+
+        except Exception as e:
+            print(f"[ExecutiveOrchestrator] Targeted generalization pass error: {e}")
 
 
 orchestrator = ExecutiveOrchestrator()

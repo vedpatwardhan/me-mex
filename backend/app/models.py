@@ -384,6 +384,22 @@ class ReorgRewirePayload(BaseModel):
     rewired_edges: List[RewireEdgeItem]
 
 
+class NodeGeneralizationItem(BaseModel):
+    node_index: int
+    updated_title: str = Field(
+        ...,
+        description="Updated, broader title accommodating all newly connected and existing concepts.",
+    )
+    updated_description: str = Field(
+        ...,
+        description="Comprehensive synthesized description accommodating all attached concepts.",
+    )
+
+
+class TargetGeneralizationPayload(BaseModel):
+    generalizations: List[NodeGeneralizationItem]
+
+
 class PersonaIngestionCommandsPayload(BaseModel):
     commands: List[PersonaIngestionCommand]
 
