@@ -84,6 +84,7 @@ class DepartmentPersonaAgent:
                             "body": neighbor_node.description,
                             "relation_desc": e.description,
                             "node_type": neighbor_node.node_type,
+                            "immutable": neighbor_node.is_immutable,
                         }
         return candidate_neighbors
 
@@ -185,6 +186,9 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 for item in payload.selected_neighbors:
                     real_node_id = expansion_mapper.to_id(item.neighbor_index)
                     if real_node_id and real_node_id in candidate_neighbors:
+                        # Defensive guard: exploration is only permitted on mutable nodes
+                        if candidate_neighbors[real_node_id]["immutable"]:
+                            continue
                         neighbor_rationales[real_node_id] = item.rationale
                 next_frontier = list(neighbor_rationales.keys())
             except Exception as e:

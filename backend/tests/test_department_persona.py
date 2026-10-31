@@ -603,3 +603,103 @@ def test_reorganize_concept_hub_mixed_overclustered_triggers_phase_2b(monkeypatc
     assert "leaf_outward" in captured_modes
     assert "mutable_partition" in captured_modes
     assert len(res["commands"]) == 2  # Phase 2a command + Phase 2b command
+
+
+def test_department_persona_subgraph_expansion_blocks_immutable_frontier(monkeypatch):
+    """Verify DepartmentPersonaAgent.explore_concept_hub provides immutable nodes for context but blocks them from the frontier."""
+    import json
+
+    project_id = "proj_immutable_guard_test"
+
+    hub = GraphNode(
+        _id="hub_domain",
+        node_type="CONCEPT",
+        title="Domain Hub",
+        description="Domain hub concept",
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
+    imm_leaf = GraphNode(
+        _id="imm_evidence",
+        node_type="CONCEPT",
+        title="Immutable Evidence",
+        description="Factual evidence leaf",
+        project_ids=[project_id],
+        metadata={"immutable": True},
+    )
+    mut_branch = GraphNode(
+        _id="mut_branch",
+        node_type="CONCEPT",
+        title="Mutable Sub-Domain",
+        description="Mutable sub-domain concept",
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
+
+    db_engine.upsert_node(hub)
+    db_engine.upsert_node(imm_leaf)
+    db_engine.upsert_node(mut_branch)
+
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="edge_hub_to_imm",
+            source_id="hub_domain",
+            target_id="imm_evidence",
+            description="RELEVANT_TO",
+            project_ids=[project_id],
+        )
+    )
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="edge_hub_to_mut",
+            source_id="hub_domain",
+            target_id="mut_branch",
+            description="SUBSET_OF",
+            project_ids=[project_id],
+        )
+    )
+
+    agent = DepartmentPersonaAgent(hub)
+
+    # Verify candidate neighbors has explicit immutable flags
+    adj_map = agent._get_adjacency_map(project_id)
+    candidates = agent.get_candidate_neighbors(
+        frontier_ids=[hub.id],
+        adj_map=adj_map,
+        visited_ids={hub.id},
+    )
+    assert candidates["imm_evidence"]["immutable"] is True
+    assert candidates["mut_branch"]["immutable"] is False
+
+    # Mock chat completion where the model attempts to select both neighbors
+    captured_prompt = []
+
+    def mock_chat_completion(messages, **kwargs):
+        captured_prompt.append(messages[-1]["content"])
+        return json.dumps(
+            {
+                "selected_neighbors": [
+                    {"neighbor_index": 1, "rationale": "Selected neighbor 1"},
+                    {"neighbor_index": 2, "rationale": "Selected neighbor 2"},
+                ]
+            }
+        )
+
+    from app.services.llm_gateway import llm_gateway
+
+    monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
+
+    res = agent.explore_concept_hub(
+        query="Test query",
+        project_id=project_id,
+        max_depth=1,
+    )
+
+    # Verify immutable node is tagged in prompt
+    assert len(captured_prompt) == 1
+    assert '"immutable": true' in captured_prompt[0]
+    assert '"immutable": false' in captured_prompt[0]
+
+    # Verify the defensive guard dropped the immutable node from traversal
+    assert "imm_evidence" not in res["traversed_node_ids"]
+    assert "mut_branch" in res["traversed_node_ids"]
