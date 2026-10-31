@@ -8,7 +8,7 @@ Me-Mex is an agentic external memory and RAG system designed for organizing, lin
 
 ## 📸 Current Status (31/10/26)
 
-The pipeline is working end-to-end for ingestion of an arxiv paper and adding it to the graph with re-organization. The "Everything" concept node is where it all begins followed by sub-division into different concepts as it gets connected to more concepts.
+The pipeline is working end-to-end for multi-format knowledge ingestion, sub-graph exploration with mutability boundaries, dynamic concept generalization, and scale-aware reorganization.
 
 <img src="./assets/311026.png" alt="Graph After Ingestion" width="100%" />
 
@@ -51,7 +51,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
  - Scale-Adaptive Document Chunking (1 to 30 Passages):
      - Dynamically partitions documents based on length: <= 1.5k chars (1 chunk for X posts/short notes), 1.5k–4k (2 chunks), 4k–8k (3 chunks), 8k–14k (4 chunks), 14k–25k (5 chunks), and scales smoothly up to 30 chunks (>= 300k chars), bounded by [1, 30].
      - Context Window & Token Budget Protection: Guarantees individual chunks never exceed 45,000 characters (~13,000 tokens), safeguarding Ministral 3-8B's 16,384-token context window against prompt overflow while reserving 1,536 completion tokens.
-     - Density-Aware Concept Extraction & Consolidation: Passages extract 1 to 3 concepts (1 for focused notes, 2–3 for rich passages, max 3). Canonical consolidation scales naturally without forcing an arbitrary 6–10 concept quota for low-volume documents.
+     - Density-Aware Concept Extraction & Scale-Aware Consolidation: Passages extract 1 to 3 concepts (1 for focused notes, 2–3 for rich passages, max 3). Standard documents (> 6 raw concepts) consolidate strictly into **5 to 7 canonical concepts**; concise documents or notes (<= 6 raw concepts) consolidate into **1 to 3 canonical concepts**.
  - Out-of-Graph Passage Storage: Text chunks are stored as plain text records in `passages`
    collection, linked only via `passage_ids` inside atomic `CONCEPT` nodes.
  - Plain text retrieval: Passages are opened only when clicked to validate concept extraction.
@@ -80,22 +80,29 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 └────────────────────────────────────────────────────────────────────────────────────────┘
  - Unweighted Topological Hub Discovery: Foundational concept hubs are detected in real time (<5ms) via `rustworkx` unweighted eigenvector centrality with relative thresholding ($s_i \ge 0.30 \times s_{\max}$). Each detected concept hub is assigned a dedicated Specialist Persona representing domain expertise for that concept cluster.
  - Mutually Exclusive Voronoi Sub-Graph Partitioning: Rather than unanchored graph clustering, the graph network is partitioned via multi-source topological shortest-path (Voronoi) distance anchored directly to the detected concept hubs. Every node in the graph is assigned to its closest department hub (with ties broken by hub centrality), strictly guaranteeing non-empty, non-overlapping partitions ($P_i \cap P_j = \emptyset$). Each Specialist Persona independently explores its strictly assigned sub-graph partition (`explore_concept_hub`) up to `max_depth = 3`.
+ - Mutability Exploration Frontier Boundary: Candidate neighbors explicitly include immutable flags. Immutable evidence leaves serve as read-only grounding context to inform personas of existing literature, but personas are strictly barred from expanding hop frontiers from immutable nodes (`if candidate_neighbors[idx]["immutable"]: continue`).
+ - Structured Exploration Rationales: Personas emit explicit per-node reasoning (`SelectedNeighborItem` with `rationale`) for each chosen neighbor, streamed over telemetry.
  - Relevance Evaluation & Independent Operation: Because all intra-document concept nodes are completely immutable, proposals from different personas operate on disjoint/immutable nodes without conflicts.
  - Real-Time SSE Telemetry: Streams live persona traversal events (`traversed_node_ids`) to animate the WebGL canvas (`react-force-graph-2d`).
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                      4. Agentic Tool Ingestion & Multi-Hub Integration                 │
+│                      4. Agentic Tool Ingestion, Generalization & Reorganization        │
 └────────────────────────────────────────────────────────────────────────────────────────┘
  - Tool-Based Fetching & Construction: Executive Orchestrator calls `ingest_document_tool` when URLs/PDFs are pasted, storing text chunks in `passages` and building intra-document concept nodes.
- - Sub-Graph Traversal & Relevance Evaluation: Performs partitioned sub-graph traversal and relevance evaluation across concept hubs to determine optimal attachment points.
+ - Sub-Graph Traversal & Collective Linking: Performs partitioned sub-graph traversal and relevance evaluation across concept hubs to link intra-document concepts to existing mutable domain concepts.
+ - Phase 3.5 Targeted Concept Generalization: Dedicated LLM pass isolating all mutable concept nodes that received new connections during ingestion. Synthesizes an updated umbrella title and description to expand their conceptual scope before any reorganization triggers. (The primordial genesis node 'Everything' has its description updated while its title is strictly preserved).
  - Priority Immutable-First Outward Reorganization: Macro node reorganization (`SPLIT_CONCEPT` / `reorganize_concept_hub`) executes a priority immutable-first outward movement loop:
-     1. Candidate Screening: Evaluates high-degree hubs against dynamic threshold $\tau = \max(3, \lfloor \text{p75}(\text{degrees}) \rfloor)$ and generates candidate rationales.
-     2. Immutable Leaves Outward Absorption:
-        - If immutable leaves exist, clusters them into $k_{new} \ll |N_{immutable}|$ intermediate abstractions. In mixed mode, existing mutable concepts serve as negative exclusion context.
-        - Dynamic Degree Re-evaluation: Hub degree is recalculated ($\text{deg}'(H) = |N_{mut}| + k_{new}$). If $\text{deg}'(H) < \tau$, the hub has decongested and finishes. If still $\ge \tau$, the new sub-concepts join the mutable set.
-     3. Pure Mutable Outward Partition:
+     1. Candidate Screening & Discovery: Evaluates high-degree hubs against dynamic threshold $\tau = \max(3, \lfloor \text{p75}(\text{degrees}) \rfloor)$ and emits structured candidate rationales.
+     2. Scenario-Aware Sub-Concept Formulation (Strict $n // 2$ Compression Invariant):
+        - Formulation is strictly capped at $\max(1, \lfloor n / 2 \rfloor)$ sub-concepts across Purely Mutable, Purely Immutable, and Mixed modes.
+        - Special Case: $n = 1$ immutable leaf in outward mode formulates exactly 1 intermediate sub-concept.
+        - Compulsory Parent Hub Updates: Every `SPLIT_CONCEPT` payload mandates updated `hub_title` and `hub_description` reflecting the parent hub's new umbrella role over the synthesized sub-concepts.
+     3. Immutable Leaves Outward Absorption (Mixed Mode):
+        - Clusters raw immutable leaves outward into $k_{new} \le \lfloor |N_{imm}| / 2 \rfloor$ intermediate abstractions.
+        - Dynamic Degree Re-evaluation: Hub degree is recalculated ($\text{deg}'(H) = |N_{mut}| + k_{new}$). If $\text{deg}'(H) < \tau$, the hub has decongested and finishes. If still $\ge \tau$, the new sub-concepts join the mutable set for the second split.
+     4. Pure Mutable Outward Partition:
         - Single execution path partitioning mutable concepts (whether originally pure mutable or a mixed hub that required further splitting).
-     4. Non-Destructive Invariant: The parent hub is always preserved as the umbrella concept anchoring the tree.
+     5. Non-Destructive Invariant: The parent hub is always preserved as the umbrella concept anchoring the tree.
  - Local LLM Telemetry Tracing: All LLM interactions (prompts, completions, parsed JSON, token latencies, and caller metadata) are logged locally to `backend/logs/llm_traces/runs/<date>/<session>/` via `LLMTracer`.
 ```
 
@@ -110,7 +117,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 * **Search Integrations:** **`arxiv`** API client and **`trafilatura`** web page markdown extractor.
 * **Telemetry & Response Streaming:** **FastAPI + SSE Starlette** streaming real-time token chunks and persona node traversal events to the client.
 * **Speech-to-Text (STT) Dictation:** **Whisper-Base.en** (`@xenova/transformers`) running 100% locally in the browser via WebAssembly/WebGPU. Users dictate voice notes directly into the chat input box to review and edit before sending.
-* **Frontend Visualization:** **React + WebGL** (`react-force-graph-2d`), featuring off-canvas Markdown drawers and visual node highlights.
+* **Frontend Visualization:** **React + WebGL** (`react-force-graph-2d`), featuring a streamlined slide-out **Description** panel, normalized single-badge headers, canvas search over node descriptions, and real-time persona traversal glowing.
 
 ---
 

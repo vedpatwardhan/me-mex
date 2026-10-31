@@ -30,17 +30,17 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
        - Routes execution to ONE of three internal paths:
            1. CONVERSATION (Direct execution -> Conversation response)
            2. RETRIEVAL    (Step 1: Partitioned Hub Traversal -> Step 2: Relevance Evaluation -> Final Conversation)
-           3. INGESTION    (Step 1: Fetch URL & Build Intra-Doc Graph -> Step 2: Hub Traversal, Relevance Eval & Reorg/Linking -> Final Conversation)
+           3. INGESTION    (Phase 1: Fetch & Intra-Doc Graph -> Phase 2: Hub Traversal -> Phase 3: Linking -> Phase 3.5: Generalization -> Phase 4: Reorganization -> Final Conversation)
                                     │
            ┌────────────────────────┼────────────────────────┐
            │                        │                        │
            ▼                        ▼                        ▼
      [CONVERSATION]            [RETRIEVAL]              [INGESTION]
-  (Direct Execution)      (Step 1: Hub Traversal    (Step 1: Fetch URL & Build
-  - Immediate LLM         - Step 2: Domain Node       Intra-Document Graph
-    response stream          Relevance Evaluation)  - Step 2: Hub Traversal,
-                                                       Relevance Eval, Link
-                                                       & Reorganize/Split)
+  (Direct Execution)      (Step 1: Hub Traversal    (Phase 1: Fetch & Build Intra-Doc
+  - Immediate LLM         - Step 2: Domain Node      Phase 2: Traversal & Relevance
+    response stream          Relevance Evaluation)   Phase 3: Collective Linking
+                                                     Phase 3.5: Target Generalization
+                                                     Phase 4: n // 2 Outward Reorg)
            │                        │                        │
            └────────────────────────┴────────────────────────┘
                                     │
@@ -58,8 +58,8 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
    - **Pre-Step 1 (Partitioned Sub-Graph Traversal)**: Discovers unweighted eigenvector hubs and assigns Specialist Personas to explore mutually exclusive sub-graph partitions.
    - **Pre-Step 2 (Relevance Evaluation)**: Personas evaluate domain relevance across their explored nodes, user prompt, and conversation history (`chat_history`).
    - **Final Conversation**: With enriched topological graph context assembled, the system triggers the final conversation step to generate and stream the response to the user.
-3. **Path 3: `INGESTION` (Two Pre-Steps $\rightarrow$ Final Conversation Response)**
-   - **Pre-Step 1 (Document Fetching & Intra-Document Graph Construction)**: Orchestrator calls `ingest_document_tool` to fetch and extract content dynamically:
+3. **Path 3: `INGESTION` (5 Sequential Ingestion Phases $\rightarrow$ Final Conversation Response)**
+   - **Phase 1 (Document Fetching & Intra-Document Graph Construction)**: Orchestrator calls `ingest_document_tool` to fetch and extract content dynamically:
      - **Universal Source Resolution**: Transparently ingests remote HTTP/HTTPS URLs (arXiv, blogs, HTML articles) and local filesystem references (`file:///...`, absolute paths `/Users/...`, `~/...`). Dispatches to format-specialized extractors:
        - **PDFs (`.pdf`, `%PDF`)**: Binary stream reading, ArXiv metadata detection, PDF layout text extraction.
        - **HTML (`.html`, `.htm`)**: Clean markdown extraction using Trafilatura with title metadata extraction.
@@ -76,8 +76,11 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
      - **LLM Context Budget & Ceiling Guarantee**: Individual chunks are bounded at $\le 45,000$ characters (~13,000 tokens), preventing Ministral 3-8B's 16,384-token context window from overflowing while allowing 1,536 tokens for concept extraction.
      - **Density-Aware Concept Extraction & Scale-Aware Consolidation**:
        - Passages extract **1 to 3 atomic concepts** (1 for focused notes, 2–3 for dense passages; max 3).
-       - Canonical consolidation scales naturally: preserves 1–5 canonical concepts for small inputs ($\le 6$ raw concepts) without forcing artificial expansion, and consolidates down to 6–10 canonical concepts for large inputs ($> 10$ raw concepts).
-   - **Pre-Step 2 (Sub-Graph Traversal, Relevance Evaluation, Linking & Reorganization)**: Performs partitioned sub-graph traversal and relevance evaluation across concept hubs. Personas link newly ingested intra-document concepts to existing domain hubs, and independently reorganize/split over-clustered mutable concept nodes (`SPLIT_CONCEPT`) using underlying passage context.
+       - Canonical consolidation enforces strict cardinality targets: **5 to 7 canonical concepts** for standard documents ($> 6$ raw concepts), and **1 to 3 canonical concepts** for concise documents or short notes ($\le 6$ raw concepts).
+   - **Phase 2 (Sub-Graph Traversal & Relevance Evaluation)**: Performs partitioned sub-graph traversal across concept hubs. Traversal presents immutable leaves as context only and strictly blocks them from expanding deeper hops.
+   - **Phase 3 (Collective Cross-Document Linking)**: Personas link newly ingested intra-document concepts to existing mutable domain hubs.
+   - **Phase 3.5 (Targeted Concept Generalization Pass)**: Dedicated LLM pass isolating all mutable nodes that received new connections during Phase 3. Synthesizes an updated umbrella title and description to accommodate the expanded conceptual domain before reorganization occurs. (The primordial anchor `'Everything'` has its description generalized while keeping its title intact).
+   - **Phase 4 (Scenario-Aware $n // 2$ Outward Reorganization)**: Screens over-clustered hubs against threshold $\tau$ and reorganizes them into sub-concepts strictly bounded by $\le \lfloor n / 2 \rfloor$, mandating updated parent `hub_title` and `hub_description` in MongoDB.
    - **Final Conversation**: Once graph integration and reorganization complete, the system triggers the final conversation step to provide an executive summary and confirmation response to the user.
 
 ---
@@ -176,25 +179,29 @@ Both Retrieval and Ingestion operate on a unified multi-agent pattern structured
    - **Mutually Exclusive Voronoi Graph Partitioning**: The graph network is partitioned via multi-source topological shortest-path (Voronoi) distance anchored directly to the detected department hubs ($H = [h_1, \dots, h_m]$). Every node $v$ is assigned to its closest hub $h^*(v) = \arg\min d(v, h_i)$ (with ties resolved by hub centrality). Partitions are keyed directly by `hub_node.id`, guaranteeing $P_i \cap P_j = \emptyset$ and eliminating key-name mismatches.
    - **Iterative Multi-Hop Traversal**: Each Concept Hub Persona independently expands its strictly assigned sub-graph partition (`partition_node_ids`) up to `max_depth = 3`.
    - **Root Node Traversal Blocking**: Traversal visits Root Nodes for provenance context and summaries, but strictly **blocks Root Nodes from expanding further hops**.
+   - **Immutable Leaf Frontier Blocking**: Candidate neighbors explicitly carry their mutability flag (`immutable: bool`). Immutable leaves are presented strictly as contextual grounding; the persona traversal engine defensively rejects them from expanding as frontier hops (`if candidate_neighbors[idx]["immutable"]: continue`).
+   - **Per-Node Exploration Rationales**: Persona exploration prompts require structured `SelectedNeighborItem` outputs detailing the exact conceptual rationale for selecting each node for traversal.
 2. **Relevance Evaluation:**
    - Each Specialist Persona evaluates the relevance of its accumulated domain nodes, search history, user prompt, and conversation history (`chat_history`) independently.
-3. **Independent Graph Ingestion, Linking & 3-Step Concept Reorganization:**
+3. **Collective Linking, Phase 3.5 Generalization & 3-Step Concept Reorganization:**
    - Consolidated concepts are ingested as **Immutable Intra-Document Concepts** on the periphery of the spherical topology.
-   - During persona ingestion, personas integrate intra-document concepts via **`CREATE_EDGE`** (connecting periphery concepts to core domain hubs) or **`EDIT_CONCEPT`** (updating mutable domain hubs).
-   - **Priority Immutable-First Outward Movement Concept Hub Reorganization**:
+   - During collective linking, personas integrate intra-document concepts via typed edges connecting periphery concepts to core mutable domain hubs.
+   - **Phase 3.5: Targeted Node Generalization Pass**:
+     - Runs immediately after linking and before macro reorganization.
+     - Identifies all mutable concept nodes that received new connections during the current ingestion.
+     - Prompts Gemini (`target_node_generalization.md`) with the target's previous title, description, and newly attached concepts to synthesize a generalized umbrella title and comprehensive domain description.
+     - Updates MongoDB records directly. (The primordial genesis node `'Everything'` is strictly exempt from title mutation while its description is updated).
+   - **Priority Immutable-First Outward Concept Hub Reorganization**:
      - **Step 1 (Candidate Screening & Discovery)**:
        - Computes dynamic degree threshold $\tau = \max(3, \lfloor \text{p75}(\text{degrees}) \rfloor)$ across the graph.
-       - Discovers qualifying mutable hubs ($\text{deg}(H) \ge \tau$) and prompts the persona to produce structured candidate rationales.
-     - **Step 2 (Neighborhood Analysis & Linear Outward Partitioning)**:
+       - Discovers qualifying mutable hubs ($\text{deg}(H) \ge \tau$) and prompts the persona to produce structured candidate rationales (`DiscoveredCandidateItem` with mandatory `rationale` emitted over telemetry).
+     - **Step 2 (Neighborhood Analysis & Scenario-Aware $n // 2$ Partitioning)**:
        - Direct neighbors $N(H)$ are classified into immutable leaves $N_{imm}$ and mutable concepts $N_{mut}$.
-       - Resolves **immutable neighbors first across all candidate hubs**:
-         1. **Immutable Leaves Outward Absorption (if $|N_{imm}| > 0$)**:
-            - *Purely Immutable ($|N_{mut}| == 0$)*: Leaves move outward into $k_{new} \ll |N_{imm}|$ intermediate mutable sub-concepts. Reorganization terminates.
-            - *Mixed ($|N_{mut}| > 0$, Phase 2a)*: Clusters raw evidence leaves into $k_{new}$ clean abstractions, passing existing mutable nodes as negative exclusion context to guarantee mutual exclusivity.
-            - *Dynamic Degree Shrinkage Re-Evaluation*: Post-2a degree $\text{deg}'(H) = |N_{mut}| + k_{new}$ is recalculated. If $\text{deg}'(H) < \tau$, the hub has decongested and reorganization completes cleanly (Phase 2b skipped). If $\text{deg}'(H) \ge \tau$, the newly formulated sub-concepts are added to $N_{mut}$ and fall through into step 2.
-         2. **Pure Mutable Outward Partition (Single Execution Pipeline)**:
-            - Executes across $N_{mut}$ (whether originally purely mutable or a mixed hub that fell through from step 1).
-            - Partitions the mutable abstractions outward without disturbing the underlying factual leaves.
+       - **Strict Cardinality Ceilings**: The number of formulated sub-concepts is mathematically bounded by $\max(1, \lfloor n / 2 \rfloor)$ across all three scenarios:
+         1. *Purely Immutable ($|N_{mut}| == 0$)*: Leaves move outward into $\le \lfloor |N_{imm}| / 2 \rfloor$ intermediate sub-concepts. (Special case: if $|N_{imm}| = 1$, creates exactly 1 sub-concept).
+         2. *Mixed ($|N_{mut}| > 0$, Phase 2a)*: Immutable leaves move outward into $\le \lfloor |N_{imm}| / 2 \rfloor$ intermediate sub-concepts (with 1 created if $|N_{imm}| = 1$). Hub degree is recalculated ($\text{deg}'(H) = |N_{mut}| + k_{new}$). If $\text{deg}'(H) < \tau$, reorganization finishes. If still $\ge \tau$, Phase 2b executes on remaining mutable concepts bounded by $\le \lfloor \text{deg}'(H) / 2 \rfloor$.
+         3. *Purely Mutable ($|N_{imm}| == 0$)*: Partitions mutable concepts into $\le \lfloor |N_{mut}| / 2 \rfloor$ sub-concepts.
+       - **Compulsory Parent Hub Updates**: Every `SPLIT_CONCEPT` command mandates updated `hub_title` and `hub_description` payloads. The engine mutates the parent hub in MongoDB (preserving `'Everything'`'s title) to formally establish its higher-level umbrella role over the new sub-concepts.
      - **Step 3 (Neighbor Edge Re-Wiring & Non-Destructive Invariant)**:
        - Deletes direct edges from $H$ to rewired neighbors, connecting them to the new sub-concepts with new sub-concepts linked to $H$ via `SUBSET_OF`.
        - The parent hub $H$ is **never deleted**, preserving the hierarchical anchor of the tree.
@@ -218,6 +225,11 @@ The SPA features a persistent canvas workspace and four view modes:
 - **`📁 Project Workspace`**: Project-scoped graph view filtered by `project_id`.
 - **`📄 Report Studio`**: Node-grounded markdown report editor.
 - **`📥 Intake Stream`**: Drag-and-drop staging sandbox.
+
+### Streamlined Slide-Out Node Drawer & Visualizer Controls
+- **Clean Description Panel**: Displays a focused, readable view prioritizing `node.description` with fallback to `node.content`. Low-level Zettelkasten note viewers and raw metadata attribute tables are eliminated.
+- **Normalized Single-Badge Header**: Header displays strictly the node title, the primary node type badge (`DOCUMENT`, `CONCEPT`, `TOPIC`), and a dedicated node deletion button with confirmation modal.
+- **Canvas Description Search**: The canvas filter indexes across `node.title`, `node.id`, and `node.description`, enabling users to search and highlight nodes by semantic topics and description text.
 
 ### Frontend Dynamic Palette Mapping
 - Visual hex color palettes belong exclusively in the frontend UI (`GraphCanvas.tsx` / `useMemexStore.ts`).
