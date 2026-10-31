@@ -38,6 +38,7 @@ export const GraphCanvas: React.FC = () => {
       const matchesSearch =
         !searchQuery ||
         n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (n.description && n.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (n.content && n.content.toLowerCase().includes(searchQuery.toLowerCase()));
 
       let matchesType = true;

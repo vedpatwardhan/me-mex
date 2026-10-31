@@ -19,7 +19,8 @@ export interface GraphNode {
   id: string;
   node_type: NodeType;
   title: string;
-  content: string;
+  description?: string;
+  content?: string;
   raw_doc_id?: string;
   is_immutable?: boolean;
   project_ids: string[];
