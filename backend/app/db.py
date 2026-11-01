@@ -139,7 +139,7 @@ class GraphMemexDatabase:
                 or n.title.strip().lower() == "everything"
             ):
                 return n
-        return None
+        return self.get_node("concept_genesis")
 
     # --- Edge Operations ---
     def upsert_edge(self, edge: GraphEdge):

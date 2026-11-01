@@ -54,9 +54,9 @@ def get_macro_documents() -> str:
 
 @mcp.tool()
 def calculate_hub_rankings() -> str:
-    """Calculate degree and eigenvector hub centrality for graph nodes."""
-    centrality = graph_analytics.calculate_hub_centrality()
-    return json.dumps(centrality, indent=2)
+    """Return mutable tree health metrics (depth, Sackin index, reachability)."""
+    metrics = graph_analytics.refresh_tree_metadata()
+    return json.dumps(metrics, indent=2)
 
 
 if __name__ == "__main__":

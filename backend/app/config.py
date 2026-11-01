@@ -31,5 +31,10 @@ class Settings:
     )
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "180.0"))
 
+    DEGREE_THRESHOLD: int = int(os.getenv("DEGREE_THRESHOLD", "7"))
+    MIN_CLUSTER_SIZE: int = int(os.getenv("MIN_CLUSTER_SIZE", "2"))
+    MAX_TRAVERSAL_DEPTH: int = int(os.getenv("MAX_TRAVERSAL_DEPTH", "4"))
+    REACHABILITY_HOP_K: int = int(os.getenv("REACHABILITY_HOP_K", "3"))
+
 
 settings = Settings()

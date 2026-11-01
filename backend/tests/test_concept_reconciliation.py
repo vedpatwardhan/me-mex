@@ -2,7 +2,7 @@
 Test Suite: Zero-Consensus Graph Reconciliation & Node Mutability Enforcement
 
 Aligned with docs/ARCHITECTURE.md Section 3 & Section 4:
-- Validates independent zero-consensus persona command execution into MongoDB.
+- Validates independent zero-consensus graph command execution into MongoDB.
 - Validates Node Mutability Hierarchy:
     - Root Nodes (`ROOT`) & Intra-Document Concepts (`immutable: True`) CANNOT be modified (`EDIT_CONCEPT`), split (`SPLIT_CONCEPT`), or deleted by persona commands.
     - Persona-created Domain Hubs & Intermediate Nodes (`immutable: False`) can be edited or split when over-clustered.
@@ -12,7 +12,7 @@ import time
 import pytest
 from app.agents.orchestrator import orchestrator
 from app.services.graph_ingestion_engine import graph_ingestion_engine
-from app.agents.department_persona import DepartmentPersonaAgent
+from app.agents.graph_navigator import GraphNavigator
 from app.models import GraphNode, GraphEdge
 from app.db import db_engine
 
@@ -45,30 +45,18 @@ def test_independent_ingestion_linking():
     )
     db_engine.upsert_node(intra_node)
 
-    persona_command_results = [
-        {
-            "department_name": "Persona Specialist: World Models",
-            "commands": [
-                {
-                    "action": "CREATE_EDGE",
-                    "edge": {
-                        "source_id": intra_concept_id,
-                        "target_id": domain_hub_id,
-                        "description": "RELEVANT_TO",
-                    },
-                }
-            ],
-        }
-    ]
-
-    events = list(
-        graph_ingestion_engine.process_persona_ingestion_commands(
-            persona_command_results=persona_command_results,
-            doc_id="doc_test_linking",
-            doc_title="Test Linking Paper",
-            consolidated_concepts=[{"title": "Pixel-Based Dynamics"}],
-            project_id="global",
-        )
+    link_command = {
+        "action": "CREATE_EDGE",
+        "edge": {
+            "source_id": intra_concept_id,
+            "target_id": domain_hub_id,
+            "description": "RELEVANT_TO",
+        },
+    }
+    graph_ingestion_engine.execute_single_command(
+        link_command,
+        doc_title="Test Linking Paper",
+        proj_list=["global"],
     )
 
     all_edges = db_engine.get_edges(project_id="global")
@@ -156,7 +144,7 @@ def test_mutable_concept_node_splitting():
         item=split_cmd_item, doc_title="Test Paper", proj_list=["global"]
     )
     assert evt is not None
-    assert evt["event"] == "node_touched"
+    assert evt["event"] in ("node_touched", "reorg_completed")
 
     # Original over-clustered node PRESERVED as umbrella node!
     old_node = db_engine.get_node(mutable_hub_id)

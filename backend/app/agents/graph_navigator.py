@@ -1,12 +1,7 @@
 """
-Specialist Persona Agent: Me-Mex
+Graph Navigator: Me-Mex v0.2
 
-Aligned with docs/ARCHITECTURE.md Section 4:
-- Instantiated dynamically per concept hub partition detected by rustworkx unweighted eigenvector centrality.
-- Conducts sub-graph exploration (`explore_concept_hub`) over mutually exclusive assigned partitions up to max_depth=3.
-- Blocks expansion past Root Nodes (read summary for provenance only).
-- Conducts independent passage-grounded concept node reorganization (`reorganize_concept_hub`) during Ingestion, splitting over-clustered mutable concept nodes (`SPLIT_CONCEPT`) using underlying text passage chunks.
-- Operates zero-consensus independently (no objections or bilateral debate loops).
+Genesis-rooted mutable tree traversal, intra-document linking, and selective reorganization.
 """
 
 import json
@@ -14,17 +9,17 @@ import time
 from collections import defaultdict
 from typing import List, Dict, Any, Optional
 from app.db import db_engine
+from app.config import settings
 from app.models import (
     GraphNode,
     GraphEdge,
-    ConceptHubCandidate,
-    PersonaRouteRelevancePayload,
     ReorgDiscoveryPayload,
     ReorgSplitPayload,
     ReorgRewirePayload,
     PersonaIngestionCommandsPayload,
     PersonaExplorationPayload,
 )
+from app.services.graph_analytics import MutableTreeIndex, graph_analytics
 from app.services.llm_gateway import llm_gateway
 from app.services.event_queue import event_queue
 from app.services.prompt_mapper import PromptIdMapper
@@ -32,15 +27,31 @@ from app.prompts import load_prompt
 from app.tools.search_tools import search_tools
 
 
-class DepartmentPersonaAgent:
-    """Specialized Persona Agent instantiated dynamically per concept hub partition."""
+class GraphNavigator:
+    """Single navigator for Genesis-rooted tree traversal and graph maintenance."""
 
-    def __init__(self, hub_node: GraphNode, score: float = 1.0):
-        self.hub_node = hub_node
-        self.score = score
-        self.department_id = f"dept_{hub_node.id}"
-        self.department_name = f"Persona Specialist: {hub_node.title}"
-        self.last_explored_nodes: List[GraphNode] = [hub_node]
+    def __init__(self, project_id: str = "global"):
+        self.project_id = project_id
+        self.genesis_node = db_engine.get_genesis_node(project_id)
+        if not self.genesis_node:
+            raise ValueError(f"Genesis node missing for project '{project_id}'")
+        self.scope_node = self.genesis_node
+        self.navigator_id = f"nav_{self.genesis_node.id}"
+        self.navigator_name = "Graph Navigator"
+        self.last_explored_nodes: List[GraphNode] = [self.genesis_node]
+
+    @property
+    def hub_node(self) -> GraphNode:
+        """Backward-compatible alias for traversal anchor (Genesis)."""
+        return self.genesis_node
+
+    @property
+    def department_id(self) -> str:
+        return self.navigator_id
+
+    @property
+    def department_name(self) -> str:
+        return self.navigator_name
 
     @staticmethod
     def _get_adjacency_map(project_id: str) -> Dict[str, List[GraphEdge]]:
@@ -88,21 +99,66 @@ class DepartmentPersonaAgent:
                         }
         return candidate_neighbors
 
-    def explore_concept_hub(
+    @classmethod
+    def get_tree_mutable_candidates(
+        cls,
+        frontier_ids: List[str],
+        tree: MutableTreeIndex,
+        visited_ids: set,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Mutable tree children plus direct immutable context (immutable not expandable)."""
+        candidate_neighbors: Dict[str, Dict[str, Any]] = {}
+        for f_id in frontier_ids:
+            for child in tree.mutable_children(f_id):
+                if child.id in visited_ids or child.id in candidate_neighbors:
+                    continue
+                candidate_neighbors[child.id] = {
+                    "id": child.id,
+                    "title": child.title,
+                    "body": child.description,
+                    "description": child.description,
+                    "relation_desc": "SUBSET_OF",
+                    "node_type": child.node_type,
+                    "immutable": False,
+                }
+            for imm in tree.direct_immutable_neighbors(f_id):
+                if imm.id in visited_ids or imm.id in candidate_neighbors:
+                    continue
+                candidate_neighbors[imm.id] = {
+                    "id": imm.id,
+                    "title": imm.title,
+                    "body": imm.description,
+                    "description": imm.description,
+                    "relation_desc": "RELEVANT_TO",
+                    "node_type": imm.node_type,
+                    "immutable": True,
+                }
+        return candidate_neighbors
+
+    def explore_for_retrieval(
         self,
         query: str,
         chat_history: Optional[List[Dict[str, str]]] = None,
-        allow_web_search: bool = False,
-        project_id: str = "global",
-        max_depth: int = 3,
-        partition_node_ids: Optional[set] = None,
+        project_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Multi-hop sub-graph exploration over mutually exclusive assigned partitions.
+        return self.traverse_mutable_tree_from_genesis(
+            query=query, chat_history=chat_history, project_id=project_id
+        )
 
-        Iteratively expands frontier nodes up to max_depth=3. Blocks further traversal past Root Nodes.
-        Emits node_touched telemetry events to animate the visual canvas.
-        """
-        adj_map = self._get_adjacency_map(project_id)
+    def traverse_mutable_tree_from_genesis(
+        self,
+        query: str,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        project_id: Optional[str] = None,
+        max_depth: Optional[int] = None,
+        allow_web_search: bool = False,
+    ) -> Dict[str, Any]:
+        """Top-down traversal from Genesis over the mutable tree backbone."""
+        pid = project_id or self.project_id
+        max_traversal_depth = (
+            max_depth if max_depth is not None else settings.MAX_TRAVERSAL_DEPTH
+        )
+        tree = MutableTreeIndex(project_id=pid)
 
         visited_node_ids = set([self.hub_node.id])
         current_frontier = [self.hub_node.id]
@@ -119,19 +175,17 @@ class DepartmentPersonaAgent:
             "message": f"Concept '{self.hub_node.title}' touched by {self.department_name}.",
             "timestamp": time.time(),
         }
-        event_queue.push(project_id, hub_evt)
+        event_queue.push(pid, hub_evt)
         emitted_events.append(hub_evt)
 
-        for depth in range(1, max_depth + 1):
+        for hop in range(1, max_traversal_depth + 1):
             if not current_frontier:
                 break
 
-            # Find all unvisited candidate neighbors connected to current frontier nodes
-            candidate_neighbors = self.get_candidate_neighbors(
+            candidate_neighbors = self.get_tree_mutable_candidates(
                 frontier_ids=current_frontier,
-                adj_map=adj_map,
+                tree=tree,
                 visited_ids=visited_node_ids,
-                partition_node_ids=partition_node_ids,
             )
 
             if not candidate_neighbors:
@@ -153,9 +207,12 @@ class DepartmentPersonaAgent:
                     }
                 )
 
-            prompt_payload = f"""Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
+            prompt_payload = f"""Genesis / Project Scope (Everything):
+{self.genesis_node.description}
+
+Current Frontier Hub: '{current_frontier[0] if current_frontier else self.hub_node.title}'
 User Query / Context: "{query}"
-Current Hop Level: {depth} / {max_depth}
+Current Hop Level: {hop} / {max_traversal_depth}
 
 Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items):
 {json.dumps(indexed_candidate_neighbors, indent=2)}"""
@@ -163,7 +220,9 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 {
                     "role": "system",
                     "content": load_prompt(
-                        "persona_subgraph_expansion", hub_title=self.hub_node.title
+                        "graph_tree_traversal",
+                        hub_title=self.genesis_node.title,
+                        max_depth=max_traversal_depth,
                     ),
                 }
             ]
@@ -179,7 +238,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     max_tokens=1024,
                     max_retries=2,
                     enable_reasoning=False,
-                    caller=f"DepartmentPersonaAgent[{self.department_name}].subgraph_expansion",
+                    caller=f"GraphNavigator[{self.department_name}].subgraph_expansion",
                 )
                 # Decode integer neighbor_index back to real string node_id
                 neighbor_rationales: Dict[str, str] = {}
@@ -212,13 +271,13 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                         "node_title": n_node.title,
                         "rationale": rationale,
                         "message": (
-                            f"Concept '{n_node.title}' explored at hop {depth}: {rationale}"
+                            f"Concept '{n_node.title}' explored at hop {hop}: {rationale}"
                             if rationale
-                            else f"Concept '{n_node.title}' explored at hop {depth} by {self.department_name}."
+                            else f"Concept '{n_node.title}' explored at hop {hop} by {self.department_name}."
                         ),
                         "timestamp": time.time(),
                     }
-                    event_queue.push(project_id, evt)
+                    event_queue.push(pid, evt)
                     emitted_events.append(evt)
 
             current_frontier = next_frontier
@@ -252,14 +311,19 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             min_allowed_subs = 2
             max_allowed_subs = max(2, n_neighbors // 2)
 
+        is_genesis = bool(
+            target_node.metadata.get("is_genesis")
+            or target_node.title.strip().lower() == "everything"
+        )
         system_split = load_prompt(
-            "persona_reorganize_split",
+            "graph_reorg_split",
             department_name=self.department_name,
             node_id=target_node.id,
             mode=mode,
             min_allowed_sub_concepts=min_allowed_subs,
             max_allowed_sub_concepts=max_allowed_subs,
             neighbor_count=n_neighbors,
+            is_genesis=str(is_genesis).lower(),
         )
 
         # Concept Cache Map for target neighbors being rewired
@@ -307,7 +371,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 max_tokens=2048,
                 max_retries=2,
                 enable_reasoning=False,
-                caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_split_{mode}",
+                caller=f"GraphNavigator[{self.department_name}].reorg_split_{mode}",
             )
             formulated_subs = [s.model_dump() for s in payload_split.sub_concepts]
             # Programmatic compression guard: enforce max_allowed_subs ceiling
@@ -345,7 +409,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
 
         # Re-wiring step
         system_rewire = load_prompt(
-            "persona_reorganize_rewire",
+            "graph_reorg_rewire",
             department_name=self.department_name,
             node_id=target_node.id,
             mode=mode,
@@ -370,7 +434,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                 max_tokens=4096,
                 max_retries=2,
                 enable_reasoning=False,
-                caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_rewire_{mode}",
+                caller=f"GraphNavigator[{self.department_name}].reorg_rewire_{mode}",
             )
             # Decode model integer neighbor_index back to real string neighbor_id
             rewired = []
@@ -415,11 +479,11 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             "rewired_edges": rewired,
         }
 
-    def reorganize_concept_hub(
+    def reorganize_mutable_hub(
         self,
         explored_nodes: list[GraphNode] | None = None,
         project_id: str = "global",
-        degree_threshold: int = 5,
+        degree_threshold: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         3-Step Non-Destructive Concept Node Reorganization & Subdivision during Ingestion.
@@ -435,6 +499,10 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
         if not explored_nodes:
             return {"commands": [], "emitted_events": []}
 
+        if degree_threshold is None:
+            degree_threshold = settings.DEGREE_THRESHOLD
+
+        tree = MutableTreeIndex(project_id=project_id)
         all_edges = db_engine.get_edges(project_id)
         node_id_set = {n.id for n in explored_nodes}
         node_map = {n.id: n for n in explored_nodes}
@@ -535,7 +603,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             )
 
         system_discover = load_prompt(
-            "persona_reorganize_discover", department_name=self.department_name
+            "graph_reorg_discover", department_name=self.department_name
         )
         user_discover = (
             "Candidate Mutable Concept Hubs Eligible for Subdivision "
@@ -554,7 +622,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                 max_tokens=1024,
                 max_retries=2,
                 enable_reasoning=False,
-                caller=f"DepartmentPersonaAgent[{self.department_name}].reorg_discover",
+                caller=f"GraphNavigator[{self.department_name}].reorg_discover",
             )
             # Decode integer candidate_index back to real string candidate_id
             for c in payload_discover.candidates:
@@ -652,6 +720,8 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                     if nb_node.is_immutable:
                         immutable_evidence_concepts.append(entry)
                     else:
+                        if tree.subtree_mut_height.get(nb_id, 0) >= 1:
+                            continue
                         mutable_concepts.append(entry)
 
             total_neighbors = len(immutable_evidence_concepts) + len(mutable_concepts)
@@ -782,9 +852,17 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                     }
                     emitted_events.append(skip_evt)
 
+        health = tree.health_metrics(k=settings.REACHABILITY_HOP_K)
+        emitted_events.append(
+            {
+                "event": "graph_health_metrics",
+                "metrics": health,
+                "timestamp": time.time(),
+            }
+        )
         return {"commands": reorg_commands, "emitted_events": emitted_events}
 
-    def persona_ingestion(
+    def link_intradoc_concepts(
         self,
         intra_doc_nodes: List[GraphNode],
         doc_title: str,
@@ -816,7 +894,9 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
         intra_payload = _format_nodes(intra_doc_nodes)
 
         prompt_str = f"""
-        Concept Hub: '{self.hub_node.title}' (ID: {self.hub_node.id})
+        Genesis Project Scope:
+        {self.genesis_node.description}
+
         Document Title: '{doc_title}'
         User Query: "{query}"
 
@@ -832,7 +912,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             {
                 "role": "system",
                 "content": load_prompt(
-                    "persona_ingestion", hub_title=self.hub_node.title
+                    "graph_link_intradoc", hub_title=self.hub_node.title
                 ),
             }
         ]
@@ -848,7 +928,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                 max_tokens=4096,
                 max_retries=2,
                 enable_reasoning=False,
-                caller=f"DepartmentPersonaAgent[{self.department_name}].persona_ingestion",
+                caller=f"GraphNavigator[{self.department_name}].graph_link_intradoc",
             )
             raw_cmds = [c.model_dump() for c in payload_ingest.commands]
             return {
@@ -860,131 +940,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                 "commands": raw_cmds,
             }
         except Exception as e:
-            print(f"[{self.department_name}] Persona ingestion error: {e}")
+            print(f"[{self.department_name}] Intra-doc linking error: {e}")
             raise RuntimeError(
-                f"[{self.department_name}] Persona cross-linking ingestion failed: {e}"
+                f"[{self.department_name}] Intra-document linking failed: {e}"
             ) from e
-
-    @classmethod
-    def get_hub_preview_subconcepts(
-        cls,
-        hub_id: str,
-        adj_map: Dict[str, List[GraphEdge]],
-        max_depth: int = 2,
-        max_items: int = 15,
-    ) -> List[Dict[str, Any]]:
-        """Collects a preview of sub-concepts connected to a hub up to max_depth using common neighbor exploration."""
-        visited_sub_ids = {hub_id}
-        frontier = [hub_id]
-        depth_subconcepts = []
-
-        for cur_depth in range(1, max_depth + 1):
-            candidates = cls.get_candidate_neighbors(
-                frontier_ids=frontier,
-                adj_map=adj_map,
-                visited_ids=visited_sub_ids,
-            )
-            if not candidates:
-                break
-
-            frontier = []
-            for n_id, n_data in candidates.items():
-                visited_sub_ids.add(n_id)
-                frontier.append(n_id)
-                depth_subconcepts.append(
-                    {
-                        "title": n_data["title"],
-                        "depth": cur_depth,
-                        "relation": n_data["relation_desc"],
-                    }
-                )
-                if len(depth_subconcepts) >= max_items:
-                    break
-            if len(depth_subconcepts) >= max_items:
-                break
-
-        return depth_subconcepts
-
-    @staticmethod
-    def filter_relevant_hubs(
-        doc_title: str,
-        intra_doc_nodes: List[GraphNode],
-        candidate_hubs: List[GraphNode],
-        project_id: str = "global",
-        preview_depth: int = 2,
-    ) -> List[str]:
-        """Pre-check relevance filtering evaluating candidate persona hubs against
-        extracted concepts.
-
-        Enriches candidate hubs with depth-2 sub-concepts for enhanced semantic
-        resolution.
-        Selects 1 to 3 candidate hubs that have genuine domain relevance.
-        Guarantees fallback to the 'Everything' hub if no specialized domain hub fits.
-        """
-        adj_map = DepartmentPersonaAgent._get_adjacency_map(project_id)
-
-        # Concept Cache Map for routing: candidate hubs and intra-doc concepts
-        concept_mapper = PromptIdMapper(prefix="concept")
-
-        candidate_hubs_payload = []
-        for h in candidate_hubs:
-            hub_index = concept_mapper.register(h.id)
-            depth_subconcepts = DepartmentPersonaAgent.get_hub_preview_subconcepts(
-                hub_id=h.id,
-                adj_map=adj_map,
-                max_depth=preview_depth,
-                max_items=15,
-            )
-            hub_dict = {
-                "hub_index": hub_index,
-                "title": h.title,
-                "description": h.description,
-            }
-            if depth_subconcepts:
-                hub_dict["connected_subconcepts"] = depth_subconcepts
-            candidate_hubs_payload.append(hub_dict)
-
-        intra_concepts_payload = []
-        for n in intra_doc_nodes:
-            c_idx = concept_mapper.register(n.id)
-            intra_concepts_payload.append(
-                {"concept_index": c_idx, "title": n.title, "description": n.description}
-            )
-
-        system_route = load_prompt("persona_route_relevance")
-        user_route = f"""Incoming Document: '{doc_title}'
-Newly Extracted Concepts ({len(intra_concepts_payload)} items):
-{json.dumps(intra_concepts_payload, indent=2)}
-
-Candidate Persona Domain Hubs with Local Sub-Concepts ({len(candidate_hubs_payload)} items):
-{json.dumps(candidate_hubs_payload, indent=2)}"""
-        selected_hub_ids = []
-        try:
-            payload_route = llm_gateway.generate_structured_completion(
-                [
-                    {"role": "system", "content": system_route},
-                    {"role": "user", "content": user_route},
-                ],
-                response_model=PersonaRouteRelevancePayload,
-                temperature=0.1,
-                max_tokens=512,
-                max_retries=2,
-                enable_reasoning=False,
-                caller="DepartmentPersonaAgent.filter_relevant_hubs",
-            )
-            # Decode returned integer hub indices back to string hub IDs
-            selected_hub_ids = [
-                concept_mapper.to_id(h_idx)
-                for h_idx in payload_route.selected_hub_indices
-                if concept_mapper.to_id(h_idx) is not None
-            ]
-        except Exception as e:
-            print(f"[DepartmentPersonaAgent] Persona relevance routing error: {e}")
-            selected_hub_ids = []
-
-        # Enforce universal fallback: if empty or unselected, fallback to 'Everything'
-        if not selected_hub_ids:
-            genesis_candidate = db_engine.get_genesis_node(project_id)
-            selected_hub_ids = [genesis_candidate.id]
-
-        return selected_hub_ids

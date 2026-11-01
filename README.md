@@ -76,10 +76,10 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
  - First-Class Timestamps: Nodes and edges carry explicit creation/update timestamps (`created_at`, `updated_at`), enabling persona agents to reason about temporal progression and historical context naturally. Optional frontend toggles visualize timeline progression using color-coded time windows.
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│             3. Mutually Exclusive Concept Hub Exploration & Relevance Evaluation       │
+│             3. Genesis Tree Traversal (Ingestion & Retrieval)                          │
 └────────────────────────────────────────────────────────────────────────────────────────┘
- - Unweighted Topological Hub Discovery: Foundational concept hubs are detected in real time (<5ms) via `rustworkx` unweighted eigenvector centrality with relative thresholding ($s_i \ge 0.30 \times s_{\max}$). Each detected concept hub is assigned a dedicated Specialist Persona representing domain expertise for that concept cluster.
- - Mutually Exclusive Voronoi Sub-Graph Partitioning: Rather than unanchored graph clustering, the graph network is partitioned via multi-source topological shortest-path (Voronoi) distance anchored directly to the detected concept hubs. Every node in the graph is assigned to its closest department hub (with ties broken by hub centrality), strictly guaranteeing non-empty, non-overlapping partitions ($P_i \cap P_j = \emptyset$). Each Specialist Persona independently explores its strictly assigned sub-graph partition (`explore_concept_hub`) up to `max_depth = 3`.
+ - **Graph Navigator** (`app/agents/graph_navigator.py`) performs top-down traversal from the primordial `concept_genesis` node over the mutable tree backbone (`SUBSET_OF` child→parent edges), guided by the Genesis project description.
+ - Immutable leaves appear as read-only context; traversal expands only through mutable children up to `MAX_TRAVERSAL_DEPTH` (default 4).
  - Mutability Exploration Frontier Boundary: Candidate neighbors explicitly include immutable flags. Immutable evidence leaves serve as read-only grounding context to inform personas of existing literature, but personas are strictly barred from expanding hop frontiers from immutable nodes (`if candidate_neighbors[idx]["immutable"]: continue`).
  - Structured Exploration Rationales: Personas emit explicit per-node reasoning (`SelectedNeighborItem` with `rationale`) for each chosen neighbor, streamed over telemetry.
  - Relevance Evaluation & Independent Operation: Because all intra-document concept nodes are completely immutable, proposals from different personas operate on disjoint/immutable nodes without conflicts.
@@ -91,7 +91,8 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
  - Tool-Based Fetching & Construction: Executive Orchestrator calls `ingest_document_tool` when URLs/PDFs are pasted, storing text chunks in `passages` and building intra-document concept nodes.
  - Sub-Graph Traversal & Collective Linking: Performs partitioned sub-graph traversal and relevance evaluation across concept hubs to link intra-document concepts to existing mutable domain concepts.
  - Phase 3.5 Targeted Concept Generalization: Dedicated LLM pass isolating all mutable concept nodes that received new connections during ingestion. Synthesizes an updated umbrella title and description to expand their conceptual scope before any reorganization triggers. (The primordial genesis node 'Everything' has its description updated while its title is strictly preserved).
- - Priority Immutable-First Outward Reorganization: Macro node reorganization (`SPLIT_CONCEPT` / `reorganize_concept_hub`) executes a priority immutable-first outward movement loop:
+ - **Engine-dispatch reorganization** (`SPLIT_CONCEPT`): LLM proposes clusters; the engine commits **wrapper expansion** only at Genesis and **lateral sibling splits** for all other mutable hubs (`graph_ingestion_engine.py`). Strahler/subtree-height gates protect deep subtrees; health metrics emit via `MutableTreeIndex`.
+ - Legacy immutable-first reorganization loop (pre-v0.2 reference):
      1. Candidate Screening & Discovery: Evaluates high-degree hubs against dynamic threshold $\tau = \max(3, \lfloor \text{p75}(\text{degrees}) \rfloor)$ and emits structured candidate rationales.
      2. Scenario-Aware Sub-Concept Formulation (Strict $n // 2$ Compression Invariant):
         - Formulation is strictly capped at $\max(1, \lfloor n / 2 \rfloor)$ sub-concepts across Purely Mutable, Purely Immutable, and Mixed modes.
@@ -112,7 +113,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 
 * **Database Engine:** **MongoDB** document database (`documents`, `passages`, `nodes`, `edges`, `macro_documents`, `staging_sandbox`, `projects`, `chat_messages`) with in-memory fallback for local execution.
 * **LLM Gateway:** **Ministral 3-8B** running remotely via Colab vLLM server (`http://localhost:8000/v1`) with local rule-based fallback.
-* **Graph Analytics Worker:** **`rustworkx`** PyDiGraph for fast (<1ms) eigenvector/degree Hub Centrality ranking with dynamic node-type filtering and relative score thresholding.
+* **Graph Analytics Worker:** **`MutableTreeIndex`** (depth, Strahler, Sackin, K-hop reachability) plus **`rustworkx`** PyDiGraph construction.
 * **Agent Protocol & Tools:** **FastMCP** (Python MCP SDK) exposing typed tools (`search_duckduckgo_web`, `search_arxiv_papers`, `fetch_web_article`, `get_graph_nodes`, `get_passages_by_ids`, `get_macro_documents`, `calculate_hub_rankings`).
 * **Search Integrations:** **`arxiv`** API client and **`trafilatura`** web page markdown extractor.
 * **Telemetry & Response Streaming:** **FastAPI + SSE Starlette** streaming real-time token chunks and persona node traversal events to the client.
@@ -126,11 +127,11 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 - **`app/db.py`**: MongoDB Database Engine with models for Documents, Passages, Graph Nodes, Connection Edges, Project Workspaces, Chat Messages, and Staging Records.
 - **`app/services/llm_gateway.py`**: vLLM gateway client targeting Colab Ministral 3-8B with local rule-based fallback.
 - **`app/services/prompt_mapper.py`**: Dual-cache ID mapping boundary (`PromptIdMapper`) providing bidirectional translation between canonical MongoDB string IDs and 1-based integer indices for prompt isolation.
-- **`app/services/graph_analytics.py`**: `rustworkx` Hub Centrality worker with pure centrality dynamic thresholding and project-scoped graph filtering.
+- **`app/services/graph_analytics.py`**: `MutableTreeIndex` (depth, Strahler, Sackin, reachability) and `rustworkx` graph construction.
 - **`app/tools/search_tools.py`**: ArXiv research paper search and Trafilatura web article text extractor.
-- **`app/agents/department_persona.py`**: Specialist Personas for shared sub-graph exploration (`explore_concept_hub`), retrieval synthesis (`explore_and_retrieve`), and structured graph ingestion (`persona_ingestion`).
-- **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating Direct Conversation, Ingestion, and Persona Retrieval flows with `chat_history` context-aware intent classification.
-- **`app/api/sse.py`**: FastAPI SSE endpoint (`/api/sse/chat`) streaming live persona traversal telemetry.
+- **`app/agents/graph_navigator.py`**: Genesis-rooted tree traversal, linking (`link_intradoc_concepts`), and reorganization (`reorganize_mutable_hub`).
+- **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating Direct Conversation, Ingestion, and Genesis tree retrieval with `chat_history` context-aware intent classification.
+- **`app/api/sse.py`**: FastAPI SSE endpoint (`/api/sse/chat`) streaming live graph traversal telemetry.
 - **`main.py`**: REST API endpoints for unified chat (`POST /api/chat`), project workspaces (`GET/POST /api/projects`), project chat history (`GET /api/projects/{id}/chat`), and graph querying (`GET /api/graph?project_id=...`).
 - **`tests/`**: Pytest test suite with `-n 2` parallel worker isolation, passing all database, project scoping, analytics, retrieval stream, concept merging, and API checks.
 

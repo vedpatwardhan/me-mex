@@ -41,7 +41,7 @@ def test_llm_tracer_session_and_step_recording(tmp_path: Path):
 
     # Log step 2: structured completion
     p2 = tracer.log_call(
-        caller="DepartmentPersonaAgent[Everything].subgraph_expansion",
+        caller="GraphNavigator[Graph Navigator].subgraph_expansion",
         model="test-model",
         messages=[{"role": "user", "content": "expand"}],
         duration_seconds=0.456,
@@ -54,7 +54,7 @@ def test_llm_tracer_session_and_step_recording(tmp_path: Path):
     )
     assert p2 is not None
     assert p2.exists()
-    assert "02_DepartmentPersonaAgent[Everything].subgraph_expansion.json" == p2.name
+    assert "02_GraphNavigator[Graph_Navigator].subgraph_expansion.json" == p2.name
 
     # Check index.jsonl
     index_file = tmp_path / "index.jsonl"
@@ -63,7 +63,7 @@ def test_llm_tracer_session_and_step_recording(tmp_path: Path):
         lines = [json.loads(line) for line in f if line.strip()]
     assert len(lines) == 2
     assert lines[0]["caller"] == "ExecutiveOrchestrator.classify_intent"
-    assert lines[1]["caller"] == "DepartmentPersonaAgent[Everything].subgraph_expansion"
+    assert lines[1]["caller"] == "GraphNavigator[Graph Navigator].subgraph_expansion"
 
 
 def test_llm_tracer_caller_fallback_detection(tmp_path: Path):

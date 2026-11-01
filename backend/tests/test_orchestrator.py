@@ -469,22 +469,12 @@ async def test_execute_ingestion_flow_fails_fast_on_fetch_error_without_substitu
     assert len(conv_evts) == 1
 
 
-@pytest.mark.asyncio
-async def test_coordinated_persona_routing_and_fallback(monkeypatch):
-    """Verify that candidate hubs are routed via LLM, falling back to 'Everything' when unrelated."""
-    from app.agents.orchestrator import orchestrator
+def test_genesis_resolves_for_project_workspace():
+    """Verify Genesis node resolves for project-scoped graphs (shared concept_genesis fallback)."""
     from app.models import GraphNode
     from app.db import db_engine
 
     proj = "test_routing_proj"
-    everything_hub = GraphNode(
-        _id="hub_everything_route",
-        title="Everything",
-        description="Universal anchor.",
-        node_type="CONCEPT",
-        project_ids=[proj],
-        metadata={"immutable": False, "is_genesis": True},
-    )
     driving_hub = GraphNode(
         _id="hub_driving_route",
         title="Autonomous Driving",
@@ -493,30 +483,10 @@ async def test_coordinated_persona_routing_and_fallback(monkeypatch):
         project_ids=[proj],
         metadata={"immutable": False},
     )
-    db_engine.upsert_node(everything_hub)
     db_engine.upsert_node(driving_hub)
-
-    # Mock routing LLM to select ONLY everything_hub for an unrelated biology topic
-    def mock_routing(messages, **kwargs):
-        sys_msg = messages[0]["content"]
-        if (
-            "persona_route_relevance" in sys_msg
-            or "Executive Knowledge Graph Router" in sys_msg
-        ):
-            return '{"selected_hub_ids": ["hub_everything_route"], "reasoning": "Biology paper unrelated to driving."}'
-        elif (
-            "collective_ingestion_linking" in sys_msg
-            or "Collective Graph Integration Coordinator" in sys_msg
-        ):
-            return '{"commands": [{"action": "CREATE_EDGE", "edge": {"source_id": "c1", "target_id": "hub_everything_route", "domain_hub_id": "hub_everything_route"}}]}'
-        return "{}"
-
-    monkeypatch.setattr(orchestrator.llm, "generate_chat_completion", mock_routing)
-
-    # Verify get_top_concept_hubs returns both
-    top_hubs = orchestrator.analytics.get_top_concept_hubs(project_id=proj)
-    hub_ids = [h[0].id for h in top_hubs]
-    assert "hub_everything_route" in hub_ids
+    genesis = db_engine.get_genesis_node(proj)
+    assert genesis is not None
+    assert genesis.title == "Everything"
 
 
 def test_radial_tree_invariant_drops_duplicate_ancestor_edges():

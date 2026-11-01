@@ -30,9 +30,9 @@ from app.models import (
     ExploredDomainContext,
     TargetGeneralizationPayload,
 )
-from app.agents.department_persona import (
-    DepartmentPersonaAgent,
-)
+from app.config import settings
+from app.agents.graph_navigator import GraphNavigator
+from app.services.graph_analytics import MutableTreeIndex, graph_analytics
 from app.services.logger import logger
 from app.services.event_queue import event_queue
 from app.services.graph_analytics import graph_analytics
@@ -47,7 +47,7 @@ from app.services.graph_ingestion_engine import graph_ingestion_engine
 class ExecutiveOrchestrator:
     """Executive Orchestrator agent acting as central intent classifier and lifecycle coordinator."""
 
-    def __init__(self, max_k_hubs: int = 5):
+    def __init__(self, max_k_hubs: int = 5):  # legacy param unused in v0.2
         self.db = db_engine
         self.analytics = graph_analytics
         self.llm = llm_gateway
@@ -533,78 +533,35 @@ class ExecutiveOrchestrator:
             style="green",
         )
 
+        navigator = GraphNavigator(project_id=project_id)
         yield {
-            "event": "persona_traversal_start",
-            "message": f"Executive Orchestrator identifying dynamic concept hubs in project '{project_id}' for query: '{query}'",
+            "event": "graph_traversal_start",
+            "navigator_id": navigator.navigator_id,
+            "genesis_id": navigator.genesis_node.id,
+            "message": f"Graph Navigator traversing mutable tree from '{navigator.genesis_node.title}' for query: '{query}'",
             "timestamp": time.time(),
         }
 
-        # Discover top concept hubs via rustworkx unweighted centrality
-        top_hubs = self.analytics.get_top_concept_hubs(
-            project_id=project_id, max_k=self.max_k_hubs
+        finding = await asyncio.to_thread(
+            navigator.explore_for_retrieval,
+            query=query,
+            chat_history=chat_history,
+            project_id=project_id,
         )
-        active_departments = [
-            DepartmentPersonaAgent(hub_node, score) for hub_node, score in top_hubs
-        ]
+        for touch_evt in finding.get("emitted_events", []):
+            yield touch_evt
 
-        if not active_departments:
-            yield {
-                "event": "no_personas_active",
-                "message": "No active concept hubs found in database yet. Falling back to direct conversation.",
-                "timestamp": time.time(),
-            }
-            async for event in self.execute_conversation_flow(
-                query, chat_history, project_id=project_id
-            ):
-                yield event
-            return
-
-        # Pre-Step 1 & 2: Mutually Exclusive Sub-Graph Traversal & Relevance Evaluation
-        top_hub_nodes = [dept.hub_node for dept in active_departments]
-        department_communities = self.analytics.partition_department_communities(
-            project_id=project_id, hubs=top_hub_nodes
-        )
-
-        for dept in active_departments:
-            yield {
-                "event": "persona_traversal_start",
-                "department_id": dept.department_id,
-                "department_name": dept.department_name,
-                "hub_id": dept.hub_node.id,
-                "message": f"Specialist Persona for '{dept.hub_node.title}' traversing adjacent concept edges...",
-                "timestamp": time.time(),
-            }
-
-        async def _traverse_dept(dept):
-            partition_ids = set(department_communities.get(dept.hub_node.id, []))
-            finding = await asyncio.to_thread(
-                dept.explore_concept_hub,
-                query=query,
-                chat_history=chat_history,
-                project_id=project_id,
-                max_depth=3,
-                partition_node_ids=partition_ids if partition_ids else None,
-            )
-            return dept, finding
-
-        traversal_results = await asyncio.gather(
-            *[_traverse_dept(dept) for dept in active_departments]
-        )
-
-        department_findings = []
-        for dept, finding in traversal_results:
-            department_findings.append(finding)
-            yield {
-                "event": "persona_traversal_active",
-                "department_id": dept.department_id,
-                "department_name": dept.department_name,
-                "traversed_node_ids": finding["traversed_node_ids"],
-                "timestamp": time.time(),
-            }
+        department_findings = [finding]
+        yield {
+            "event": "graph_traversal_active",
+            "navigator_id": navigator.navigator_id,
+            "traversed_node_ids": finding.get("traversed_node_ids", []),
+            "timestamp": time.time(),
+        }
 
         yield {
             "event": "retrieval_summary",
-            "message": f"Graph Retrieval completed across {len(active_departments)} concept departments for query: '{query}'",
+            "message": f"Graph retrieval completed from Genesis for query: '{query}'",
             "timestamp": time.time(),
         }
 
@@ -892,117 +849,45 @@ class ExecutiveOrchestrator:
             "timestamp": time.time(),
         }
 
-        # Step 2: Sub-Graph Traversal, Candidate Hub Assembly & Relevance Routing
-        top_hubs = self.analytics.get_top_concept_hubs(
-            project_id=project_id, max_k=self.max_k_hubs
-        )
+        # Step 2: Genesis tree traversal & linking
+        navigator = GraphNavigator(project_id=project_id)
         yield {
-            "event": "hubs_calculated",
-            "hubs": [
-                {"id": h.id, "title": h.title, "score": round(h.centrality_score, 4)}
-                for h in top_hubs
-            ],
-            "count": len(top_hubs),
+            "event": "graph_traversal_start",
+            "navigator_id": navigator.navigator_id,
+            "genesis_id": navigator.genesis_node.id,
+            "message": f"Graph Navigator exploring mutable tree for ingestion of '{title}'",
             "timestamp": time.time(),
         }
 
-        # Phase 1: Pre-Check Persona Relevance Filtering (delegated to DepartmentPersonaAgent)
-        selected_hub_ids = DepartmentPersonaAgent.filter_relevant_hubs(
-            doc_title=title,
-            intra_doc_nodes=intra_doc_nodes,
-            candidate_hubs=[h.node for h in top_hubs],
+        traversal_finding = await asyncio.to_thread(
+            navigator.traverse_mutable_tree_from_genesis,
+            query=query,
+            chat_history=chat_history,
             project_id=project_id,
         )
+        for touch_evt in traversal_finding.get("emitted_events", []):
+            yield touch_evt
 
-        # Filter active departments to ONLY the selected hubs
-        selected_hub_set = set(selected_hub_ids)
-        active_departments = [
-            DepartmentPersonaAgent(h.node, h.centrality_score)
-            for h in top_hubs
-            if h.id in selected_hub_set
-        ]
-
-        evt_route_done = {
-            "event": "persona_routing_completed",
-            "active_hub_ids": [d.hub_node.id for d in active_departments],
-            "active_hub_titles": [d.hub_node.title for d in active_departments],
-            "bypassed_hub_titles": [
-                h.title
-                for h in top_hubs
-                if h.id not in {d.hub_node.id for d in active_departments}
-            ],
-            "message": (
-                f"Persona routing completed: activated {len(active_departments)} domain"
-                f" hub(s) ({', '.join(d.hub_node.title for d in active_departments)})."
-            ),
-            "timestamp": time.time(),
-        }
-        yield evt_route_done
-        print(f"[ExecutiveOrchestrator] {evt_route_done['message']}")
-
-        # Partition network into mutually exclusive sub-graph communities anchored to detected active hubs
-        top_hub_nodes = [dept.hub_node for dept in active_departments]
-        department_communities = self.analytics.partition_department_communities(
-            project_id=project_id, hubs=top_hub_nodes, max_depth=5
+        explored_nodes = list(
+            {n.id: n for n in traversal_finding.get("explored_nodes", [])}.values()
         )
+        collective_explored_trees: Dict[str, ExploredDomainContext] = {
+            navigator.genesis_node.id: ExploredDomainContext(
+                department_id=navigator.navigator_id,
+                department_name=navigator.navigator_name,
+                hub_node=navigator.genesis_node,
+                explored_nodes=explored_nodes,
+            )
+        }
+
         yield {
-            "event": "partitions_calculated",
-            "partitions": {
-                dept.department_name: list(
-                    department_communities.get(dept.hub_node.id, [])
-                )
-                for dept in active_departments
-            },
+            "event": "graph_traversal_active",
+            "navigator_id": navigator.navigator_id,
+            "traversed_node_ids": traversal_finding.get("traversed_node_ids", []),
             "timestamp": time.time(),
         }
 
-        # Phase 2: Parallel Partitioned Sub-Graph Traversal for active personas
-        collective_explored_trees: Dict[str, ExploredDomainContext] = {}
-
-        for dept in active_departments:
-            yield {
-                "event": "persona_traversal_start",
-                "department_id": dept.department_id,
-                "department_name": dept.department_name,
-                "hub_id": dept.hub_node.id,
-                "message": f"Specialist Persona for '{dept.hub_node.title}' exploring sub-graph partition during ingestion...",
-                "timestamp": time.time(),
-            }
-
-            partition_ids = set(department_communities.get(dept.hub_node.id, []))
-            traversal_finding = await asyncio.to_thread(
-                dept.explore_concept_hub,
-                query=query,
-                chat_history=chat_history,
-                project_id=project_id,
-                max_depth=5,
-                partition_node_ids=partition_ids if partition_ids else None,
-            )
-
-            for touch_evt in traversal_finding.get("emitted_events", []):
-                yield touch_evt
-
-            yield {
-                "event": "persona_traversal_active",
-                "department_id": dept.department_id,
-                "department_name": dept.department_name,
-                "traversed_node_ids": traversal_finding["traversed_node_ids"],
-                "timestamp": time.time(),
-            }
-
-            # Store explored nodes per department for collective linking and post-reorganization
-            dept_nodes_dict = {
-                n.id: n for n in traversal_finding.get("explored_nodes", [])
-            }
-            dept_nodes_dict[dept.hub_node.id] = dept.hub_node
-            collective_explored_trees[dept.hub_node.id] = ExploredDomainContext(
-                department_id=dept.department_id,
-                department_name=dept.department_name,
-                hub_node=dept.hub_node,
-                explored_nodes=list(dept_nodes_dict.values()),
-            )
-
-        # Phase 3: Collective Multi-Hub Ingestion Linking (Radial Invariant & Surjective Coverage)
+        # Phase 3: Tree-grounded ingestion linking
         # Dedicated Concept Cache Map for intra concepts and explored target nodes
         linking_concept_mapper = PromptIdMapper(prefix="concept")
 
@@ -1098,43 +983,7 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
             print(f"[ExecutiveOrchestrator] Collective ingestion linking error: {e}")
             collective_commands = []
 
-        # Execute collective linking commands into MongoDB with Radial Single-Attachment Enforcement
-        # Map: (concept_id, domain_hub_id) -> chosen command (to enforce at most 1 connection per domain)
-        domain_connections_tracker: dict[tuple[str, str], dict[str, Any]] = {}
-        non_edge_commands: list[dict[str, Any]] = []
-
-        # Pre-populate domain lookup map: node_id -> domain_hub_id
-        node_to_domain_map: dict[str, str] = {}
-        for h_id, d_info in collective_explored_trees.items():
-            for n in d_info.explored_nodes:
-                node_to_domain_map[n.id] = h_id
-
-        for cmd in collective_commands:
-            action = cmd.get("action")
-            if action == "CREATE_EDGE":
-                edge = cmd.get("edge", {})
-                src = edge.get("source_id")
-                tgt = edge.get("target_id")
-                domain = edge.get("domain_hub_id") or node_to_domain_map.get(tgt)
-                if src and tgt and domain:
-                    pair_key = (src, domain)
-                    # If already connected to this domain, prioritize deeper intermediate node over root hub
-                    if pair_key not in domain_connections_tracker:
-                        domain_connections_tracker[pair_key] = cmd
-                    else:
-                        existing_cmd = domain_connections_tracker[pair_key]
-                        existing_tgt = existing_cmd.get("edge", {}).get("target_id")
-                        if existing_tgt == domain and tgt != domain:
-                            # Replace hub link with more specific intermediate node link
-                            domain_connections_tracker[pair_key] = cmd
-                else:
-                    non_edge_commands.append(cmd)
-            else:
-                non_edge_commands.append(cmd)
-
-        filtered_commands = (
-            list(domain_connections_tracker.values()) + non_edge_commands
-        )
+        filtered_commands = list(collective_commands)
 
         # Defensive Guard: Verify Surjective Coverage (Every concept must connect to at least one node)
         connected_concepts = {
@@ -1162,17 +1011,13 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
                 )
 
         for cmd in filtered_commands:
-            # Map persona details if missing
-            tgt = cmd.get("edge", {}).get("target_id")
-            dept_id = node_to_domain_map.get(tgt)
-            if dept_id and dept_id in collective_explored_trees:
-                cmd["department_name"] = collective_explored_trees[
-                    dept_id
-                ].department_name
-                cmd["persona_id"] = collective_explored_trees[dept_id].department_id
+            cmd.setdefault("department_name", navigator.navigator_name)
+            cmd.setdefault("persona_id", navigator.navigator_id)
             evt = self.ingestion_engine.execute_single_command(cmd, title, proj_list)
             if evt:
                 yield evt
+
+        graph_analytics.refresh_tree_metadata(project_id)
 
         # Phase 3.5: Targeted Generalization Pass on Affected Target Nodes
         # Gathers all mutable target nodes that received new connections during this ingestion pass
@@ -1196,31 +1041,30 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
             ):
                 yield gen_evt
 
-        # Phase 4: Consolidated Post-Linking Macro-Reorganization
-        # Runs ONCE after all edges are established into MongoDB
-        for dept in active_departments:
-            dept_context = collective_explored_trees.get(dept.hub_node.id)
-            dept_explored = (
-                dept_context.explored_nodes if dept_context else [dept.hub_node]
-            )
-            reorg_res = await asyncio.to_thread(
-                dept.reorganize_concept_hub,
-                explored_nodes=dept_explored,
-                project_id=project_id,
-                degree_threshold=5,
-            )
-
-            for reorg_evt in reorg_res.get("emitted_events", []):
-                yield reorg_evt
-
-            for cmd in reorg_res.get("commands", []):
-                cmd["department_name"] = dept.department_name
-                cmd["persona_id"] = dept.department_id
-                evt = self.ingestion_engine.execute_single_command(
-                    cmd, title, proj_list
-                )
-                if evt:
-                    yield evt
+        # Phase 4: Post-linking reorganization (explored path + ancestors)
+        tree = MutableTreeIndex(project_id=project_id)
+        reorg_ids: set[str] = {n.id for n in explored_nodes}
+        for nid in list(reorg_ids):
+            for anc in tree.ancestors(nid):
+                reorg_ids.add(anc)
+        reorg_nodes = [
+            self.db.get_node(nid) for nid in reorg_ids if self.db.get_node(nid)
+        ]
+        reorg_res = await asyncio.to_thread(
+            navigator.reorganize_mutable_hub,
+            explored_nodes=reorg_nodes,
+            project_id=project_id,
+            degree_threshold=settings.DEGREE_THRESHOLD,
+        )
+        for reorg_evt in reorg_res.get("emitted_events", []):
+            yield reorg_evt
+        for cmd in reorg_res.get("commands", []):
+            cmd["department_name"] = navigator.navigator_name
+            cmd["persona_id"] = navigator.navigator_id
+            evt = self.ingestion_engine.execute_single_command(cmd, title, proj_list)
+            if evt:
+                yield evt
+        graph_analytics.refresh_tree_metadata(project_id)
 
         yield {
             "event": "ingestion_completed",

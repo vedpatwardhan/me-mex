@@ -15,6 +15,7 @@ CRITICAL INVARIANTS:
    - For all other concept nodes, synthesize an `updated_title` and `updated_description` that cleanly accommodate the new connections alongside its existing connections.
    - The updated title should reflect an umbrella or cohesive domain category containing all its connected concepts.
    - The updated description should synthesize the main facets and relationships represented by its connections.
+   - **Miscellaneous attachments**: neighbors linked as taxonomic outliers (not yet assigned to a sub-hub) are still **in-scope for the parent**. Widen the parent description to acknowledge them without forcing sub-category language.
 3. CONCISENESS & CLARITY:
    - Titles should be clear, concise, and academic/conceptual (2-6 words).
    - Descriptions should be 2-4 comprehensive sentences capturing the overarching domain scope.

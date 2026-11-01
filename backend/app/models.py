@@ -113,6 +113,7 @@ class GraphEdge(BaseModel):
     status: str = "PRIMARY_ACTIVE"  # "PRIMARY_ACTIVE" | "HISTORICAL_SUPERSEDED"
     provenance_quote: Optional[str] = None
     project_ids: List[str] = Field(default_factory=lambda: ["global"])
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: float = Field(default_factory=time.time)
 
     # Aliases for frontend compatibility

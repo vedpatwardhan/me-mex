@@ -1,6 +1,6 @@
 # Master Architecture & Technical Specification: Me-Mex
 
-> **Document Purpose**: This document serves as the single master technical specification for **Me-Mex**, unifying system architecture, clean 3-element graph topology, Node Mutability Hierarchy, 3-step persona workflows, WebGL UI/UX specifications, REST/SSE API endpoints, FastMCP tools, and backend test specifications.
+> **Document Purpose**: Single master technical specification for **Me-Mex** (v0.2): system architecture, 3-element graph topology, mutability hierarchy, **Genesis-rooted tree traversal**, graph navigator workflows, engine-dispatch reorganization, WebGL UI/UX, REST/SSE API, FastMCP tools, and backend test specifications.
 
 ---
 
@@ -12,12 +12,13 @@ Me-Mex is an **Agentic External Memory System** designed to function as an exter
 1. **Manual Overhead & Linear Scrolling**: Reviewing massive paper additions daily via linear text file scrolling is inefficient.
 2. **Context Fragmentation**: Manually linking new papers to past literature or updating concept clusters requires high cognitive load.
 3. **Implicit Relationships**: Complex cross-paper dynamics (supersedes, contrasts, co-occurs) are implicit rather than visually navigable.
+4. **Cascade Depth Trap (v0.2 fix)**: Prior wrapper-only splits under every overflowing hub pushed subtrees deeper on each reorg; v0.2 uses **lateral sibling splits** everywhere except Genesis.
 
 ---
 
 ## 2. Core Architecture & System Lifecycle
 
-Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** loop. While **Conversation** streams a response straightaway, **Retrieval** and **Ingestion** execute preliminary processing steps before culminating in a final **Conversation** response:
+Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** loop. **Conversation** streams immediately; **Retrieval** and **Ingestion** run graph phases first, then a final **Conversation** response.
 
 ```
        ┌──────────────────────────────────────────────────────────┐
@@ -27,247 +28,208 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
                                     ▼
        [PHASE 0: UNIFIED CONVERSATIONAL GATEWAY (POST /api/chat)]
        - Executive Orchestrator analyzes query & chat history
-       - Routes execution to ONE of three internal paths:
-           1. CONVERSATION (Direct execution -> Conversation response)
-           2. RETRIEVAL    (Step 1: Partitioned Hub Traversal -> Step 2: Relevance Evaluation -> Final Conversation)
-           3. INGESTION    (Phase 1: Fetch & Intra-Doc Graph -> Phase 2: Hub Traversal -> Phase 3: Linking -> Phase 3.5: Generalization -> Phase 4: Reorganization -> Final Conversation)
+       - Routes to ONE of three paths:
+           1. CONVERSATION (direct LLM stream)
+           2. RETRIEVAL    (Genesis tree traversal → conversation)
+           3. INGESTION    (Phase 1 intra-doc → Phase 2 tree traversal → Phase 3 linking
+                            → Phase 3.5 generalization → Phase 4 reorg → conversation)
                                     │
            ┌────────────────────────┼────────────────────────┐
            │                        │                        │
            ▼                        ▼                        ▼
      [CONVERSATION]            [RETRIEVAL]              [INGESTION]
-  (Direct Execution)      (Step 1: Hub Traversal    (Phase 1: Fetch & Build Intra-Doc
-  - Immediate LLM         - Step 2: Domain Node      Phase 2: Traversal & Relevance
-    response stream          Relevance Evaluation)   Phase 3: Collective Linking
-                                                     Phase 3.5: Target Generalization
-                                                     Phase 4: n // 2 Outward Reorg)
            │                        │                        │
            └────────────────────────┴────────────────────────┘
                                     │
                                     ▼
                  [FINAL CONVERSATION RESPONSE STREAM]
-                 - Synthesizes retrieved / ingested context
-                 - Streams final answer to user in chat UI
 ```
 
 ### Operational Path Breakdown
 
-1. **Path 1: `CONVERSATION` (Single-Step Direct Response)**
-   - **Direct Execution**: Fast-path for greetings, quick questions, and direct synthesis without graph overhead. Streams the conversation response straightaway.
-2. **Path 2: `RETRIEVAL` (Two Pre-Steps $\rightarrow$ Final Conversation Response)**
-   - **Pre-Step 1 (Partitioned Sub-Graph Traversal)**: Discovers unweighted eigenvector hubs and assigns Specialist Personas to explore mutually exclusive sub-graph partitions.
-   - **Pre-Step 2 (Relevance Evaluation)**: Personas evaluate domain relevance across their explored nodes, user prompt, and conversation history (`chat_history`).
-   - **Final Conversation**: With enriched topological graph context assembled, the system triggers the final conversation step to generate and stream the response to the user.
-3. **Path 3: `INGESTION` (5 Sequential Ingestion Phases $\rightarrow$ Final Conversation Response)**
-   - **Phase 1 (Document Fetching & Intra-Document Graph Construction)**: Orchestrator calls `ingest_document_tool` to fetch and extract content dynamically:
-     - **Universal Source Resolution**: Transparently ingests remote HTTP/HTTPS URLs (arXiv, blogs, HTML articles) and local filesystem references (`file:///...`, absolute paths `/Users/...`, `~/...`). Dispatches to format-specialized extractors:
-       - **PDFs (`.pdf`, `%PDF`)**: Binary stream reading, ArXiv metadata detection, PDF layout text extraction.
-       - **HTML (`.html`, `.htm`)**: Clean markdown extraction using Trafilatura with title metadata extraction.
-       - **Markdown (`.md`, `.markdown`)**: Direct UTF-8 ingestion preserving existing heading hierarchies.
-       - **Plain Text / Notes (`.txt`, `.log`, raw text)**: UTF-8 ingestion with automatic top-level header synthesis (`# {stem}`).
-     - **Scale-Adaptive Document Chunking (1 to 30 Passages)**: Dynamically partitions the text into $N \in [1, 30]$ passages:
-       - Tier 1 ($\le 1,500$ chars, X posts / quick notes): **1 chunk** (no artificial splitting).
-       - Tier 2 ($1,500 < L \le 4,000$ chars, short memos): **2 chunks**.
-       - Tier 3 ($4,000 < L \le 8,000$ chars, medium articles): **3 chunks**.
-       - Tier 4 ($8,000 < L \le 14,000$ chars, multi-section overviews): **4 chunks**.
-       - Tier 5 ($14,000 < L \le 25,000$ chars, short papers / reports): **5 chunks**.
-       - Tier 6 ($L > 25,000$ chars up to $\ge 300\text{k}$ chars): scales from 5 to 30 chunks:
-         $$N_{\text{target}} = \min\left(30, \max\left(5, 5 + \left\lfloor \frac{\text{len}(\text{text}) - 25000}{11000} \right\rfloor\right)\right)$$
-     - **LLM Context Budget & Ceiling Guarantee**: Individual chunks are bounded at $\le 45,000$ characters (~13,000 tokens), preventing Ministral 3-8B's 16,384-token context window from overflowing while allowing 1,536 tokens for concept extraction.
-     - **Density-Aware Concept Extraction & Scale-Aware Consolidation**:
-       - Passages extract **1 to 3 atomic concepts** (1 for focused notes, 2–3 for dense passages; max 3).
-       - Canonical consolidation enforces strict cardinality targets: **5 to 7 canonical concepts** for standard documents ($> 6$ raw concepts), and **1 to 3 canonical concepts** for concise documents or short notes ($\le 6$ raw concepts).
-   - **Phase 2 (Sub-Graph Traversal & Relevance Evaluation)**: Performs partitioned sub-graph traversal across concept hubs. Traversal presents immutable leaves as context only and strictly blocks them from expanding deeper hops.
-   - **Phase 3 (Collective Cross-Document Linking)**: Personas link newly ingested intra-document concepts to existing mutable domain hubs.
-   - **Phase 3.5 (Targeted Concept Generalization Pass)**: Dedicated LLM pass isolating all mutable nodes that received new connections during Phase 3. Synthesizes an updated umbrella title and description to accommodate the expanded conceptual domain before reorganization occurs. (The primordial anchor `'Everything'` has its description generalized while keeping its title intact).
-   - **Phase 4 (Scenario-Aware $n // 2$ Outward Reorganization)**: Screens over-clustered hubs against threshold $\tau$ and reorganizes them into sub-concepts strictly bounded by $\le \lfloor n / 2 \rfloor$, mandating updated parent `hub_title` and `hub_description` in MongoDB.
-   - **Final Conversation**: Once graph integration and reorganization complete, the system triggers the final conversation step to provide an executive summary and confirmation response to the user.
+1. **Path 1: `CONVERSATION`** — Direct LLM response without graph traversal.
+2. **Path 2: `RETRIEVAL`**
+   - **Step 1**: Single **`GraphNavigator`** walks the **mutable tree from Genesis** (`traverse_mutable_tree_from_genesis`), presenting mutable children and read-only immutable neighbors each hop (immutable nodes are context only; frontier expansion is mutable-only).
+   - **Step 2**: Final conversation synthesizes retrieved graph context.
+3. **Path 3: `INGESTION`**
+   - **Phase 1**: Document fetch, scale-adaptive chunking (1–30 passages), LLM concept extraction and consolidation (same tiering as v0.1).
+   - **Phase 2**: Genesis-rooted tree traversal (same navigator as retrieval).
+   - **Phase 3**: Collective cross-document linking (immutable intra-doc concepts → best mutable parent).
+   - **Phase 3.5**: Target generalization on all mutable nodes that received new edges; **miscellaneous** neighbors remain in-scope for parent description updates.
+   - **Phase 4**: `reorganize_mutable_hub` on explored path + ancestors when degree ≥ `DEGREE_THRESHOLD` (default **7**); engine commits **wrapper** split at Genesis only, **lateral** split elsewhere.
 
 ---
 
 ## 3. Clean 3-Element Topology & Universal Storage Schema
 
-### Graph Topology & Node/Edge Classification
+### Graph Topology
 
-The active graph network operates on an eventual **Spherical Topology Model**:
-- **Periphery (Outer Shell)**: `ROOT` nodes (immutable base documents/papers) and extracted factual **Intra-Document Concepts** (immutable evidence).
-- **Core (Inner Hubs)**: Dynamic, mutable **Persona Domain Hubs & Intermediate Nodes** that cluster and evolve over time.
-- **Typed Relation Edges**: Connect immutable periphery concepts inward to mutable domain hubs or link core hubs together.
+- **Periphery**: `ROOT` nodes and **immutable** intra-document concepts (evidence).
+- **Core**: **Mutable** domain hubs and intermediates on a **`SUBSET_OF` tree backbone** rooted at Genesis (`concept_genesis` / title **Everything**).
+- **Typed edges**: Semantic relations (`RELEVANT_TO`, `SUPERSEDES`, etc.) plus **`SUBSET_OF`** for hierarchy.
 
 ```mermaid
 graph TD
     subgraph Active Graph Network Topology (No Passages)
-        Paper[Root Node: Paper / Blog (Immutable)] -->|RELEVANT_TO| ConceptPixel[Intra-Document Concept: Pixel World Models (Immutable)]
-        Paper -->|RELEVANT_TO| ConceptLatent[Intra-Document Concept: Latent World Models (Immutable)]
-        ConceptPixel -->|SUBSET_OF| ConceptH[Persona Domain Hub Node: World Models (Mutable)]
-        ConceptLatent -->|SUBSET_OF| ConceptH
-        ConceptH <==>|SUPERSEDES| DownstreamTask[Persona Intermediate Node: MPC Planning (Mutable)]
+        Paper[Root Node: Paper (Immutable)] -->|RELEVANT_TO| ConceptPixel[Intra-Doc Concept (Immutable)]
+        ConceptPixel -->|RELEVANT_TO| HubA[Mutable Hub A]
+        HubA -->|SUBSET_OF| Genesis[Genesis: Everything (Mutable)]
+        HubB[Mutable Hub B] -->|SUBSET_OF| Genesis
     end
 
-    subgraph Out-of-Graph Database Storage
-        Passage1[Plain Text Passage Chunk #101]
-        Passage2[Plain Text Passage Chunk #102]
+    subgraph Out-of-Graph Storage
+        Passage1[Passage Chunk]
     end
 
-    ConceptLatent -.->|ID Pointers in Metadata| Passage1
-    ConceptLatent -.->|ID Pointers in Metadata| Passage2
+    ConceptPixel -.->|passage_ids| Passage1
 ```
 
 ### Node & Edge Schema Taxonomy
 
-1. **`ROOT` Nodes (Immutable)**
-   - Base node for an ingested paper, blog, transcript, or X post, shortly summarizing everything in that document. Cannot be modified or deleted.
-2. **`CONCEPT` Nodes (Immutable vs. Mutable)**
-   - **Intra-Document Concepts (`immutable: True`)**: Direct concepts originating from an ingested document. Preserves ground-truth evidence; personas can only link to them.
-   - **Domain & Intermediate Nodes (`immutable: False`)**: Persona domain hubs and bridge nodes created during graph ingestion. Can be generalized (`EDIT_CONCEPT`) or restructured (`SPLIT_CONCEPT`).
-3. **Qualitative Relation Edges (`GraphEdge`)**
-   - Typed edges with qualitative descriptions contextualizing relationships:
-     - **`SUBSET_OF`**: Concept $A$ is a specialized sub-type or narrower instance of Concept $B$.
-     - **`SUPERSET_OF`**: Concept $A$ is an umbrella category or broader domain containing Concept $B$.
-     - **`RELEVANT_TO`**: General semantic relevance link connecting an intra-document concept to a domain hub or intermediate concept.
-     - **`BUILDS_UPON`**: Incremental theoretical or technical extension of an existing concept.
-     - **`SUPERSEDES`**: New SOTA paradigm replacing or improving upon a historical concept.
-     - **`PARALLEL_TO`**: Contemporary parallel approaches or competing paradigms.
-     - **`CONTRASTS_WITH`**: Asymmetric contrast or explicit contradiction between concepts.
+1. **`ROOT` (immutable)** — One per ingested document; not a reorg target.
+2. **`CONCEPT`**
+   - **Immutable intra-doc** (`metadata.immutable: true`) — Extracted evidence; agents may **link to** them, not edit/split/delete.
+   - **Mutable hubs** (`immutable: false`) — Created during ingestion; `EDIT_CONCEPT`, `SPLIT_CONCEPT`, generalization allowed.
+3. **Genesis** — `metadata.is_genesis`; title locked to **Everything**; **single user/LLM-editable `description`** (project scope).
+4. **Edges (`GraphEdge`)**
+   - Qualitative `description` (relation type).
+   - **`metadata.link_class`**: `"clustered"` (default) | `"miscellaneous"` — outlier bucket under a parent; still valid for generalization and search, not excluded from Phase 3.5.
 
-### First-Class Temporal Reasoning
+Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_depth_from_genesis`, `subtree_mut_height`, `strahler_order`, `subtree_immutable_count`.
 
-All nodes and edges store explicit unix timestamps (`created_at`, `updated_at`).
-- **Agent Reasoning**: Specialist Persona agents receive exact creation/update timestamps in their sub-graph context window, enabling natural LLM temporal reasoning (*"Concept A (2024) is superseded by Concept B (2026)"*).
-- **Frontend Timeline Visualizer**: The WebGL UI visualizer (`react-force-graph-2d`) provides an optional temporal timeline toggle, applying color-coded visual highlights across user-selected time windows.
+### Hierarchy of Mutability
 
-The graph network enforces a strict **Hierarchy of Mutability**:
+| Layer | Mutability | Reorg commit shape |
+|-------|------------|-------------------|
+| Genesis (`Everything`) | Mutable; title fixed | **Wrapper** — department hubs under Genesis |
+| Other mutable hubs | Mutable | **Lateral** — dissolve hub into siblings under `Parent(H)`; unclustered immutables promote to parent as `miscellaneous` |
+| Intra-doc concepts | Immutable | N/A |
+| Root nodes | Immutable | N/A |
 
-1. **Universal Genesis Concept Node (`concept_genesis` / "Everything") — MUTABLE**
-   - Primordial universal mutable knowledge anchor initialized automatically in every empty workspace.
-   - Solves the hub cold-start paradox: provides the initial "Persona Specialist: Everything" anchor for the first document's intra-document concepts to attach to, later subdividing organically via `SPLIT_CONCEPT` as degree exceeds threshold.
-2. **Root Nodes (`ROOT`) — IMMUTABLE**
-   - Base node for a paper, blog, transcript, or X post, summarizing the document. Cannot be modified or deleted. Strictly excluded from being hubs.
-3. **Intra-Document Concepts (`node_type="concept"`, Extracted) — IMMUTABLE**
-   - Concept nodes directly originating from and connected to a Root Node during ingestion. Preserves factual ground truth.
-   - Personas **cannot** modify, restructure, or delete these nodes; they can **only link** from them. Strictly excluded from being hubs.
-4. **Persona Domain Hubs & Intermediate Concepts — MUTABLE**
-   - Concept nodes created deeper in the graph by personas during ingestion for linking, synthesizing, or grouping concepts across documents.
-   - Personas **can** create, edit/generalize (`EDIT_CONCEPT`), or restructure/split (`SPLIT_CONCEPT`) these nodes as new documents arrive.
-   - Hub Centrality dynamically identifies top mutable hubs ($k \le 5$, relative score threshold $s_i \ge 0.3 \times s_{\max}$). All Root and Immutable Concept nodes are 100% excluded from candidate hubs.
-
-```json
-{
-  "id": "concept_latent_world_models",
-  "node_class": "CONCEPT",
-  "node_type": "concept",
-  "title": "Latent-Space World Models",
-  "description": "Atomic self-evolving Markdown description & synthesis across papers...",
-  "metadata": {
-    "theme_id": "vla_research",
-    "domain_tags": ["world_models", "latent_dynamics"],
-    "status": "PRIMARY_ACTIVE",
-    "immutable": false
-  },
-  "passage_ids": ["pass_chunk_101", "pass_chunk_102"]
-}
-```
+**Hub discovery (removed in v0.2):** No eigenvector centrality, Voronoi partitions, or multi-persona routing. Construction is **lateral** except at Genesis; search is **top-down from Genesis**.
 
 ---
 
-## 4. Unified 3-Step Multi-Agent Persona Workflow
+## 4. Graph Navigator Workflow (v0.2)
 
-Both Retrieval and Ingestion operate on a unified multi-agent pattern structured around **Departments** (Thematic Concept Hubs):
+**Module:** `app/agents/graph_navigator.py` — one navigator per ingestion/retrieval, anchored on project Genesis.
 
-1. **Mutually Exclusive Sub-Graph Exploration:**
-   - **Unweighted Topological Hub Detection**: Identifies foundational keystone concepts in real time (<5ms) using `rustworkx` unweighted eigenvector centrality with relative thresholding ($s_i \ge 0.30 \times s_{\max}$). Each detected concept hub is assigned a dedicated Specialist Persona representing domain expertise for that concept cluster.
-   - **Mutually Exclusive Voronoi Graph Partitioning**: The graph network is partitioned via multi-source topological shortest-path (Voronoi) distance anchored directly to the detected department hubs ($H = [h_1, \dots, h_m]$). Every node $v$ is assigned to its closest hub $h^*(v) = \arg\min d(v, h_i)$ (with ties resolved by hub centrality). Partitions are keyed directly by `hub_node.id`, guaranteeing $P_i \cap P_j = \emptyset$ and eliminating key-name mismatches.
-   - **Iterative Multi-Hop Traversal**: Each Concept Hub Persona independently expands its strictly assigned sub-graph partition (`partition_node_ids`) up to `max_depth = 3`.
-   - **Root Node Traversal Blocking**: Traversal visits Root Nodes for provenance context and summaries, but strictly **blocks Root Nodes from expanding further hops**.
-   - **Immutable Leaf Frontier Blocking**: Candidate neighbors explicitly carry their mutability flag (`immutable: bool`). Immutable leaves are presented strictly as contextual grounding; the persona traversal engine defensively rejects them from expanding as frontier hops (`if candidate_neighbors[idx]["immutable"]: continue`).
-   - **Per-Node Exploration Rationales**: Persona exploration prompts require structured `SelectedNeighborItem` outputs detailing the exact conceptual rationale for selecting each node for traversal.
-2. **Relevance Evaluation:**
-   - Each Specialist Persona evaluates the relevance of its accumulated domain nodes, search history, user prompt, and conversation history (`chat_history`) independently.
-3. **Collective Linking, Phase 3.5 Generalization & 3-Step Concept Reorganization:**
-   - Consolidated concepts are ingested as **Immutable Intra-Document Concepts** on the periphery of the spherical topology.
-   - During collective linking, personas integrate intra-document concepts via typed edges connecting periphery concepts to core mutable domain hubs.
-   - **Phase 3.5: Targeted Node Generalization Pass**:
-     - Runs immediately after linking and before macro reorganization.
-     - Identifies all mutable concept nodes that received new connections during the current ingestion.
-     - Prompts Gemini (`target_node_generalization.md`) with the target's previous title, description, and newly attached concepts to synthesize a generalized umbrella title and comprehensive domain description.
-     - Updates MongoDB records directly. (The primordial genesis node `'Everything'` is strictly exempt from title mutation while its description is updated).
-   - **Priority Immutable-First Outward Concept Hub Reorganization**:
-     - **Step 1 (Candidate Screening & Discovery)**:
-       - Computes dynamic degree threshold $\tau = \max(3, \lfloor \text{p75}(\text{degrees}) \rfloor)$ across the graph.
-       - Discovers qualifying mutable hubs ($\text{deg}(H) \ge \tau$) and prompts the persona to produce structured candidate rationales (`DiscoveredCandidateItem` with mandatory `rationale` emitted over telemetry).
-     - **Step 2 (Neighborhood Analysis & Scenario-Aware $n // 2$ Partitioning)**:
-       - Direct neighbors $N(H)$ are classified into immutable leaves $N_{imm}$ and mutable concepts $N_{mut}$.
-       - **Strict Cardinality Ceilings**: The number of formulated sub-concepts is mathematically bounded by $\max(1, \lfloor n / 2 \rfloor)$ across all three scenarios:
-         1. *Purely Immutable ($|N_{mut}| == 0$)*: Leaves move outward into $\le \lfloor |N_{imm}| / 2 \rfloor$ intermediate sub-concepts. (Special case: if $|N_{imm}| = 1$, creates exactly 1 sub-concept).
-         2. *Mixed ($|N_{mut}| > 0$, Phase 2a)*: Immutable leaves move outward into $\le \lfloor |N_{imm}| / 2 \rfloor$ intermediate sub-concepts (with 1 created if $|N_{imm}| = 1$). Hub degree is recalculated ($\text{deg}'(H) = |N_{mut}| + k_{new}$). If $\text{deg}'(H) < \tau$, reorganization finishes. If still $\ge \tau$, Phase 2b executes on remaining mutable concepts bounded by $\le \lfloor \text{deg}'(H) / 2 \rfloor$.
-         3. *Purely Mutable ($|N_{imm}| == 0$)*: Partitions mutable concepts into $\le \lfloor |N_{mut}| / 2 \rfloor$ sub-concepts.
-       - **Compulsory Parent Hub Updates**: Every `SPLIT_CONCEPT` command mandates updated `hub_title` and `hub_description` payloads. The engine mutates the parent hub in MongoDB (preserving `'Everything'`'s title) to formally establish its higher-level umbrella role over the new sub-concepts.
-     - **Step 3 (Neighbor Edge Re-Wiring & Non-Destructive Invariant)**:
-       - Deletes direct edges from $H$ to rewired neighbors, connecting them to the new sub-concepts with new sub-concepts linked to $H$ via `SUBSET_OF`.
-       - The parent hub $H$ is **never deleted**, preserving the hierarchical anchor of the tree.
-   - Because intra-document nodes are immutable and graph partitions are mutually exclusive, persona updates proceed completely independently without conflicts.
+**Prompts:** `graph_tree_traversal.md`, `graph_link_intradoc.md`, `graph_reorg_discover.md`, `graph_reorg_split.md`, `graph_reorg_rewire.md`, plus orchestrator prompts (`collective_ingestion_linking`, `target_node_generalization`, etc.).
 
-### Integer Indexing Prompt Protocol & Dual-Cache Invariant
-To ensure robust, deterministic LLM interaction and completely eliminate character transposition/truncation errors with raw database IDs (e.g. MongoDB UUIDs/hex IDs), all prompt-boundary communications operate over clean, 1-based integer indices:
-- **Dual-Cache Isolation**: Two distinct, non-overlapping `PromptIdMapper` instances are maintained across agent lifecycles:
-  1. `passage_mapper`: Isolates passage chunk boundaries (`passage_id <-> int`).
-  2. `concept_mapper`: Isolates concept node boundaries (`concept_id <-> int`).
-- **Prompt Isolation Invariant**: Raw database string IDs are strictly stripped and replaced by integer indices (`passage_indices`, `candidate_index`, `neighbor_index`, `source_index`, `target_index`) inside structured prompts and output schemas (`ReorgDiscoveryPayload`, `ReorgRewirePayload`, `EdgeCommandPayload`, `CanonicalConceptItem`).
-- **Boundary Translation**: The agent orchestrator and persona agents dynamically project registered string IDs to integer indices before LLM generation and translate received integer indices back to canonical database IDs prior to executing mutations or persisting records.
+### 4.1 Tree traversal
+
+1. Start at `get_genesis_node(project_id)`; inject Genesis **description** as scope.
+2. Each hop: LLM selects mutable **tree children** (`SUBSET_OF` backbone); immutables shown but not expandable.
+3. Depth capped by `MAX_TRAVERSAL_DEPTH` (default 3–4); depth penalty in prompt.
+4. Returns `explored_nodes`, `traversed_node_ids`, SSE `node_touched` events.
+
+### 4.2 Linking
+
+- `link_intradoc_concepts` emits zero-consensus commands (`CREATE_EDGE`, `CREATE_INTERMEDIATE`, `EDIT_CONCEPT`, `SPLIT_CONCEPT` on mutable nodes only).
+- Attach with `link_class: miscellaneous` when no matching sub-branch exists (including under Genesis); Phase 3.5 still runs on that parent.
+
+### 4.3 Reorganization (LLM proposes; engine commits)
+
+**Single LLM payload** (discover → split sub-concepts → rewire). The LLM does **not** emit `SPLIT_LATERAL` vs `SPLIT_WRAPPER`.
+
+**On `SPLIT_CONCEPT` commit** (`graph_ingestion_engine.py`):
+
+```python
+if target.is_genesis:
+    apply_wrapper_split(payload)   # sub-hubs under Everything
+else:
+    apply_lateral_split(payload)   # siblings under Parent(H); UNCLUSTERED → parent (miscellaneous)
+```
+
+**Gates (orchestration in `reorganize_mutable_hub`):**
+
+- **Gate A (sibling absorption):** Low-degree siblings may absorb overflow via normal edge delete/create in the same transaction (not a separate REDISTRIBUTE command).
+- **Gate B:** Neighbors with `subtree_mut_height >= 1` excluded from mutable partition batch (keep direct edge to hub).
+- **Gate C:** Wrapper vs lateral chosen by **`is_genesis`**, not by the LLM.
+
+Cardinality: sub-concept count bounded by **⌊n/2⌋** (existing mixed/pure immutable/mutable scenarios). Parent hub title/description updates required on split (Genesis title unchanged).
+
+**Telemetry:** `reorg_completed` may include `reorg_strategy: wrapper|lateral`; `graph_health_metrics` (Sackin, max depth, K-hop immutable reachability via `MutableTreeIndex`).
+
+**Out of v0.2 scope:** `COLLAPSE_CONCEPT` (UI delete uses existing delete-node API); optional PPR/shortcut edges deferred.
+
+### 4.4 Integer indexing prompt protocol
+
+- Dual `PromptIdMapper` caches: `passage_mapper`, `concept_mapper`.
+- LLM sees integer indices only; orchestrator/navigator map back to MongoDB IDs before persistence.
 
 ---
 
 ## 5. WebGL UI/UX Specification & Visual Palette Mapping
 
-### SPA Layout & Views
-The SPA features a persistent canvas workspace and four view modes:
-- **`🌐 Global Graph`**: Master superset graph visualization.
-- **`📁 Project Workspace`**: Project-scoped graph view filtered by `project_id`.
-- **`📄 Report Studio`**: Node-grounded markdown report editor.
-- **`📥 Intake Stream`**: Drag-and-drop staging sandbox.
+(Unchanged from v0.1 except where noted.)
 
-### Streamlined Slide-Out Node Drawer & Visualizer Controls
-- **Clean Description Panel**: Displays a focused, readable view prioritizing `node.description` with fallback to `node.content`. Low-level Zettelkasten note viewers and raw metadata attribute tables are eliminated.
-- **Normalized Single-Badge Header**: Header displays strictly the node title, the primary node type badge (`DOCUMENT`, `CONCEPT`, `TOPIC`), and a dedicated node deletion button with confirmation modal.
-- **Canvas Description Search**: The canvas filter indexes across `node.title`, `node.id`, and `node.description`, enabling users to search and highlight nodes by semantic topics and description text.
+- **Genesis / mutable description edit:** `PATCH /api/nodes/{node_id}` updates `description`; Genesis **title** remains **Everything**.
+- **Right drawer:** Editable description for mutable nodes and Genesis.
+- **Canvas search:** Indexes `title`, `id`, `description`.
+- **SSE visualization:** Frontend may still listen for legacy event names (`persona_traversal_*`) while also handling `graph_traversal_*`; `node_touched` carries `persona_id`/`persona_name` fields mapped from navigator scope for backward-compatible UI glows.
 
-### Frontend Dynamic Palette Mapping
-- Visual hex color palettes belong exclusively in the frontend UI (`GraphCanvas.tsx` / `useMemexStore.ts`).
-- Backend streams clean `department_id` and `department_name` attributes over SSE.
-- Frontend dynamically maps `department_id` string hashes to a high-contrast visual palette array (`['#38bdf8', '#fbbf24', '#c084fc', '#34d399', '#f87171', '#f43f5e', '#a855f7', '#06b6d4']`), rendering live node traversal glows.
+### Speech-to-Text (STT)
 
-### Speech-to-Text (STT) Voice Dictation
-- **In-Browser Whisper Model**: Speech is captured via `MediaRecorder` (Opus) and transcribed 100% locally using `@xenova/transformers` (`Xenova/whisper-base.en`) running on WebAssembly/WebGPU.
-- **Editable Draft Workflow**: Stopping voice recording places the transcribed text directly into the chat input textarea without auto-sending. Users can review, adjust technical terms, and fix typos before manually submitting via `Enter` or the `Send` button.
-- **Clean Input Reset**: Submitting the form resets the textarea immediately for the next interaction.
+In-browser Whisper (`@xenova/transformers`); editable draft in chat input before send.
 
 ---
 
 ## 6. API Endpoint Specification & FastMCP Tools
 
 ### REST API Routes
-- `POST /api/chat`: Unified conversational gateway (Direct Q&A, Graph Retrieval, Document Ingestion).
-- `GET /api/graph?project_id=...`: Retrieve clean 3-element graph topology.
-- `GET /api/projects` & `POST /api/projects`: Project workspace CRUD.
-- `GET /api/projects/{id}/chat`: Project-isolated conversation history.
-- `GET /api/passages`: Fetch plain text passage records linked to atomic concepts.
+
+- `POST /api/chat` — Unified gateway (conversation, retrieval, ingestion).
+- `GET /api/graph?project_id=...` — Project-scoped topology.
+- `PATCH /api/nodes/{node_id}` — Update node description (Genesis title locked).
+- `GET/POST /api/projects`, project chat history, passages, etc.
 
 ### Telemetry Stream (`GET /api/sse/chat`)
-Streams real-time JSON events: `intent_classified`, `node_touched`, `persona_debate_start`, `persona_debate_turn`, and `chat_complete`.
 
-### FastMCP Tool Signatures
-- `search_duckduckgo_web`, `search_arxiv_papers`, `fetch_web_article`, `get_graph_nodes`, `get_passages_by_ids`, `get_macro_documents`, `calculate_hub_rankings`.
+Examples: `intent_classified`, `node_touched`, `graph_traversal_start`, `graph_traversal_active`, `graph_health_metrics`, `reorg_completed`, `chat_complete`.
+
+### FastMCP Tools
+
+- `search_duckduckgo_web`, `search_arxiv_papers`, `fetch_web_article`, `get_graph_nodes`, `get_passages_by_ids`, `get_macro_documents`
+- **`calculate_hub_rankings`** — **Repurposed (v0.2):** returns **mutable tree health metrics** from `MutableTreeIndex.refresh_tree_metadata`, not eigenvector hub rankings.
+
+### Configuration (v0.2)
+
+| Setting | Default | Role |
+|---------|---------|------|
+| `DEGREE_THRESHOLD` | 7 | Reorg trigger |
+| `MIN_CLUSTER_SIZE` | 2–3 | Genesis department minting |
+| `MAX_TRAVERSAL_DEPTH` | 3–4 | Tree walk cap |
+| `REACHABILITY_HOP_K` | K for immutable reachability metric |
 
 ---
 
 ## 7. Backend Test Specification & Verification
 
-### Test Database Isolation (`test-me-mex`)
-All tests execute against a dedicated isolated database named `test-me-mex` (`DB_NAME="test-me-mex"`). Production records are completely untouched.
+### Test database
 
-### Execution Command
-Execute tests via the project virtual environment:
+Isolated `test-me-mex` (`DB_NAME="test-me-mex"`).
+
+### Execution
+
 ```bash
-me-mex/.venv/bin/python3.14 me-mex/backend/run_tests.py
+cd me-mex/backend
+python -m pytest tests
 ```
-*(When using parallel runners, worker count must never exceed 2: `-n 2`).*
+
+Use at most **2** parallel workers (`pytest -n 2`).
+
+### v0.2 test focus
+
+- **`test_graph_analytics.py`** — `MutableTreeIndex`, tree metadata refresh (no Voronoi/hub centrality).
+- **`test_graph_navigator.py`** — Traversal, immutable frontier blocking, reorg telemetry, tree candidate filtering.
+- **`test_reorg_simulation.py`** — Wrapper (Genesis) vs lateral commit behavior.
+- **`test_concept_reconciliation.py`** — Immutability enforcement, `execute_single_command` / split dispatch.
+
+---
+
+## 8. Analytics Module (`graph_analytics.py`)
+
+- **`MutableTreeIndex`**: Parent/child via `SUBSET_OF`, depth from Genesis, subtree height, Strahler order, Sackin index, K-hop immutable reachability.
+- **`build_rustworkx_graph`**: Retained for general graph ops where needed.
+- **Removed:** `get_top_concept_hubs`, Voronoi `partition_department_communities`, eigenvector hub pipeline.

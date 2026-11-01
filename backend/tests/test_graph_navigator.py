@@ -1,24 +1,25 @@
 """
-Test Suite: Department Persona Agent Sub-Graph Exploration & Reorganization
+Test Suite: Graph Navigator tree traversal & reorganization
 
 Aligned with docs/ARCHITECTURE.md Section 4:
-- Validates sub-graph traversal (`explore_concept_hub`) over mutually exclusive partitions.
+- Validates Genesis-rooted mutable tree traversal (`traverse_mutable_tree_from_genesis`).
 - Validates Root Node Traversal Blocking (Root Nodes provide summary context, but expansion past Root Nodes is strictly blocked).
-- Validates independent passage-grounded concept node reorganization (`reorganize_concept_hub`).
+- Validates passage-grounded hub reorganization (`reorganize_mutable_hub`).
 """
 
 import pytest
-from app.agents.department_persona import DepartmentPersonaAgent
+from app.agents.graph_navigator import GraphNavigator
 from app.db import db_engine
 from app.models import GraphNode, GraphEdge
+from app.services.graph_analytics import MutableTreeIndex
 
 pytestmark = pytest.mark.xdist_group(name="worker1")
 
 
-def test_department_persona_shared_exploration():
-    """Verify DepartmentPersonaAgent.explore_concept_hub performs sub-graph traversal up to max_depth."""
+def test_graph_navigator_shared_exploration():
+    """Verify GraphNavigator.traverse_mutable_tree_from_genesis performs tree traversal up to max_depth."""
     hub_node = GraphNode(
-        _id="concept_world_models_test",
+        _id="concept_genesis",
         node_type="CONCEPT",
         title="World Models",
         description="World models domain hub.",
@@ -28,27 +29,28 @@ def test_department_persona_shared_exploration():
     )
     db_engine.upsert_node(hub_node)
 
-    agent = DepartmentPersonaAgent(hub_node)
-    exploration = agent.explore_concept_hub(
+    agent = GraphNavigator("global")
+    exploration = agent.traverse_mutable_tree_from_genesis(
         query="world models research",
         chat_history=[{"role": "user", "content": "Tell me about world models"}],
         allow_web_search=False,
         project_id="global",
     )
 
-    assert exploration["department_id"] == "dept_concept_world_models_test"
-    assert exploration["hub_node_id"] == "concept_world_models_test"
-    assert "concept_world_models_test" in exploration["traversed_node_ids"]
+    assert exploration["department_id"] == "nav_concept_genesis"
+    assert exploration["hub_node_id"] == "concept_genesis"
+    assert "concept_genesis" in exploration["traversed_node_ids"]
+    assert len(exploration["traversed_node_ids"]) >= 1
     assert "explored_nodes" in exploration
 
 
-def test_department_persona_root_node_traversal_blocking():
+def test_graph_navigator_root_node_traversal_blocking():
     """Verify traversal visits Root Nodes for context but blocks expanding further hops through them."""
     from app.services.llm_gateway import llm_gateway
 
     if not llm_gateway.is_server_available():
         print(
-            "  ⏭️ test_department_persona_root_node_traversal_blocking [SKIPPED - vLLM Server Offline]"
+            "  ⏭️ test_graph_navigator_root_node_traversal_blocking [SKIPPED - vLLM Server Offline]"
         )
         return
     hub_a = GraphNode(
@@ -97,8 +99,8 @@ def test_department_persona_root_node_traversal_blocking():
     db_engine.upsert_edge(e1)
     db_engine.upsert_edge(e2)
 
-    agent = DepartmentPersonaAgent(hub_a)
-    exploration = agent.explore_concept_hub(
+    agent = GraphNavigator("global")
+    exploration = agent.traverse_mutable_tree_from_genesis(
         query="Explore Hub A",
         project_id="proj_root_blocking_test",
         max_depth=3,
@@ -111,85 +113,66 @@ def test_department_persona_root_node_traversal_blocking():
     assert "concept_e_unreachable" not in traversed
 
 
-@pytest.mark.vllm
-def test_department_persona_mutually_exclusive_partitioning():
-    """Verify DepartmentPersonaAgent.explore_concept_hub strictly obeys partition_node_ids boundaries."""
-    from app.services.llm_gateway import llm_gateway
-
-    if not llm_gateway.is_server_available():
-        print(
-            "  ⏭️ test_department_persona_mutually_exclusive_partitioning [SKIPPED - vLLM Server Offline]"
-        )
-        return
-
+def test_mutable_tree_candidates_exclude_non_subset_mutable_edges():
+    """Tree traversal candidates include SUBSET_OF children only, not lateral mutable edges."""
     hub_a = GraphNode(
-        _id="hub_a",
+        _id="hub_a_tree",
         node_type="CONCEPT",
-        project_ids=["proj_partition_test"],
+        project_ids=["global"],
         metadata={"immutable": False},
         title="Model-Based Reinforcement Learning",
-        description="Core domain hub for model-based RL and trajectory planning.",
+        description="Core domain hub for model-based RL.",
     )
     c_inside = GraphNode(
-        _id="concept_inside_partition",
+        _id="concept_inside_tree",
         node_type="CONCEPT",
-        project_ids=["proj_partition_test"],
+        project_ids=["global"],
         metadata={"immutable": False},
         title="Model Predictive Control Planning",
-        description="MPC optimizes action sequences over predicted world model states.",
+        description="MPC over predicted world model states.",
     )
     c_outside = GraphNode(
-        _id="concept_outside_partition",
+        _id="concept_outside_tree",
         node_type="CONCEPT",
-        project_ids=["proj_partition_test"],
+        project_ids=["global"],
         metadata={"immutable": False},
-        title="Unrelated Concept Outside Partition",
-        description="Unrelated concept outside the assigned partition.",
+        title="Unrelated Lateral Concept",
+        description="Linked via PARALLEL_TO, not tree child.",
     )
-
     db_engine.upsert_node(hub_a)
     db_engine.upsert_node(c_inside)
     db_engine.upsert_node(c_outside)
-
     db_engine.upsert_edge(
         GraphEdge(
-            _id="e1",
-            source_id="hub_a",
-            target_id="concept_inside_partition",
+            _id="e_tree_1",
+            source_id="concept_inside_tree",
+            target_id="hub_a_tree",
             description="SUBSET_OF",
-            project_ids=["proj_partition_test"],
+            project_ids=["global"],
         )
     )
     db_engine.upsert_edge(
         GraphEdge(
-            _id="e2",
-            source_id="hub_a",
-            target_id="concept_outside_partition",
+            _id="e_tree_2",
+            source_id="hub_a_tree",
+            target_id="concept_outside_tree",
             description="PARALLEL_TO",
-            project_ids=["proj_partition_test"],
+            project_ids=["global"],
         )
     )
 
-    agent = DepartmentPersonaAgent(hub_a)
-
-    # Restrict partition strictly to {"hub_a", "concept_inside_partition"}
-    partition = {"hub_a", "concept_inside_partition"}
-    exploration = agent.explore_concept_hub(
-        query="test partition",
-        project_id="proj_partition_test",
-        max_depth=3,
-        partition_node_ids=partition,
+    agent = GraphNavigator("global")
+    candidates = agent.get_tree_mutable_candidates(
+        frontier_ids=["hub_a_tree"],
+        tree=MutableTreeIndex(project_id="global"),
+        visited_ids=set(),
     )
-
-    traversed = exploration["traversed_node_ids"]
-    assert "hub_a" in traversed
-    assert "concept_inside_partition" in traversed
-    # concept_outside_partition MUST be excluded because it is outside partition boundary!
-    assert "concept_outside_partition" not in traversed
+    assert "concept_inside_tree" in candidates
+    assert "concept_outside_tree" not in candidates
 
 
-def test_reorganize_concept_hub_emits_telemetry_events(monkeypatch):
-    """Verify that DepartmentPersonaAgent.reorganize_concept_hub emits discovery telemetry
+def test_reorganize_mutable_hub_emits_telemetry_events(monkeypatch):
+    """Verify that GraphNavigator.reorganize_mutable_hub emits discovery telemetry
 
     events even when no nodes qualify or when explored_nodes is empty.
     """
@@ -202,10 +185,10 @@ def test_reorganize_concept_hub_emits_telemetry_events(monkeypatch):
         project_ids=["proj_reorg_telemetry"],
         metadata={"immutable": False},
     )
-    agent = DepartmentPersonaAgent(hub)
+    agent = GraphNavigator("global")
 
     # 1. Empty explored nodes
-    res_empty = agent.reorganize_concept_hub(
+    res_empty = agent.reorganize_mutable_hub(
         explored_nodes=[], project_id="proj_reorg_telemetry"
     )
     assert res_empty["commands"] == []
@@ -221,7 +204,7 @@ def test_reorganize_concept_hub_emits_telemetry_events(monkeypatch):
     )
 
     db_engine.upsert_node(hub)
-    res = agent.reorganize_concept_hub(
+    res = agent.reorganize_mutable_hub(
         explored_nodes=[hub], project_id="proj_reorg_telemetry", degree_threshold=5
     )
     events = res.get("emitted_events", [])
@@ -237,7 +220,7 @@ def test_reorganize_concept_hub_emits_telemetry_events(monkeypatch):
     assert "cohesive" in done_evt["message"]
 
 
-def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch):
+def test_reorganize_mutable_hub_selects_qualifying_mutable_candidate(monkeypatch):
     """Verify that when a mutable hub has degree >= threshold, it is passed to LLM and selected."""
     project_id = "proj_qualifying_hub_test"
     hub = GraphNode(
@@ -284,7 +267,7 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
             )
         )
 
-    agent = DepartmentPersonaAgent(hub)
+    agent = GraphNavigator("global")
 
     # Mock LLM calls:
     # 1. Discovery returns candidate hub_qualifying
@@ -343,7 +326,7 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
 
     monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
 
-    res = agent.reorganize_concept_hub(
+    res = agent.reorganize_mutable_hub(
         explored_nodes=[hub], project_id=project_id, degree_threshold=5
     )
     assert len(res["commands"]) == 1
@@ -353,7 +336,7 @@ def test_reorganize_concept_hub_selects_qualifying_mutable_candidate(monkeypatch
     assert len(cmd["sub_concepts"]) == 2
 
 
-def test_reorganize_concept_hub_mixed_decongested_skips_phase_2b(monkeypatch):
+def test_reorganize_mutable_hub_mixed_decongested_skips_phase_2b(monkeypatch):
     """Verify that in mixed neighborhood, Phase 2a runs and if post_2a_degree < threshold, Phase 2b is skipped."""
     project_id = "proj_mixed_decongested_test"
     hub = GraphNode(
@@ -405,7 +388,7 @@ def test_reorganize_concept_hub_mixed_decongested_skips_phase_2b(monkeypatch):
         )
     )
 
-    agent = DepartmentPersonaAgent(hub)
+    agent = GraphNavigator("global")
 
     import json
 
@@ -466,7 +449,7 @@ def test_reorganize_concept_hub_mixed_decongested_skips_phase_2b(monkeypatch):
 
     monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
 
-    res = agent.reorganize_concept_hub(
+    res = agent.reorganize_mutable_hub(
         explored_nodes=[hub], project_id=project_id, degree_threshold=5
     )
 
@@ -484,7 +467,7 @@ def test_reorganize_concept_hub_mixed_decongested_skips_phase_2b(monkeypatch):
     assert len(res["commands"][0]["sub_concepts"]) == 2
 
 
-def test_reorganize_concept_hub_mixed_overclustered_triggers_phase_2b(monkeypatch):
+def test_reorganize_mutable_hub_mixed_overclustered_triggers_phase_2b(monkeypatch):
     """Verify that in mixed neighborhood, if post_2a_degree >= threshold, Phase 2b executes."""
     project_id = "proj_mixed_phase2b_test"
     hub = GraphNode(
@@ -537,7 +520,7 @@ def test_reorganize_concept_hub_mixed_overclustered_triggers_phase_2b(monkeypatc
             )
         )
 
-    agent = DepartmentPersonaAgent(hub)
+    agent = GraphNavigator("global")
 
     import json
 
@@ -598,7 +581,7 @@ def test_reorganize_concept_hub_mixed_overclustered_triggers_phase_2b(monkeypatc
 
     monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
 
-    res = agent.reorganize_concept_hub(
+    res = agent.reorganize_mutable_hub(
         explored_nodes=[hub], project_id=project_id, degree_threshold=5
     )
 
@@ -611,8 +594,8 @@ def test_reorganize_concept_hub_mixed_overclustered_triggers_phase_2b(monkeypatc
     assert len(res["commands"]) == 2  # Phase 2a command + Phase 2b command
 
 
-def test_department_persona_subgraph_expansion_blocks_immutable_frontier(monkeypatch):
-    """Verify DepartmentPersonaAgent.explore_concept_hub provides immutable nodes for context but blocks them from the frontier."""
+def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier(monkeypatch):
+    """Verify GraphNavigator traversal presents immutables for context but blocks them from the frontier."""
     import json
 
     project_id = "proj_immutable_guard_test"
@@ -665,7 +648,7 @@ def test_department_persona_subgraph_expansion_blocks_immutable_frontier(monkeyp
         )
     )
 
-    agent = DepartmentPersonaAgent(hub)
+    agent = GraphNavigator("global")
 
     # Verify candidate neighbors has explicit immutable flags
     adj_map = agent._get_adjacency_map(project_id)
@@ -695,7 +678,7 @@ def test_department_persona_subgraph_expansion_blocks_immutable_frontier(monkeyp
 
     monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
 
-    res = agent.explore_concept_hub(
+    res = agent.traverse_mutable_tree_from_genesis(
         query="Test query",
         project_id=project_id,
         max_depth=1,
@@ -711,7 +694,7 @@ def test_department_persona_subgraph_expansion_blocks_immutable_frontier(monkeyp
     assert "mut_branch" in res["traversed_node_ids"]
 
 
-def test_reorganize_concept_hub_updates_parent_hub_title_and_description(monkeypatch):
+def test_reorganize_mutable_hub_updates_parent_hub_title_and_description(monkeypatch):
     """Verify that SPLIT_CONCEPT updates parent hub title & description to accommodate new sub-concepts."""
     from app.services.graph_ingestion_engine import GraphIngestionEngine
 
@@ -760,7 +743,7 @@ def test_reorganize_concept_hub_updates_parent_hub_title_and_description(monkeyp
     )
 
 
-def test_reorganize_concept_hub_caps_subconcepts_to_half_degree(monkeypatch):
+def test_reorganize_mutable_hub_caps_subconcepts_to_half_degree(monkeypatch):
     """Verify that formulated sub-concepts are strictly capped to max(2, n // 2) for compression."""
     import json
 
@@ -794,7 +777,7 @@ def test_reorganize_concept_hub_caps_subconcepts_to_half_degree(monkeypatch):
             )
         )
 
-    agent = DepartmentPersonaAgent(hub)
+    agent = GraphNavigator("global")
 
     def mock_chat_completion(messages, **kwargs):
         sys_content = messages[0]["content"]
@@ -837,7 +820,7 @@ def test_reorganize_concept_hub_caps_subconcepts_to_half_degree(monkeypatch):
 
     monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
 
-    res = agent.reorganize_concept_hub(
+    res = agent.reorganize_mutable_hub(
         explored_nodes=[hub],
         project_id=project_id,
         degree_threshold=5,

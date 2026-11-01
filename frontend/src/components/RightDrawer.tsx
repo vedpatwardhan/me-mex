@@ -15,10 +15,14 @@ export const RightDrawer: React.FC = () => {
     setSelectedNodeId,
     nodes,
     deleteNode,
+    updateNodeDescription,
   } = useMemexStore();
 
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isEditingDesc, setIsEditingDesc] = useState(false);
+  const [draftDescription, setDraftDescription] = useState('');
+  const [isSavingDesc, setIsSavingDesc] = useState(false);
 
   // Collapse completely if no node is selected
   if (!selectedNodeId) return null;
@@ -31,6 +35,8 @@ export const RightDrawer: React.FC = () => {
   const rootType = isRoot ? getRootSubType(selectedNode) : null;
   const isImmutable = isImmutableConcept(selectedNode);
   const umbrellaHubId = selectedNode.metadata?.sub_of_hub;
+  const isGenesis = Boolean(selectedNode.metadata?.is_genesis);
+  const canEditDescription = !isImmutable || isGenesis;
 
 
   const getNodeTypeBadge = () => {
@@ -102,11 +108,55 @@ export const RightDrawer: React.FC = () => {
             <span className="font-display font-semibold text-slate-200 flex items-center gap-1.5 text-xs">
               <FileText className="w-4 h-4 text-purple-400" /> Description
             </span>
+            {canEditDescription && !isEditingDesc && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftDescription(selectedNode.description || selectedNode.content || '');
+                  setIsEditingDesc(true);
+                }}
+                className="text-[10px] uppercase font-mono text-purple-300 hover:text-purple-100"
+              >
+                Edit
+              </button>
+            )}
           </div>
 
-          <div className="bg-[#090d16] p-4 rounded-2xl border border-white/10 text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-wrap shadow-inner font-medium">
-            {selectedNode.description || selectedNode.content || 'No description provided.'}
-          </div>
+          {isEditingDesc ? (
+            <div className="space-y-2">
+              <textarea
+                value={draftDescription}
+                onChange={(e) => setDraftDescription(e.target.value)}
+                className="w-full min-h-[140px] bg-[#090d16] p-4 rounded-2xl border border-purple-500/30 text-slate-200 font-mono text-[11px] leading-relaxed"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={isSavingDesc}
+                  onClick={async () => {
+                    setIsSavingDesc(true);
+                    const ok = await updateNodeDescription(selectedNode.id, draftDescription);
+                    setIsSavingDesc(false);
+                    if (ok) setIsEditingDesc(false);
+                  }}
+                  className="flex-1 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium"
+                >
+                  {isSavingDesc ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingDesc(false)}
+                  className="py-1.5 px-3 rounded-xl bg-white/10 text-slate-300 text-xs"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-[#090d16] p-4 rounded-2xl border border-white/10 text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-wrap shadow-inner font-medium">
+              {selectedNode.description || selectedNode.content || 'No description provided.'}
+            </div>
+          )}
         </div>
 
         {/* Delete Node Action Section */}

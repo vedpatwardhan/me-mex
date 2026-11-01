@@ -1,5 +1,5 @@
 import uuid
-from typing import Dict, List
+from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -185,6 +185,34 @@ def get_graph(project_id: str = "global"):
             for e in edges
         ],
     }
+
+
+class NodeUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+
+@app.patch("/api/nodes/{node_id}")
+def update_node_endpoint(node_id: str, req: NodeUpdateRequest):
+    """Update mutable node fields (Genesis title remains locked to 'Everything')."""
+    from app.models import GraphNode
+
+    node = db_engine.get_node(node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+    if node.is_immutable and not node.metadata.get("is_genesis"):
+        raise HTTPException(status_code=400, detail="Cannot edit immutable node")
+    if req.title is not None and not node.metadata.get("is_genesis"):
+        node.title = req.title
+    elif req.title is not None and node.metadata.get("is_genesis"):
+        pass  # title locked
+    if req.description is not None:
+        node.description = req.description
+    import time
+
+    node.updated_at = time.time()
+    db_engine.upsert_node(node)
+    return {"node": node.model_dump(), "status": "updated"}
 
 
 @app.get("/api/nodes/{node_id}")

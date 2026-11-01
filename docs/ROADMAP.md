@@ -21,17 +21,17 @@ The roadmap bridges core engine implementation with real-time UI interactivity, 
 
   [ Goal 1: Core Engine & Substrate Implementation ] — COMPLETED
    ├── Ingestion Pipeline: Out-of-graph text chunk storage in `passages` collection
-   ├── Clean 3-Element Topology: Root Nodes, Intra-Doc Concepts, Persona Domain Hubs, & Typed Edges
+   ├── Clean 3-Element Topology: Root Nodes, Intra-Doc Concepts, Mutable Domain Hubs, & Typed Edges
    ├── Node Mutability Enforcement: Root & Intra-Doc nodes (Immutable), Domain Hubs (Mutable)
-   ├── Mutually Exclusive Hub Partitioning: rustworkx unweighted eigenvector hub detection
+   ├── Genesis-Rooted Tree Traversal: `GraphNavigator` + `MutableTreeIndex` (no Voronoi / eigenvector hubs)
    ├── Single-Source Genesis Hub: Primordial 'Everything' hub anchor across workspaces
-   ├── Phase 3.5 Dynamic Target Generalization: Post-linking LLM pass widening mutable target scope
-   └── Scenario-Aware Reorganization ($n // 2$): Degree halving compression with compulsory hub updates
+   ├── Phase 3.5 Dynamic Target Generalization: Post-linking LLM pass (includes miscellaneous neighbors)
+   └── Engine-Dispatch Reorganization: Wrapper at Genesis, lateral sibling split elsewhere ($n // 2$ caps)
 
   [ Goal 2: Comprehensive Backend Testing & Telemetry ] — COMPLETED
    ├── Unit Test Suite: 50+ passing tests with 2-worker isolation (`pytest -n 2`)
    ├── Project Isolation Tests: Scoped graph querying (`project_id`) & workspace chat history
-   ├── Persona Exploration & Reorganization Tests: Voronoi partitioning, outward leaf movement & degree caps
+   ├── Graph Navigator Tests: Tree traversal, reorg telemetry, wrapper vs lateral splits
    ├── Target Generalization Tests: Validated title/description synthesis & Genesis title preservation
    ├── Fail-Fast Ingestion Coordination: Zero orphan document records on fetch failures
    └── Full Local LLM Telemetry Tracing: Structured logging of prompts, completions, latencies, and caller IDs to `backend/logs/llm_traces/`
@@ -46,7 +46,7 @@ The roadmap bridges core engine implementation with real-time UI interactivity, 
 
   [ Goal 4: End-to-End System Testing & Graph Interactivity Enhancements ] — ACTIVE
    ├── Continuous Ingestion Validation: Automated multi-document intake, search retrieval, & chat stream checks
-   ├── Taxonomic Depth Ceilings: Monitoring cascade depth ($D_{\max}$) and transition to lateral clustering
+   ├── Taxonomic Depth Ceilings: **v0.2** lateral sibling splits + `MutableTreeIndex` health metrics (Sackin, K-hop reachability)
    ├── Interactivity Enhancements: Drag-and-drop intake staging sandbox, dynamic re-clustering
    └── Report Studio Integration: Graph-grounded markdown synthesis and manuscript draft generation
 

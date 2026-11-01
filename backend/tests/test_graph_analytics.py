@@ -1,5 +1,5 @@
 import pytest
-from app.services.graph_analytics import graph_analytics
+from app.services.graph_analytics import graph_analytics, MutableTreeIndex
 from app.db import db_engine
 from app.models import GraphNode, GraphEdge
 
@@ -7,239 +7,77 @@ pytestmark = pytest.mark.xdist_group(name="worker1")
 
 
 def test_rustworkx_graph_construction():
-    """Verify PyDiGraph construction from DB nodes/edges."""
     graph, idx_to_node_id, node_id_to_idx = graph_analytics.build_rustworkx_graph(
         "global"
     )
-    # 4 baseline concepts + 1 primordial Universal Genesis concept ('Everything')
-    assert len(graph) == 5
-    assert "concept_action_mpc" in node_id_to_idx
+    assert len(graph) >= 5
     assert "concept_genesis" in node_id_to_idx
 
 
-def test_hub_centrality_calculation():
-    """Verify eigenvector/degree centrality score ranking."""
-    centrality = graph_analytics.calculate_hub_centrality("global")
-    assert "concept_action_mpc" in centrality
-    assert centrality["concept_action_mpc"] > 0.0
+def test_mutable_tree_index_parent_child():
+    tree = graph_analytics.build_tree_index("global")
+    assert tree.genesis_id == "concept_genesis"
+    children = tree.mutable_children("concept_genesis")
+    child_ids = {c.id for c in children}
+    assert "concept_world_models" in child_ids
 
 
-def test_project_scoped_concept_hubs():
-    """Verify top concept hub discovery filters by project_id."""
-    # Create project node and edge
-    p_node = GraphNode(
-        _id="concept_custom_p",
-        title="Custom Project Hub",
-        description="# Custom Hub\nUnique to proj_custom.",
-        project_ids=["global", "proj_custom"],
-    )
-    db_engine.upsert_node(p_node)
-
-    # Fetch hubs for proj_custom vs unrelated project
-    custom_hubs = graph_analytics.get_top_concept_hubs(
-        project_id="proj_custom", max_k=5
-    )
-    unrelated_hubs = graph_analytics.get_top_concept_hubs(
-        project_id="proj_unrelated", max_k=5
-    )
-
-    assert any(node.id == "concept_custom_p" for node, score in custom_hubs)
-    assert not any(node.id == "concept_custom_p" for node, score in unrelated_hubs)
+def test_mutable_tree_health_metrics():
+    tree = graph_analytics.build_tree_index("global")
+    metrics = tree.health_metrics(k=3)
+    assert "sackin_index" in metrics
+    assert "max_mutable_depth" in metrics
+    assert metrics["immutable_reachable_pct_within_k"] >= 0.0
 
 
-def test_pure_centrality_dynamic_hub_selection():
-    """Verify node-type filtering and relative thresholding (s_i >= 0.3 * s_max) in get_top_concept_hubs."""
-    # Add a root paper node and a low-score concept node
-    paper_node = GraphNode(
-        _id="paper_test_root",
-        node_type="paper",
-        title="Root Paper Node",
-        description="Paper node emanates concepts but is not a concept hub.",
-        project_ids=["proj_heuristic_test"],
-    )
-    c_node_high = GraphNode(
-        _id="concept_high_hub",
-        node_type="concept",
-        title="High Centrality Concept Hub",
-        description="Core paradigm hub node.",
-        project_ids=["proj_heuristic_test"],
-    )
-    c_node_outlier = GraphNode(
-        _id="concept_outlier_leaf",
-        node_type="concept",
-        title="Outlier Isolated Leaf",
-        description="Isolated leaf node with near zero centrality.",
-        project_ids=["proj_heuristic_test"],
-    )
-    db_engine.upsert_node(paper_node)
-    db_engine.upsert_node(c_node_high)
-    db_engine.upsert_node(c_node_outlier)
-
-    # Edge between paper and high hub (weight 1.0)
-    e1 = GraphEdge(
-        _id="edge_test_p_c",
-        source_id="paper_test_root",
-        target_id="concept_high_hub",
-        is_directional=True,
-        description="Link to high hub",
-        project_ids=["proj_heuristic_test"],
-    )
-    db_engine.upsert_edge(e1)
-
-    hubs = graph_analytics.get_top_concept_hubs(
-        project_id="proj_heuristic_test", max_k=8, relative_threshold=0.30
-    )
-
-    # Paper node MUST be excluded from concept hubs
-    assert not any(n.node_type == "paper" for n, _ in hubs)
-    # High centrality concept node MUST be included
-    assert any(n.id == "concept_high_hub" for n, _ in hubs)
+def test_refresh_tree_metadata_persists():
+    graph_analytics.refresh_tree_metadata("global")
+    node = db_engine.get_node("concept_world_models")
+    assert node.metadata.get("tree_depth_from_genesis") is not None
 
 
-def test_partition_department_communities_voronoi_mutual_exclusivity():
-    """Verify that partition_department_communities partitions all nodes around designated hubs with strict mutual exclusivity."""
-    # Setup test project with 2 hubs and connected periphery nodes
-    proj = "proj_voronoi_test"
-    hub_a = GraphNode(
-        _id="hub_a",
-        node_type="concept",
-        title="Hub A Robotics",
-        description="Core Robotics Paradigm",
-        project_ids=[proj],
-    )
-    hub_b = GraphNode(
-        _id="hub_b",
-        node_type="concept",
-        title="Hub B Vision",
-        description="Core Vision Paradigm",
-        project_ids=[proj],
-    )
-    leaf_a = GraphNode(
-        _id="leaf_a",
-        node_type="concept",
-        title="Leaf A Gripper",
-        description="Gripper leaf attached to Hub A",
-        project_ids=[proj],
-    )
-    leaf_b = GraphNode(
-        _id="leaf_b",
-        node_type="concept",
-        title="Leaf B Camera",
-        description="Camera leaf attached to Hub B",
-        project_ids=[proj],
-    )
-    db_engine.upsert_node(hub_a)
-    db_engine.upsert_node(hub_b)
-    db_engine.upsert_node(leaf_a)
-    db_engine.upsert_node(leaf_b)
-
-    # Edge hub_a -> leaf_a
-    db_engine.upsert_edge(
-        GraphEdge(
-            _id="edge_a",
-            source_id="hub_a",
-            target_id="leaf_a",
-            project_ids=[proj],
-        )
-    )
-    # Edge hub_b -> leaf_b
-    db_engine.upsert_edge(
-        GraphEdge(
-            _id="edge_b",
-            source_id="hub_b",
-            target_id="leaf_b",
-            project_ids=[proj],
-        )
-    )
-
-    hubs = [hub_a, hub_b]
-    partitions = graph_analytics.partition_department_communities(
-        project_id=proj, hubs=hubs
-    )
-
-    # Partitions must be keyed by hub ID
-    assert "hub_a" in partitions
-    assert "hub_b" in partitions
-
-    # Each hub must be in its own partition
-    assert "hub_a" in partitions["hub_a"]
-    assert "hub_b" in partitions["hub_b"]
-
-    # Topological proximity: leaf_a must be in hub_a partition, leaf_b in hub_b
-    assert "leaf_a" in partitions["hub_a"]
-    assert "leaf_b" in partitions["hub_b"]
-
-    # Mutual Exclusivity: intersection must be empty
-    set_a = set(partitions["hub_a"])
-    set_b = set(partitions["hub_b"])
-    assert len(set_a.intersection(set_b)) == 0
-
-    # Coverage: all nodes within max_depth must be partitioned
-    all_partitioned = set_a.union(set_b)
-    assert all_partitioned == {"hub_a", "hub_b", "leaf_a", "leaf_b"}
-
-    # Distant node beyond max_depth (e.g. max_depth=1) should NOT be partitioned
-    distant_node = GraphNode(
-        _id="distant_node",
-        title="Distant Node",
-        description="",
-        project_ids=[proj],
-    )
-    db_engine.upsert_node(distant_node)
-    # leaf_a -> distant_node (distance from hub_a is 2)
-    db_engine.upsert_edge(
-        GraphEdge(
-            _id="edge_distant",
-            source_id="leaf_a",
-            target_id="distant_node",
-            project_ids=[proj],
-        )
-    )
-    bounded_partitions = graph_analytics.partition_department_communities(
-        project_id=proj, hubs=hubs, max_depth=1
-    )
-    assert "distant_node" not in bounded_partitions["hub_a"]
-    assert "distant_node" not in bounded_partitions["hub_b"]
-
-
-def test_everything_hub_guaranteed_in_candidate_hubs():
-    """Verify that get_top_concept_hubs always includes the primordial 'Everything' node,
-
-    even if other nodes have much higher degrees.
-    """
-    proj = "proj_everything_guarantee_test"
+def test_lateral_split_parent_resolution():
+    proj = "proj_tree_lateral"
     genesis = GraphNode(
-        _id="concept_genesis_guaranteed",
-        title="Everything",
-        description="Universal knowledge anchor.",
+        _id="gen_lat",
         node_type="CONCEPT",
+        title="Everything",
         project_ids=[proj],
         metadata={"immutable": False, "is_genesis": True},
     )
-    db_engine.upsert_node(genesis)
-
-    # Add several high-degree nodes
-    for i in range(10):
-        n = GraphNode(
-            _id=f"high_deg_node_{i}",
-            title=f"High Degree Node {i}",
-            description="High degree node.",
-            node_type="CONCEPT",
-            project_ids=[proj],
-            metadata={"immutable": False},
-        )
+    parent = GraphNode(
+        _id="hub_parent",
+        node_type="CONCEPT",
+        title="Parent Hub",
+        project_ids=[proj],
+        metadata={"immutable": False},
+    )
+    hub = GraphNode(
+        _id="hub_overflow",
+        node_type="CONCEPT",
+        title="Overflow Hub",
+        project_ids=[proj],
+        metadata={"immutable": False},
+    )
+    for n in [genesis, parent, hub]:
         db_engine.upsert_node(n)
-        db_engine.upsert_edge(
-            GraphEdge(
-                _id=f"edge_high_{i}",
-                source_id=f"high_deg_node_{i}",
-                target_id="high_deg_node_0",
-                project_ids=[proj],
-            )
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="e_p_g",
+            source_id="hub_parent",
+            target_id="gen_lat",
+            description="SUBSET_OF",
+            project_ids=[proj],
         )
-
-    hubs = graph_analytics.get_top_concept_hubs(project_id=proj, max_k=3)
-    hub_ids = [h[0].id for h in hubs]
-    assert (
-        "concept_genesis_guaranteed" in hub_ids
-    ), "Everything hub must be guaranteed in top hubs!"
+    )
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="e_h_p",
+            source_id="hub_overflow",
+            target_id="hub_parent",
+            description="SUBSET_OF",
+            project_ids=[proj],
+        )
+    )
+    tree = MutableTreeIndex(project_id=proj)
+    assert tree.parent_of("hub_overflow") == "hub_parent"

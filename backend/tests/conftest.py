@@ -158,6 +158,23 @@ def reset_test_database():
     for e in [e1, e2, e3]:
         db_engine.upsert_edge(e)
 
+    # Mutable tree backbone under Genesis (SUBSET_OF: child -> parent)
+    for child_id in [
+        "concept_world_models",
+        "concept_pixel_world_models",
+        "concept_latent_world_models",
+        "concept_action_mpc",
+    ]:
+        db_engine.upsert_edge(
+            GraphEdge(
+                _id=f"edge_{child_id}_genesis",
+                source_id=child_id,
+                target_id="concept_genesis",
+                description="SUBSET_OF",
+                project_ids=["global"],
+            )
+        )
+
 
 def teardown_test_database():
     """Wipe all collections in isolated worker DB (MongoDB or in-memory) at test completion."""

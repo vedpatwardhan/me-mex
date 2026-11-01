@@ -1,222 +1,298 @@
-from typing import Optional
-from typing import List, Dict, Any, Tuple
-import rustworkx as rx
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set, Tuple
+
 import networkx as nx
+import rustworkx as rx
+
 from app.db import db_engine
-from app.models import GraphNode, GraphEdge, MacroDocumentRecord, ConceptHubCandidate
+from app.models import GraphEdge, GraphNode
 
 
+def _is_subset_edge(edge: GraphEdge) -> bool:
+    desc = (edge.description or "").upper()
+    return "SUBSET_OF" in desc or "SUBSET" in desc
+
+
+class MutableTreeIndex:
+    """
+    Mutable concept backbone rooted at Genesis.
+
+    Parent/child convention: child --SUBSET_OF--> parent (source=child, target=parent).
+    Immutable leaves attach via RELEVANT_TO (or similar) with target=mutable parent.
+    """
+
+    def __init__(
+        self,
+        project_id: Optional[str] = None,
+        nodes: Optional[List[GraphNode]] = None,
+        edges: Optional[List[GraphEdge]] = None,
+    ):
+        self.project_id = project_id
+        self.nodes = nodes if nodes is not None else db_engine.get_nodes(project_id)
+        self.edges = edges if edges is not None else db_engine.get_edges(project_id)
+        self.node_map: Dict[str, GraphNode] = {n.id: n for n in self.nodes}
+        self.genesis_id: Optional[str] = None
+        for n in self.nodes:
+            if n.metadata.get("is_genesis") or n.title.strip().lower() == "everything":
+                self.genesis_id = n.id
+                break
+
+        self._parent: Dict[str, str] = {}
+        self._mutable_children: Dict[str, List[str]] = {}
+        self._direct_neighbors: Dict[str, List[str]] = {}
+        self._build_mutable_tree()
+
+        self.tree_depth_from_genesis: Dict[str, int] = {}
+        self.subtree_mut_height: Dict[str, int] = {}
+        self.strahler_order: Dict[str, int] = {}
+        self.subtree_immutable_count: Dict[str, int] = {}
+        self._compute_metrics()
+
+    def _build_mutable_tree(self) -> None:
+        for e in self.edges:
+            self._direct_neighbors.setdefault(e.source_id, []).append(e.target_id)
+            self._direct_neighbors.setdefault(e.target_id, []).append(e.source_id)
+
+        for e in self.edges:
+            if not _is_subset_edge(e):
+                continue
+            child_id, parent_id = e.source_id, e.target_id
+            child = self.node_map.get(child_id)
+            parent = self.node_map.get(parent_id)
+            if not child or not parent or child.is_immutable or parent.is_immutable:
+                continue
+            if child_id in self._parent and self._parent[child_id] != parent_id:
+                continue
+            self._parent[child_id] = parent_id
+            self._mutable_children.setdefault(parent_id, []).append(child_id)
+
+        for pid, kids in self._mutable_children.items():
+            self._mutable_children[pid] = sorted(set(kids))
+
+    def parent_of(self, node_id: str) -> Optional[str]:
+        return self._parent.get(node_id)
+
+    def mutable_children(self, node_id: str) -> List[GraphNode]:
+        ids = self._mutable_children.get(node_id, [])
+        return [self.node_map[i] for i in ids if i in self.node_map]
+
+    def mutable_siblings(self, node_id: str) -> List[GraphNode]:
+        parent_id = self.parent_of(node_id)
+        if not parent_id:
+            return []
+        return [n for n in self.mutable_children(parent_id) if n.id != node_id]
+
+    def degree(self, node_id: str) -> int:
+        return len(self._direct_neighbors.get(node_id, []))
+
+    def direct_immutable_neighbors(self, node_id: str) -> List[GraphNode]:
+        imm: List[GraphNode] = []
+        seen: Set[str] = set()
+        for nid in self._direct_neighbors.get(node_id, []):
+            if nid in seen:
+                continue
+            seen.add(nid)
+            n = self.node_map.get(nid)
+            if n and n.is_immutable and not n.is_root_node:
+                imm.append(n)
+        return imm
+
+    def ancestors(self, node_id: str) -> List[str]:
+        chain: List[str] = []
+        cur = self.parent_of(node_id)
+        while cur:
+            chain.append(cur)
+            cur = self.parent_of(cur)
+        return chain
+
+    def path_to_genesis(self, node_id: str) -> List[str]:
+        if not self.genesis_id:
+            return [node_id]
+        path = [node_id]
+        cur = node_id
+        while cur != self.genesis_id:
+            p = self.parent_of(cur)
+            if not p:
+                break
+            path.append(p)
+            cur = p
+        if path[-1] != self.genesis_id and self.genesis_id:
+            path.append(self.genesis_id)
+        return path
+
+    def _compute_metrics(self) -> None:
+        if not self.genesis_id:
+            return
+
+        def mut_height(nid: str, visiting: Set[str]) -> int:
+            if nid in visiting:
+                return 0
+            visiting.add(nid)
+            kids = [
+                c
+                for c in self._mutable_children.get(nid, [])
+                if c in self.node_map and not self.node_map[c].is_immutable
+            ]
+            if not kids:
+                self.subtree_mut_height[nid] = 0
+                return 0
+            h = 1 + max(mut_height(c, visiting) for c in kids)
+            self.subtree_mut_height[nid] = h
+            return h
+
+        mut_height(self.genesis_id, set())
+
+        def depth_from_genesis(nid: str) -> int:
+            d = 0
+            cur = nid
+            while cur and cur != self.genesis_id:
+                p = self.parent_of(cur)
+                if not p:
+                    return d
+                d += 1
+                cur = p
+            return d
+
+        for n in self.nodes:
+            if n.is_immutable or n.is_root_node:
+                continue
+            self.tree_depth_from_genesis[n.id] = depth_from_genesis(n.id)
+            self.strahler_order[n.id] = self._strahler(n.id)
+            self.subtree_immutable_count[n.id] = self._count_immutables(n.id)
+
+    def _strahler(self, nid: str) -> int:
+        kids = self._mutable_children.get(nid, [])
+        if not kids:
+            return 1
+        child_orders = [self._strahler(c) for c in kids]
+        child_orders.sort(reverse=True)
+        if len(child_orders) >= 2 and child_orders[0] == child_orders[1]:
+            return child_orders[0] + 1
+        return max(child_orders) if child_orders else 1
+
+    def _count_immutables(self, nid: str, seen: Optional[Set[str]] = None) -> int:
+        if seen is None:
+            seen = set()
+        if nid in seen:
+            return 0
+        seen.add(nid)
+        count = len(self.direct_immutable_neighbors(nid))
+        for c in self._mutable_children.get(nid, []):
+            count += self._count_immutables(c, seen)
+        return count
+
+    def sackin_index(self) -> int:
+        total = 0
+        for n in self.nodes:
+            if n.is_immutable and not n.is_root_node:
+                parent_edges = [
+                    e
+                    for e in self.edges
+                    if (e.source_id == n.id or e.target_id == n.id)
+                ]
+                depth = 1
+                for e in parent_edges:
+                    other = e.target_id if e.source_id == n.id else e.source_id
+                    if other in self.node_map and not self.node_map[other].is_immutable:
+                        depth = 1 + self.tree_depth_from_genesis.get(other, 0)
+                        break
+                total += depth
+        return total
+
+    def immutable_reachability_within_k(self, k: int = 3) -> float:
+        if not self.genesis_id:
+            return 0.0
+        imm_nodes = [n for n in self.nodes if n.is_immutable and not n.is_root_node]
+        if not imm_nodes:
+            return 100.0
+        g = nx.Graph()
+        g.add_node(self.genesis_id)
+        for e in self.edges:
+            g.add_edge(e.source_id, e.target_id)
+        reachable = 0
+        try:
+            lengths = nx.single_source_shortest_path_length(
+                g, self.genesis_id, cutoff=k
+            )
+        except Exception:
+            return 0.0
+        for n in imm_nodes:
+            if n.id in lengths:
+                reachable += 1
+        return round(100.0 * reachable / len(imm_nodes), 2)
+
+    def health_metrics(self, k: int = 3) -> Dict[str, Any]:
+        max_depth = max(self.tree_depth_from_genesis.values(), default=0)
+        max_deg = max(
+            (self.degree(n.id) for n in self.nodes if not n.is_immutable), default=0
+        )
+        return {
+            "max_mutable_depth": max_depth,
+            "max_mutable_degree": max_deg,
+            "sackin_index": self.sackin_index(),
+            "immutable_reachable_pct_within_k": self.immutable_reachability_within_k(k),
+            "hop_k": k,
+        }
+
+    def recompute_and_persist_metadata(self) -> None:
+        for n in self.nodes:
+            if n.is_immutable or n.is_root_node:
+                continue
+            misc_ids = [m.id for m in self.direct_immutable_neighbors(n.id)]
+            meta = dict(n.metadata)
+            meta["tree_depth_from_genesis"] = self.tree_depth_from_genesis.get(n.id, 0)
+            meta["subtree_mut_height"] = self.subtree_mut_height.get(n.id, 0)
+            meta["strahler_order"] = self.strahler_order.get(n.id, 1)
+            meta["subtree_immutable_count"] = self.subtree_immutable_count.get(n.id, 0)
+            meta["miscellaneous_immutable_ids"] = misc_ids
+            n.metadata = meta
+            n.updated_at = __import__("time").time()
+            db_engine.upsert_node(n)
+
+
+@dataclass
 class GraphAnalyticsWorker:
-    """Worker handling Hub Centrality ranking and Leiden/Louvain community detection."""
+    """Tree index and graph health metrics (v0.2 — no eigenvector / Voronoi hubs)."""
 
     @staticmethod
     def build_rustworkx_graph(
         project_id: Optional[str] = None,
     ) -> Tuple[rx.PyDiGraph, Dict[int, str], Dict[str, int]]:
-        """Construct a PyDiGraph from MongoDB/InMemory node and edge collections."""
         nodes = db_engine.get_nodes(project_id)
         edges = db_engine.get_edges(project_id)
-
         graph = rx.PyDiGraph()
         node_id_to_idx: Dict[str, int] = {}
         idx_to_node_id: Dict[int, str] = {}
-
         for n in nodes:
             idx = graph.add_node(n.id)
             node_id_to_idx[n.id] = idx
             idx_to_node_id[idx] = n.id
-
         for e in edges:
             if e.source_id in node_id_to_idx and e.target_id in node_id_to_idx:
                 s_idx = node_id_to_idx[e.source_id]
                 t_idx = node_id_to_idx[e.target_id]
                 edge_data = {
-                    "weight": 1.0,  # Unweighted topological link (w=1.0)
+                    "weight": 1.0,
                     "status": e.status,
                     "is_directional": getattr(e, "is_directional", True),
                     "description": getattr(e, "description", ""),
                 }
                 graph.add_edge(s_idx, t_idx, edge_data)
-                # If undirected, add reciprocal edge for symmetric PageRank and traversal
                 if not getattr(e, "is_directional", True):
                     graph.add_edge(t_idx, s_idx, edge_data)
-
         return graph, idx_to_node_id, node_id_to_idx
 
     @staticmethod
-    def calculate_hub_centrality(project_id: Optional[str] = None) -> Dict[str, float]:
-        """Compute unweighted eigenvector centrality via rustworkx to rank foundational concept hubs."""
-        graph, idx_to_node_id, _ = GraphAnalyticsWorker.build_rustworkx_graph(
-            project_id
-        )
-        if len(graph) == 0:
-            return {}
-
-        # Unweighted eigenvector centrality via rustworkx (with fallback to degree centrality)
-        try:
-            centrality_map = rx.eigenvector_centrality(graph, weight_fn=lambda e: 1.0)
-        except Exception:
-            # Fallback to in-degree centrality
-            centrality_map = {}
-            for idx in graph.node_indices():
-                centrality_map[idx] = float(
-                    graph.in_degree(idx) + graph.out_degree(idx)
-                )
-
-        res = {}
-        for idx, score in centrality_map.items():
-            node_id = idx_to_node_id.get(idx)
-            if node_id:
-                res[node_id] = round(score, 4)
-
-        return res
+    def build_tree_index(project_id: Optional[str] = None) -> MutableTreeIndex:
+        return MutableTreeIndex(project_id=project_id)
 
     @staticmethod
-    def partition_department_communities(
-        project_id: Optional[str] = None,
-        hubs: Optional[List[GraphNode]] = None,
-        max_depth: int = 5,
-    ) -> Dict[str, List[str]]:
-        """Partition concept nodes into mutually exclusive Department Communities anchored to concept hubs using topological Voronoi distance.
-
-        Nodes exceeding max_depth hops from a hub remain unassigned to preserve locality.
-        """
-        nodes = db_engine.get_nodes(project_id)
-        if not nodes:
-            return {}
-
-        # If hubs not passed explicitly, discover top candidate mutable concept hubs
-        if hubs is None:
-            top_hub_tuples = GraphAnalyticsWorker.get_top_concept_hubs(project_id)
-            hubs = [h[0] for h in top_hub_tuples]
-
-        if not hubs:
-            return {}
-
-        edges = db_engine.get_edges(project_id)
-
-        # Build undirected graph for topological distance metric
-        nx_graph = nx.Graph()
-        for n in nodes:
-            nx_graph.add_node(n.id)
-
-        for e in edges:
-            nx_graph.add_edge(e.source_id, e.target_id, weight=1.0)
-
-        hub_ids = [h.id for h in hubs]
-        centralities = GraphAnalyticsWorker.calculate_hub_centrality(project_id)
-
-        # Multi-source shortest path Voronoi partitioning bounded by max_depth:
-        # Compute shortest topological path from each hub to reachable nodes within max_depth hops
-        distances_from_hubs: Dict[str, Dict[str, int]] = {}
-        for h_id in hub_ids:
-            try:
-                distances_from_hubs[h_id] = nx.single_source_shortest_path_length(
-                    nx_graph, h_id, cutoff=max_depth
-                )
-            except Exception:
-                distances_from_hubs[h_id] = {h_id: 0}
-
-        department_map: Dict[str, List[str]] = {h_id: [] for h_id in hub_ids}
-
-        # Assign each node to its closest department hub strictly within max_depth hops
-        for n in nodes:
-            best_hub = None
-            best_dist = float("inf")
-            best_score = -1.0
-
-            for h_id in hub_ids:
-                d = distances_from_hubs[h_id].get(n.id, float("inf"))
-                if d > max_depth:
-                    continue
-                score = centralities.get(h_id, 0.0)
-
-                # Minimize distance; break ties by highest hub centrality, then lexicographical order
-                if d < best_dist:
-                    best_dist = d
-                    best_hub = h_id
-                    best_score = score
-                elif d == best_dist and score > best_score:
-                    best_hub = h_id
-                    best_score = score
-                elif (
-                    d == best_dist
-                    and score == best_score
-                    and best_hub
-                    and h_id < best_hub
-                ):
-                    best_hub = h_id
-
-            # Only assign if within max_depth (no unbounded fallback)
-            if best_hub is not None and best_dist <= max_depth:
-                department_map[best_hub].append(n.id)
-
-        # Ensure the hub itself is in its own partition
-        for h_id in hub_ids:
-            if h_id not in department_map[h_id]:
-                department_map[h_id].append(h_id)
-
-        return department_map
-
-    @staticmethod
-    def get_top_concept_hubs(
-        project_id: Optional[str] = None,
-        max_k: int = 8,
-        relative_threshold: float = 0.30,
-    ) -> List[ConceptHubCandidate]:
-        """Identify mutable domain concept hub nodes dynamically using eigenvector/degree centrality with relative thresholding."""
-        # Filter candidate concept hubs: strictly Mutable Concepts (excludes Root Nodes & Immutable Intra-Document Concepts)
-        all_nodes = db_engine.get_nodes(project_id)
-        mutable_concept_hubs = [
-            n
-            for n in all_nodes
-            if n.node_type.lower() == "concept" and not n.is_immutable
-        ]
-
-        # If no mutable concept hubs exist, return empty (never fallback to immutable concept nodes or root nodes)
-        if not mutable_concept_hubs:
-            return []
-
-        centralities = GraphAnalyticsWorker.calculate_hub_centrality(project_id)
-
-        # Filter scores strictly for candidate concept hubs
-        concept_scores: List[Tuple[GraphNode, float]] = []
-        for c_node in mutable_concept_hubs:
-            score = centralities.get(c_node.id, 0.0)
-            concept_scores.append((c_node, score))
-
-        # Sort descending by centrality score
-        concept_scores.sort(key=lambda x: x[1], reverse=True)
-
-        if not concept_scores:
-            return []
-
-        max_score = concept_scores[0][1]
-
-        # Apply relative thresholding (s_i >= relative_threshold * max_score)
-        selected_hubs: List[ConceptHubCandidate] = []
-        for c_node, score in concept_scores:
-            # Always include the top hub; for others, enforce relative thresholding
-            if not selected_hubs or score >= (max_score * relative_threshold):
-                selected_hubs.append(
-                    ConceptHubCandidate(node=c_node, centrality_score=score)
-                )
-                if len(selected_hubs) >= max_k:
-                    break
-
-        # GUARANTEE: The primordial Universal Genesis node ('Everything') must ALWAYS be present in candidate hubs
-        genesis_node = db_engine.get_genesis_node(project_id)
-        if genesis_node:
-            selected_ids = {h.id for h in selected_hubs}
-            if genesis_node.id not in selected_ids:
-                genesis_score = centralities.get(genesis_node.id, 0.0)
-                selected_hubs.append(
-                    ConceptHubCandidate(
-                        node=genesis_node, centrality_score=genesis_score
-                    )
-                )
-
-        return selected_hubs
+    def refresh_tree_metadata(project_id: Optional[str] = None) -> Dict[str, Any]:
+        idx = MutableTreeIndex(project_id=project_id)
+        idx.recompute_and_persist_metadata()
+        return idx.health_metrics()
 
 
 graph_analytics = GraphAnalyticsWorker()

@@ -32,6 +32,7 @@ interface MemexState {
   sendMessage: (text: string, isVoice?: boolean) => Promise<void>;
   createProjectWorkspace: (name: string, description: string) => Promise<void>;
   deleteNode: (nodeId: string) => Promise<boolean>;
+  updateNodeDescription: (nodeId: string, description: string) => Promise<boolean>;
 }
 
 const initialDefaultChat: Record<string, ChatMessage[]> = {};
@@ -134,6 +135,31 @@ export const useMemexStore = create<MemexState>((set, get) => ({
       }
     } catch (err) {
       console.error(`Failed to clear chat history for ${projId}:`, err);
+    }
+  },
+
+  updateNodeDescription: async (nodeId: string, description: string) => {
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description }),
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to update node');
+      }
+      const data = await res.json();
+      const updated = data.node;
+      set((state) => ({
+        nodes: state.nodes.map((n) =>
+          n.id === nodeId ? { ...n, description: updated.description ?? description } : n
+        ),
+      }));
+      return true;
+    } catch (err) {
+      console.error('Failed to update node description:', err);
+      return false;
     }
   },
 

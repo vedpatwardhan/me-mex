@@ -1,35 +1,29 @@
 """
-Graph Ingestion & Command Execution Engine: Me-Mex
-
-Aligned with docs/ARCHITECTURE.md Section 4:
-- Executes independent, zero-consensus graph modifications proposed by Specialist Personas.
-- Enforces strict Node Mutability Hierarchy:
-    - Root Nodes (`ROOT`) and Intra-Document Concepts (`metadata.immutable = True`) are completely IMMUTABLE.
-      Direct mutations (`EDIT_CONCEPT`, `DELETE_CONCEPT`, `SPLIT_CONCEPT`) targeting immutable nodes are strictly blocked.
-    - Persona-created Domain Hubs and Intermediate nodes (`metadata.immutable = False`) are MUTABLE.
-- Processes actions (`CONNECT_DIRECT`, `CREATE_INTERMEDIATE`, `EDIT_CONCEPT` on mutable nodes, `SPLIT_CONCEPT` on mutable nodes) directly.
-- Multi-persona debates and consensus resolution loops have been completely deprecated and removed.
+Graph Ingestion & Command Execution Engine: Me-Mex v0.2
 """
 
-import json
 import uuid
 import time
-from typing import List, Dict, Any, Generator, Optional
+from typing import List, Dict, Any, Optional, Set
+
+from app.config import settings
 from app.db import db_engine
-from app.models import (
-    GraphNode,
-    GraphEdge,
-)
+from app.models import GraphNode, GraphEdge
 from app.services.event_queue import event_queue
-from app.services.llm_gateway import llm_gateway
+from app.services.graph_analytics import MutableTreeIndex, graph_analytics
+
+
+def _is_genesis(node: GraphNode) -> bool:
+    return bool(
+        node.metadata.get("is_genesis") or node.title.strip().lower() == "everything"
+    )
 
 
 class GraphIngestionEngine:
-    """Service handling zero-consensus independent command execution and node mutability enforcement."""
+    """Zero-consensus command execution with engine-dispatch reorganization commits."""
 
     def __init__(self):
         self.db = db_engine
-        self.llm = llm_gateway
         self.event_queue = event_queue
 
     def execute_single_command(
@@ -38,305 +32,397 @@ class GraphIngestionEngine:
         doc_title: str,
         proj_list: List[str],
     ) -> Optional[Dict[str, Any]]:
-        """
-        Executes a single persona command against the MongoDB database, enforcing node mutability rules.
-        """
         action = item.get("action") or item.get("command_type")
-        dept_name = item.get("department_name", "Ingestion Engine")
-        persona_id = item.get("persona_id")
+        dept_name = item.get("department_name", "Graph Navigator")
+        persona_id = item.get("persona_id") or item.get("navigator_id")
 
-        # 1. Action: CREATE_EDGE / CONNECT_DIRECT (Connect concepts with qualitative relation edge)
         if action in ["CREATE_EDGE", "CONNECT_DIRECT", "CONSTRUCT_EDGE"]:
-            edge_data = item.get("edge", {})
-            src_id = edge_data.get("source_id")
-            tgt_id = edge_data.get("target_id")
-            if src_id and tgt_id:
-                # Radial Tree Invariant Guard: Prevent duplicate edges between the same source and target
-                project_scope = proj_list[0] if proj_list else None
-                existing_edges = self.db.get_edges(project_scope)
-                for existing in existing_edges:
-                    if (
-                        existing.source_id == src_id and existing.target_id == tgt_id
-                    ) or (
-                        existing.source_id == tgt_id and existing.target_id == src_id
-                    ):
-                        return None  # Edge already exists, skip redundant duplicate
+            return self._create_edge(item, proj_list, dept_name, persona_id)
 
-                edge_id = f"edge_{uuid.uuid4().hex[:8]}"
-                edge_obj = GraphEdge(
-                    _id=edge_id,
-                    source_id=src_id,
-                    target_id=tgt_id,
-                    description=edge_data.get("description", "Related concept link"),
-                    project_ids=proj_list,
-                )
-                self.db.upsert_edge(edge_obj)
-                tgt_node = self.db.get_node(tgt_id)
-                src_node = self.db.get_node(src_id)
-                tgt_title = tgt_node.title if tgt_node else tgt_id
-                src_title = src_node.title if src_node else src_id
-                return {
-                    "event": "node_touched",
-                    "persona_id": persona_id,
-                    "persona_name": dept_name,
-                    "node_id": tgt_id,
-                    "node_title": tgt_title,
-                    "message": f"Connected concept '{src_title}' -> '{tgt_title}' ({edge_data.get('description', '')}).",
-                    "timestamp": time.time(),
-                }
+        if action in ["CREATE_INTERMEDIATE", "CREATE_CONCEPT"]:
+            return self._create_intermediate(item, proj_list, dept_name, persona_id)
 
-        # 2. Action: CREATE_INTERMEDIATE (Create new mutable domain bridge concept)
-        elif action in ["CREATE_INTERMEDIATE", "CREATE_CONCEPT"]:
-            concept_data = item.get("concept", {})
-            c_title = concept_data.get("title")
-            if c_title:
-                c_id = f"concept_{uuid.uuid4().hex[:8]}"
-                new_node = GraphNode(
-                    _id=c_id,
-                    node_type="CONCEPT",
-                    title=c_title,
-                    description=concept_data.get("description", ""),
-                    passage_ids=concept_data.get("passage_ids", []),
-                    project_ids=proj_list,
-                    metadata={
-                        "immutable": False,
-                        "status": "PRIMARY_ACTIVE",
-                    },  # Mutable domain bridge
-                )
-                self.db.upsert_node(new_node)
+        if action == "EDIT_CONCEPT":
+            return self._edit_concept(item, dept_name, persona_id)
 
-                # Connect associated edges for the intermediate node
-                for edge_info in item.get("edges", []):
-                    edge_id = f"edge_{uuid.uuid4().hex[:8]}"
-                    src = edge_info.get("source_id", c_id)
-                    tgt = edge_info.get("target_id", c_id)
-                    edge_obj = GraphEdge(
-                        _id=edge_id,
-                        source_id=src,
-                        target_id=tgt,
-                        description=edge_info.get("description", "Bridge relationship"),
-                        project_ids=proj_list,
-                    )
-                    self.db.upsert_edge(edge_obj)
-
-                return {
-                    "event": "node_touched",
-                    "persona_id": persona_id,
-                    "persona_name": dept_name,
-                    "node_id": c_id,
-                    "node_title": c_title,
-                    "message": f"Created intermediate domain concept '{c_title}'.",
-                    "timestamp": time.time(),
-                }
-
-        # 3. Action: EDIT_CONCEPT (Mutate existing mutable domain concept)
-        elif action == "EDIT_CONCEPT":
-            concept_data = item.get("concept", {})
-            target_id = concept_data.get("id")
-            if target_id:
-                target_node = self.db.get_node(target_id)
-                # IMMUTABILITY SAFETY CHECK: Block edits targeting immutable nodes
-                if target_node and target_node.is_immutable:
-                    print(
-                        f"[{dept_name}] MUTABILITY BLOCK: Cannot edit immutable node '{target_id}'."
-                    )
-                    return None
-
-                if target_node:
-                    target_node.title = concept_data.get("title", target_node.title)
-                    target_node.description = concept_data.get(
-                        "description", target_node.description
-                    )
-                    target_node.updated_at = time.time()
-                    self.db.upsert_node(target_node)
-                    return {
-                        "event": "node_touched",
-                        "persona_id": persona_id,
-                        "persona_name": dept_name,
-                        "node_id": target_id,
-                        "node_title": target_node.title,
-                        "message": f"Edited mutable domain concept '{target_node.title}'.",
-                        "timestamp": time.time(),
-                    }
-
-        # 4. Action: SPLIT_CONCEPT (Non-destructive intermediate subdivision & re-wiring)
-        elif action == "SPLIT_CONCEPT":
-            concept_id = item.get("concept_id") or item.get("concept", {}).get("id")
-            if concept_id:
-                target_node = self.db.get_node(concept_id)
-                # IMMUTABILITY SAFETY CHECK: Block splitting immutable nodes
-                if target_node and target_node.is_immutable:
-                    print(
-                        f"[{dept_name}] MUTABILITY BLOCK: Cannot split immutable node '{concept_id}'."
-                    )
-                    return None
-
-                sub_concepts = item.get("sub_concepts", [])
-                rewired_edges = item.get("rewired_edges", [])
-                if target_node and sub_concepts:
-                    # PRESERVE ORIGINAL HUB: Target node remains as umbrella concept node!
-                    sub_alias_map: Dict[str, str] = {}
-
-                    # Insert newly created sub-concept nodes & connect to original hub
-                    for sub in sub_concepts:
-                        new_sub_id = f"concept_{uuid.uuid4().hex[:8]}"
-                        alias = sub.get("sub_id_alias")
-                        if alias:
-                            sub_alias_map[alias] = new_sub_id
-
-                        sub_node = GraphNode(
-                            _id=new_sub_id,
-                            node_type="CONCEPT",
-                            title=sub.get("title", "Split Sub-Concept"),
-                            description=sub.get("description", ""),
-                            passage_ids=sub.get("passage_ids", target_node.passage_ids),
-                            project_ids=proj_list,
-                            metadata={"immutable": False, "sub_of_hub": concept_id},
-                        )
-                        self.db.upsert_node(sub_node)
-
-                        # Link sub-concept directly to original target concept hub
-                        hub_edge = GraphEdge(
-                            _id=f"edge_{uuid.uuid4().hex[:8]}",
-                            source_id=new_sub_id,
-                            target_id=concept_id,
-                            description="SUBSET_OF",
-                            project_ids=proj_list,
-                        )
-                        self.db.upsert_edge(hub_edge)
-
-                    # Re-wire neighbor edges to target the new sub-concepts (removing old link to umbrella hub)
-                    project_scope = proj_list[0] if proj_list else None
-                    current_edges = self.db.get_edges(project_scope)
-                    deleted_neighbors = set()
-                    connected_sub_aliases = set()
-
-                    for rewired in rewired_edges:
-                        neighbor_id = rewired.get("neighbor_id")
-                        sub_alias = rewired.get("connect_to_sub_alias")
-                        target_sub_id = sub_alias_map.get(sub_alias)
-                        if neighbor_id and target_sub_id:
-                            connected_sub_aliases.add(sub_alias)
-                            # 1. Remove old edge between neighbor and original umbrella hub (only once per neighbor)
-                            if neighbor_id not in deleted_neighbors:
-                                for old_edge in current_edges:
-                                    if (
-                                        old_edge.source_id == neighbor_id
-                                        and old_edge.target_id == concept_id
-                                    ) or (
-                                        old_edge.source_id == concept_id
-                                        and old_edge.target_id == neighbor_id
-                                    ):
-                                        self.db.delete_edge(old_edge.id)
-                                deleted_neighbors.add(neighbor_id)
-
-                            # 2. Add cleanly rewired edge pointing to the specific sub-concept
-                            rewired_edge = GraphEdge(
-                                _id=f"edge_{uuid.uuid4().hex[:8]}",
-                                source_id=neighbor_id,
-                                target_id=target_sub_id,
-                                description=rewired.get("relation_type", "RELEVANT_TO"),
-                                project_ids=proj_list,
-                            )
-                            self.db.upsert_edge(rewired_edge)
-                        else:
-                            print(
-                                f"[{dept_name}] Warning: Rewire item skipped (neighbor_id: {neighbor_id}, "
-                                f"sub_alias: {sub_alias}, target_sub_id: {target_sub_id})"
-                            )
-
-                    # Update parent hub title & description to accommodate new sub-concepts and broader scope
-                    new_title = item.get("hub_title")
-                    new_desc = item.get("hub_description")
-                    if new_title and target_node.title.lower() != "everything":
-                        target_node.title = new_title.strip()
-                    if new_desc:
-                        target_node.description = new_desc.strip()
-                    target_node.updated_at = time.time()
-                    self.db.upsert_node(target_node)
-
-                    print(
-                        f"[{dept_name}] Reorganization commit for '{target_node.title}': "
-                        f"Created {len(sub_concepts)} sub-concepts, rewired {len(deleted_neighbors)} neighbors."
-                    )
-
-                    # Defensive Guard: Ensure every sub-concept has at least one neighbor connection
-                    # If any sub-concept was omitted in rewired_edges, link it to the first available neighbor
-                    if deleted_neighbors and len(sub_alias_map) > len(
-                        connected_sub_aliases
-                    ):
-                        primary_neighbor_id = next(iter(deleted_neighbors))
-                        for alias, sub_id in sub_alias_map.items():
-                            if alias not in connected_sub_aliases:
-                                fallback_edge = GraphEdge(
-                                    _id=f"edge_{uuid.uuid4().hex[:8]}",
-                                    source_id=primary_neighbor_id,
-                                    target_id=sub_id,
-                                    description="RELEVANT_TO",
-                                    project_ids=proj_list,
-                                )
-                                self.db.upsert_edge(fallback_edge)
-
-                    return {
-                        "event": "node_touched",
-                        "persona_id": persona_id,
-                        "persona_name": dept_name,
-                        "node_id": concept_id,
-                        "node_title": target_node.title,
-                        "message": (
-                            f"Subdivided concept hub '{target_node.title}' into "
-                            f"{len(sub_concepts)} intermediate sub-concepts."
-                        ),
-                        "timestamp": time.time(),
-                    }
+        if action == "SPLIT_CONCEPT":
+            return self._split_concept(item, proj_list, dept_name, persona_id)
 
         return None
 
-    def process_persona_ingestion_commands(
-        self,
-        persona_command_results: List[Dict[str, Any]],
-        doc_id: str,
-        doc_title: str,
-        consolidated_concepts: List[Dict[str, Any]],
-        project_id: str = "global",
-    ) -> Generator[Dict[str, Any], None, None]:
-        """
-        Processes persona ingestion and reorganization commands independently without consensus debate.
-        """
-        proj_list = [project_id] if project_id != "global" else ["global"]
+    def _create_edge(self, item, proj_list, dept_name, persona_id):
+        edge_data = item.get("edge", {})
+        src_id = edge_data.get("source_id")
+        tgt_id = edge_data.get("target_id")
+        if not (src_id and tgt_id):
+            return None
+        project_scope = proj_list[0] if proj_list else None
+        for existing in self.db.get_edges(project_scope):
+            if (existing.source_id == src_id and existing.target_id == tgt_id) or (
+                existing.source_id == tgt_id and existing.target_id == src_id
+            ):
+                return None
 
-        # Collect flat sequence of commands from all personas
-        for res in persona_command_results:
-            dept_name = res.get("department_name", "Ingestion Specialist")
-            commands = res.get("commands", [])
-
-            for cmd in commands:
-                cmd_item = {
-                    "department_name": dept_name,
-                    "action": cmd.get("action") or cmd.get("command_type"),
-                    "concept": cmd.get("concept"),
-                    "concept_id": cmd.get("concept_id"),
-                    "sub_concepts": cmd.get("sub_concepts"),
-                    "edge": cmd.get("edge"),
-                    "edges": cmd.get("edges"),
-                }
-                evt = self.execute_single_command(
-                    item=cmd_item, doc_title=doc_title, proj_list=proj_list
-                )
-                if evt:
-                    self.event_queue.push(project_id, evt)
-                    yield evt
-
-        summary_evt = {
-            "event": "ingestion_completed",
-            "doc_id": doc_id,
-            "title": doc_title,
-            "concepts_count": len(consolidated_concepts),
-            "message": f"Document '{doc_title}' successfully ingested and merged into knowledge graph.",
+        link_class = (
+            edge_data.get("link_class") or item.get("link_class") or "clustered"
+        )
+        edge_id = f"edge_{uuid.uuid4().hex[:8]}"
+        edge_obj = GraphEdge(
+            _id=edge_id,
+            source_id=src_id,
+            target_id=tgt_id,
+            description=edge_data.get("description", "RELEVANT_TO"),
+            project_ids=proj_list,
+            metadata={"link_class": link_class},
+        )
+        self.db.upsert_edge(edge_obj)
+        tgt_node = self.db.get_node(tgt_id)
+        src_node = self.db.get_node(src_id)
+        return {
+            "event": "node_touched",
+            "persona_id": persona_id,
+            "persona_name": dept_name,
+            "node_id": tgt_id,
+            "node_title": tgt_node.title if tgt_node else tgt_id,
+            "message": f"Connected '{src_node.title if src_node else src_id}' -> '{tgt_node.title if tgt_node else tgt_id}'.",
             "timestamp": time.time(),
         }
-        self.event_queue.push(project_id, summary_evt)
-        yield summary_evt
+
+    def _create_intermediate(self, item, proj_list, dept_name, persona_id):
+        concept_data = item.get("concept", {})
+        c_title = concept_data.get("title")
+        if not c_title:
+            return None
+        c_id = f"concept_{uuid.uuid4().hex[:8]}"
+        new_node = GraphNode(
+            _id=c_id,
+            node_type="CONCEPT",
+            title=c_title,
+            description=concept_data.get("description", ""),
+            passage_ids=concept_data.get("passage_ids", []),
+            project_ids=proj_list,
+            metadata={"immutable": False, "status": "PRIMARY_ACTIVE"},
+        )
+        self.db.upsert_node(new_node)
+        for edge_info in item.get("edges", []):
+            edge_obj = GraphEdge(
+                _id=f"edge_{uuid.uuid4().hex[:8]}",
+                source_id=edge_info.get("source_id", c_id),
+                target_id=edge_info.get("target_id", c_id),
+                description=edge_info.get("description", "SUBSET_OF"),
+                project_ids=proj_list,
+            )
+            self.db.upsert_edge(edge_obj)
+        return {
+            "event": "node_touched",
+            "persona_id": persona_id,
+            "persona_name": dept_name,
+            "node_id": c_id,
+            "node_title": c_title,
+            "message": f"Created intermediate concept '{c_title}'.",
+            "timestamp": time.time(),
+        }
+
+    def _edit_concept(self, item, dept_name, persona_id):
+        concept_data = item.get("concept", {})
+        target_id = concept_data.get("id")
+        if not target_id:
+            return None
+        target_node = self.db.get_node(target_id)
+        if not target_node or target_node.is_immutable:
+            return None
+        new_title = concept_data.get("title")
+        if new_title and not _is_genesis(target_node):
+            target_node.title = new_title
+        if concept_data.get("description") is not None:
+            target_node.description = concept_data.get(
+                "description", target_node.description
+            )
+        target_node.updated_at = time.time()
+        self.db.upsert_node(target_node)
+        return {
+            "event": "node_touched",
+            "persona_id": persona_id,
+            "persona_name": dept_name,
+            "node_id": target_id,
+            "node_title": target_node.title,
+            "message": f"Edited concept '{target_node.title}'.",
+            "timestamp": time.time(),
+        }
+
+    def _split_concept(self, item, proj_list, dept_name, persona_id):
+        concept_id = item.get("concept_id") or item.get("concept", {}).get("id")
+        if not concept_id:
+            return None
+        target_node = self.db.get_node(concept_id)
+        if not target_node or target_node.is_immutable:
+            return None
+        sub_concepts = item.get("sub_concepts", [])
+        rewired_edges = item.get("rewired_edges", [])
+        if not sub_concepts:
+            return None
+
+        project_scope = proj_list[0] if proj_list else None
+        if _is_genesis(target_node):
+            evt = self._apply_wrapper_split(
+                target_node, sub_concepts, rewired_edges, item, proj_list, project_scope
+            )
+        else:
+            evt = self._apply_lateral_split(
+                target_node, sub_concepts, rewired_edges, item, proj_list, project_scope
+            )
+
+        if evt:
+            graph_analytics.refresh_tree_metadata(project_scope)
+            evt["persona_id"] = persona_id
+            evt["persona_name"] = dept_name
+            evt["reorg_strategy"] = "wrapper" if _is_genesis(target_node) else "lateral"
+        return evt
+
+    def _apply_wrapper_split(
+        self,
+        target_node: GraphNode,
+        sub_concepts: List[Dict],
+        rewired_edges: List[Dict],
+        item: Dict,
+        proj_list: List[str],
+        project_scope: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        concept_id = target_node.id
+        sub_alias_map: Dict[str, str] = {}
+        for sub in sub_concepts:
+            new_sub_id = f"concept_{uuid.uuid4().hex[:8]}"
+            alias = sub.get("sub_id_alias")
+            if alias:
+                sub_alias_map[alias] = new_sub_id
+            sub_node = GraphNode(
+                _id=new_sub_id,
+                node_type="CONCEPT",
+                title=sub.get("title", "Split Sub-Concept"),
+                description=sub.get("description", ""),
+                passage_ids=sub.get("passage_ids", target_node.passage_ids),
+                project_ids=proj_list,
+                metadata={"immutable": False, "sub_of_hub": concept_id},
+            )
+            self.db.upsert_node(sub_node)
+            self.db.upsert_edge(
+                GraphEdge(
+                    _id=f"edge_{uuid.uuid4().hex[:8]}",
+                    source_id=new_sub_id,
+                    target_id=concept_id,
+                    description="SUBSET_OF",
+                    project_ids=proj_list,
+                )
+            )
+
+        current_edges = self.db.get_edges(project_scope)
+        deleted_neighbors = self._rewire_neighbors(
+            concept_id, rewired_edges, sub_alias_map, current_edges, proj_list
+        )
+
+        new_desc = item.get("hub_description")
+        if new_desc:
+            target_node.description = new_desc.strip()
+        target_node.updated_at = time.time()
+        self.db.upsert_node(target_node)
+
+        return {
+            "event": "reorg_completed",
+            "node_id": concept_id,
+            "node_title": target_node.title,
+            "message": (
+                f"Genesis wrapper split: {len(sub_concepts)} department hub(s), "
+                f"{len(deleted_neighbors)} neighbors rewired."
+            ),
+            "timestamp": time.time(),
+        }
+
+    def _apply_lateral_split(
+        self,
+        target_node: GraphNode,
+        sub_concepts: List[Dict],
+        rewired_edges: List[Dict],
+        item: Dict,
+        proj_list: List[str],
+        project_scope: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        tree = MutableTreeIndex(project_id=project_scope)
+        parent_id = tree.parent_of(target_node.id)
+        if not parent_id:
+            return self._apply_wrapper_split(
+                target_node, sub_concepts, rewired_edges, item, proj_list, project_scope
+            )
+
+        sub_alias_map: Dict[str, str] = {}
+        if sub_concepts:
+            first = sub_concepts[0]
+            sub_alias_map[first.get("sub_id_alias", "sub_1")] = target_node.id
+            target_node.title = first.get("title", target_node.title)
+            target_node.description = first.get("description", target_node.description)
+            target_node.updated_at = time.time()
+            self.db.upsert_node(target_node)
+
+        for sub in sub_concepts[1:]:
+            new_id = f"concept_{uuid.uuid4().hex[:8]}"
+            alias = sub.get("sub_id_alias")
+            if alias:
+                sub_alias_map[alias] = new_id
+            sibling = GraphNode(
+                _id=new_id,
+                node_type="CONCEPT",
+                title=sub.get("title", "Sibling Concept"),
+                description=sub.get("description", ""),
+                project_ids=proj_list,
+                metadata={"immutable": False, "lateral_split_of": target_node.id},
+            )
+            self.db.upsert_node(sibling)
+            self.db.upsert_edge(
+                GraphEdge(
+                    _id=f"edge_{uuid.uuid4().hex[:8]}",
+                    source_id=new_id,
+                    target_id=parent_id,
+                    description="SUBSET_OF",
+                    project_ids=proj_list,
+                )
+            )
+
+        old_parent_edge_removed = False
+        current_edges = self.db.get_edges(project_scope)
+        for e in list(current_edges):
+            if (
+                e.source_id == target_node.id
+                and e.target_id == parent_id
+                and _is_subset_edge(e)
+            ):
+                self.db.delete_edge(e.id)
+                old_parent_edge_removed = True
+        if old_parent_edge_removed or sub_concepts:
+            self.db.upsert_edge(
+                GraphEdge(
+                    _id=f"edge_{uuid.uuid4().hex[:8]}",
+                    source_id=target_node.id,
+                    target_id=parent_id,
+                    description="SUBSET_OF",
+                    project_ids=proj_list,
+                )
+            )
+
+        deleted = self._rewire_neighbors_lateral(
+            hub_id=target_node.id,
+            parent_id=parent_id,
+            rewired_edges=rewired_edges,
+            sub_alias_map=sub_alias_map,
+            current_edges=self.db.get_edges(project_scope),
+            proj_list=proj_list,
+        )
+
+        return {
+            "event": "reorg_completed",
+            "node_id": target_node.id,
+            "node_title": target_node.title,
+            "message": (
+                f"Lateral split under parent '{parent_id}': "
+                f"{len(sub_concepts)} sibling hub(s), {len(deleted)} neighbors rewired."
+            ),
+            "timestamp": time.time(),
+        }
+
+    def _rewire_neighbors(
+        self,
+        hub_id: str,
+        rewired_edges: List[Dict],
+        sub_alias_map: Dict[str, str],
+        current_edges: List[GraphEdge],
+        proj_list: List[str],
+    ) -> Set[str]:
+        deleted_neighbors: Set[str] = set()
+        for rewired in rewired_edges:
+            neighbor_id = rewired.get("neighbor_id")
+            sub_alias = rewired.get("connect_to_sub_alias")
+            target_sub_id = sub_alias_map.get(sub_alias)
+            if not (neighbor_id and target_sub_id):
+                continue
+            if neighbor_id not in deleted_neighbors:
+                for old_edge in current_edges:
+                    if (
+                        old_edge.source_id == neighbor_id
+                        and old_edge.target_id == hub_id
+                    ) or (
+                        old_edge.source_id == hub_id
+                        and old_edge.target_id == neighbor_id
+                    ):
+                        self.db.delete_edge(old_edge.id)
+                deleted_neighbors.add(neighbor_id)
+            self.db.upsert_edge(
+                GraphEdge(
+                    _id=f"edge_{uuid.uuid4().hex[:8]}",
+                    source_id=neighbor_id,
+                    target_id=target_sub_id,
+                    description=rewired.get("relation_type", "RELEVANT_TO"),
+                    project_ids=proj_list,
+                    metadata={"link_class": rewired.get("link_class", "clustered")},
+                )
+            )
+        return deleted_neighbors
+
+    def _rewire_neighbors_lateral(
+        self,
+        hub_id: str,
+        parent_id: str,
+        rewired_edges: List[Dict],
+        sub_alias_map: Dict[str, str],
+        current_edges: List[GraphEdge],
+        proj_list: List[str],
+    ) -> Set[str]:
+        deleted_neighbors: Set[str] = set()
+        for rewired in rewired_edges:
+            neighbor_id = rewired.get("neighbor_id")
+            sub_alias = (rewired.get("connect_to_sub_alias") or "").upper()
+            if not neighbor_id:
+                continue
+            if neighbor_id not in deleted_neighbors:
+                for old_edge in list(current_edges):
+                    if (
+                        old_edge.source_id == neighbor_id
+                        and old_edge.target_id == hub_id
+                    ) or (
+                        old_edge.source_id == hub_id
+                        and old_edge.target_id == neighbor_id
+                    ):
+                        self.db.delete_edge(old_edge.id)
+                deleted_neighbors.add(neighbor_id)
+
+            if sub_alias in ("UNCLUSTERED", "MISC", "PARENT"):
+                self.db.upsert_edge(
+                    GraphEdge(
+                        _id=f"edge_{uuid.uuid4().hex[:8]}",
+                        source_id=neighbor_id,
+                        target_id=parent_id,
+                        description=rewired.get("relation_type", "RELEVANT_TO"),
+                        project_ids=proj_list,
+                        metadata={"link_class": "miscellaneous"},
+                    )
+                )
+                continue
+
+            target_id = sub_alias_map.get(rewired.get("connect_to_sub_alias"))
+            if target_id:
+                self.db.upsert_edge(
+                    GraphEdge(
+                        _id=f"edge_{uuid.uuid4().hex[:8]}",
+                        source_id=neighbor_id,
+                        target_id=target_id,
+                        description=rewired.get("relation_type", "RELEVANT_TO"),
+                        project_ids=proj_list,
+                        metadata={"link_class": rewired.get("link_class", "clustered")},
+                    )
+                )
+        return deleted_neighbors
+
+
+def _is_subset_edge(edge: GraphEdge) -> bool:
+    desc = (edge.description or "").upper()
+    return "SUBSET_OF" in desc
 
 
 graph_ingestion_engine = GraphIngestionEngine()
