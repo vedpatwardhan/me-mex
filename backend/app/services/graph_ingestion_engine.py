@@ -19,6 +19,16 @@ def _is_genesis(node: GraphNode) -> bool:
     )
 
 
+def _ancestor_aliases(sub_alias: str) -> bool:
+    return (sub_alias or "").upper() in (
+        "UNCLUSTERED",
+        "MISC",
+        "PARENT",
+        "ANCESTOR",
+        "EVERYTHING",
+    )
+
+
 class GraphIngestionEngine:
     """Zero-consensus command execution with engine-dispatch reorganization commits."""
 
@@ -65,9 +75,6 @@ class GraphIngestionEngine:
             ):
                 return None
 
-        link_class = (
-            edge_data.get("link_class") or item.get("link_class") or "clustered"
-        )
         edge_id = f"edge_{uuid.uuid4().hex[:8]}"
         edge_obj = GraphEdge(
             _id=edge_id,
@@ -75,7 +82,6 @@ class GraphIngestionEngine:
             target_id=tgt_id,
             description=edge_data.get("description", "RELEVANT_TO"),
             project_ids=proj_list,
-            metadata={"link_class": link_class},
         )
         self.db.upsert_edge(edge_obj)
         tgt_node = self.db.get_node(tgt_id)
@@ -165,20 +171,24 @@ class GraphIngestionEngine:
             return None
 
         project_scope = proj_list[0] if proj_list else None
+        ungrouped = 0
         if _is_genesis(target_node):
             evt = self._apply_wrapper_split(
                 target_node, sub_concepts, rewired_edges, item, proj_list, project_scope
             )
+            strategy = "wrapper"
         else:
-            evt = self._apply_lateral_split(
+            evt, ungrouped = self._apply_lateral_split(
                 target_node, sub_concepts, rewired_edges, item, proj_list, project_scope
             )
+            strategy = "replacement"
 
         if evt:
             graph_analytics.refresh_tree_metadata(project_scope)
             evt["persona_id"] = persona_id
             evt["persona_name"] = dept_name
-            evt["reorg_strategy"] = "wrapper" if _is_genesis(target_node) else "lateral"
+            evt["reorg_strategy"] = strategy
+            evt["ungrouped_to_ancestor_count"] = ungrouped
         return evt
 
     def _apply_wrapper_split(
@@ -218,13 +228,16 @@ class GraphIngestionEngine:
             )
 
         current_edges = self.db.get_edges(project_scope)
-        deleted_neighbors = self._rewire_neighbors(
-            concept_id, rewired_edges, sub_alias_map, current_edges, proj_list
+        deleted_neighbors, ungrouped = self._rewire_neighbors(
+            split_target_id=concept_id,
+            fallback_target_id=concept_id,
+            rewired_edges=rewired_edges,
+            sub_alias_map=sub_alias_map,
+            current_edges=current_edges,
+            proj_list=proj_list,
+            is_genesis_split=True,
         )
 
-        new_title = item.get("parent_title") or item.get("hub_title")
-        if new_title and not _is_genesis(target_node):
-            target_node.title = new_title.strip()
         new_desc = item.get("parent_description") or item.get("hub_description")
         if new_desc:
             target_node.description = new_desc.strip()
@@ -237,7 +250,7 @@ class GraphIngestionEngine:
             "node_title": target_node.title,
             "message": (
                 f"Genesis wrapper split: {len(sub_concepts)} intermediate concept(s), "
-                f"{len(deleted_neighbors)} neighbors rewired."
+                f"{len(deleted_neighbors)} neighbors rewired, {ungrouped} left on Everything."
             ),
             "timestamp": time.time(),
         }
@@ -250,13 +263,14 @@ class GraphIngestionEngine:
         item: Dict,
         proj_list: List[str],
         project_scope: Optional[str],
-    ) -> Optional[Dict[str, Any]]:
+    ) -> tuple[Optional[Dict[str, Any]], int]:
         tree = MutableTreeIndex(project_id=project_scope)
         parent_id = tree.parent_of(target_node.id)
         if not parent_id:
-            return self._apply_wrapper_split(
+            evt = self._apply_wrapper_split(
                 target_node, sub_concepts, rewired_edges, item, proj_list, project_scope
             )
+            return evt, 0
 
         sub_alias_map: Dict[str, str] = {}
         if sub_concepts:
@@ -301,7 +315,6 @@ class GraphIngestionEngine:
                 )
             )
 
-        old_parent_edge_removed = False
         current_edges = self.db.get_edges(project_scope)
         for e in list(current_edges):
             if (
@@ -310,89 +323,55 @@ class GraphIngestionEngine:
                 and _is_subset_edge(e)
             ):
                 self.db.delete_edge(e.id)
-                old_parent_edge_removed = True
-        if old_parent_edge_removed or sub_concepts:
-            self.db.upsert_edge(
-                GraphEdge(
-                    _id=f"edge_{uuid.uuid4().hex[:8]}",
-                    source_id=target_node.id,
-                    target_id=parent_id,
-                    description="SUBSET_OF",
-                    project_ids=proj_list,
-                )
+        self.db.upsert_edge(
+            GraphEdge(
+                _id=f"edge_{uuid.uuid4().hex[:8]}",
+                source_id=target_node.id,
+                target_id=parent_id,
+                description="SUBSET_OF",
+                project_ids=proj_list,
             )
+        )
 
-        deleted = self._rewire_neighbors_lateral(
+        deleted, ungrouped = self._rewire_neighbors(
             split_target_id=target_node.id,
-            parent_id=parent_id,
+            fallback_target_id=parent_id,
             rewired_edges=rewired_edges,
             sub_alias_map=sub_alias_map,
             current_edges=self.db.get_edges(project_scope),
             proj_list=proj_list,
+            is_genesis_split=False,
         )
 
-        return {
+        evt = {
             "event": "reorg_completed",
             "node_id": target_node.id,
             "node_title": target_node.title,
+            "parent_id": parent_id,
             "message": (
-                f"Lateral split under parent '{parent_id}': "
-                f"{len(sub_concepts)} sibling concept(s), {len(deleted)} neighbors rewired."
+                f"Replacement split under parent '{parent_id}': "
+                f"{len(sub_concepts)} sibling concept(s), {len(deleted)} rewired, "
+                f"{ungrouped} promoted to ancestor."
             ),
             "timestamp": time.time(),
         }
+        return evt, ungrouped
 
     def _rewire_neighbors(
         self,
         split_target_id: str,
+        fallback_target_id: str,
         rewired_edges: List[Dict],
         sub_alias_map: Dict[str, str],
         current_edges: List[GraphEdge],
         proj_list: List[str],
-    ) -> Set[str]:
+        is_genesis_split: bool,
+    ) -> tuple[Set[str], int]:
         deleted_neighbors: Set[str] = set()
+        ungrouped_count = 0
         for rewired in rewired_edges:
             neighbor_id = rewired.get("neighbor_id")
-            sub_alias = rewired.get("connect_to_sub_alias")
-            target_sub_id = sub_alias_map.get(sub_alias)
-            if not (neighbor_id and target_sub_id):
-                continue
-            if neighbor_id not in deleted_neighbors:
-                for old_edge in current_edges:
-                    if (
-                        old_edge.source_id == neighbor_id
-                        and old_edge.target_id == split_target_id
-                    ) or (
-                        old_edge.source_id == split_target_id
-                        and old_edge.target_id == neighbor_id
-                    ):
-                        self.db.delete_edge(old_edge.id)
-                deleted_neighbors.add(neighbor_id)
-            self.db.upsert_edge(
-                GraphEdge(
-                    _id=f"edge_{uuid.uuid4().hex[:8]}",
-                    source_id=neighbor_id,
-                    target_id=target_sub_id,
-                    description=rewired.get("relation_type", "RELEVANT_TO"),
-                    project_ids=proj_list,
-                    metadata={"link_class": rewired.get("link_class", "clustered")},
-                )
-            )
-        return deleted_neighbors
-
-    def _rewire_neighbors_lateral(
-        self,
-        split_target_id: str,
-        parent_id: str,
-        rewired_edges: List[Dict],
-        sub_alias_map: Dict[str, str],
-        current_edges: List[GraphEdge],
-        proj_list: List[str],
-    ) -> Set[str]:
-        deleted_neighbors: Set[str] = set()
-        for rewired in rewired_edges:
-            neighbor_id = rewired.get("neighbor_id")
-            sub_alias = (rewired.get("connect_to_sub_alias") or "").upper()
+            raw_alias = rewired.get("connect_to_sub_alias") or ""
             if not neighbor_id:
                 continue
             if neighbor_id not in deleted_neighbors:
@@ -407,32 +386,25 @@ class GraphIngestionEngine:
                         self.db.delete_edge(old_edge.id)
                 deleted_neighbors.add(neighbor_id)
 
-            if sub_alias in ("UNCLUSTERED", "MISC", "PARENT"):
-                self.db.upsert_edge(
-                    GraphEdge(
-                        _id=f"edge_{uuid.uuid4().hex[:8]}",
-                        source_id=neighbor_id,
-                        target_id=parent_id,
-                        description=rewired.get("relation_type", "RELEVANT_TO"),
-                        project_ids=proj_list,
-                        metadata={"link_class": "miscellaneous"},
-                    )
-                )
-                continue
+            if _ancestor_aliases(raw_alias):
+                target_id = fallback_target_id
+                ungrouped_count += 1
+            else:
+                target_id = sub_alias_map.get(raw_alias)
+            if not target_id:
+                target_id = fallback_target_id
+                ungrouped_count += 1
 
-            target_id = sub_alias_map.get(rewired.get("connect_to_sub_alias"))
-            if target_id:
-                self.db.upsert_edge(
-                    GraphEdge(
-                        _id=f"edge_{uuid.uuid4().hex[:8]}",
-                        source_id=neighbor_id,
-                        target_id=target_id,
-                        description=rewired.get("relation_type", "RELEVANT_TO"),
-                        project_ids=proj_list,
-                        metadata={"link_class": rewired.get("link_class", "clustered")},
-                    )
+            self.db.upsert_edge(
+                GraphEdge(
+                    _id=f"edge_{uuid.uuid4().hex[:8]}",
+                    source_id=neighbor_id,
+                    target_id=target_id,
+                    description=rewired.get("relation_type", "RELEVANT_TO"),
+                    project_ids=proj_list,
                 )
-        return deleted_neighbors
+            )
+        return deleted_neighbors, ungrouped_count
 
 
 def _is_subset_edge(edge: GraphEdge) -> bool:

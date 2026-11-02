@@ -301,7 +301,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         """Formulates intermediate sub-concepts (Step 2) and re-wires direct neighbor edges (Step 3)."""
         # Compute cardinality bounds for sub-concept formulation (n // 2 compression invariant)
         n_neighbors = len(target_neighbors_to_rewire)
-        if mode == "leaf_outward" and n_neighbors == 1:
+        if n_neighbors <= 1:
             min_allowed_subs = 1
             max_allowed_subs = 1
         else:
@@ -405,14 +405,27 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         event_queue.push(project_id, split_event)
 
         # Re-wiring step
+        is_genesis_hub = bool(
+            target_node.metadata.get("is_genesis")
+            or target_node.title.strip().lower() == "everything"
+        )
+        tree_idx = MutableTreeIndex(project_id=project_id)
+        parent = tree_idx.parent_of(target_node.id)
+        ancestor_note = (
+            "Leftovers use connect_to_sub_alias EVERYTHING (stay on Genesis)."
+            if is_genesis_hub
+            else f"Leftovers use connect_to_sub_alias ANCESTOR (rewire to parent '{parent}')."
+        )
         system_rewire = load_prompt(
             "graph_reorg_rewire",
             department_name=self.department_name,
             node_id=target_node.id,
             mode=mode,
+            is_genesis=str(is_genesis_hub).lower(),
         )
         user_rewire = f"""Target mutable concept: '{target_node.title}' (ID: {target_node.id})
 Reorganization Mode: {mode}
+{ancestor_note}
 
 Formulated Sub-Concepts Available for Connection:
 {json.dumps(formulated_subs, indent=2)}
@@ -476,6 +489,84 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             "rewired_edges": rewired,
         }
 
+    @staticmethod
+    def _neighbor_entries_for_hub(
+        hub_id: str, project_id: str, tree: MutableTreeIndex
+    ) -> List[Dict[str, Any]]:
+        """All direct neighbors of hub_id with metadata for partition prompts."""
+        entries: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for e in db_engine.get_edges(project_id):
+            nb_id = None
+            direction = "incoming"
+            if e.source_id == hub_id:
+                nb_id = e.target_id
+                direction = "outgoing"
+            elif e.target_id == hub_id:
+                nb_id = e.source_id
+                direction = "incoming"
+            else:
+                continue
+            if not nb_id or nb_id in seen:
+                continue
+            seen.add(nb_id)
+            nb_node = db_engine.get_node(nb_id)
+            if not nb_node or nb_node.is_root_node:
+                continue
+            entries.append(
+                {
+                    "id": nb_node.id,
+                    "title": nb_node.title,
+                    "description": nb_node.description,
+                    "is_immutable": nb_node.is_immutable,
+                    "node_type": nb_node.node_type,
+                    "relation_to_target": e.description or "RELEVANT_TO",
+                    "direction": direction,
+                    "subtree_mut_height": tree.subtree_mut_height.get(nb_id, 0),
+                }
+            )
+        return entries
+
+    def build_split_command_for_hub(
+        self,
+        hub_id: str,
+        project_id: str = "global",
+        emitted_events: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Partition + rewire for one hub (cascade path; no LLM discover)."""
+        events = emitted_events if emitted_events is not None else []
+        target_node = db_engine.get_node(hub_id)
+        if not target_node or target_node.is_immutable:
+            return None
+        tree = MutableTreeIndex(project_id=project_id)
+        neighbors = self._neighbor_entries_for_hub(hub_id, project_id, tree)
+        if not neighbors:
+            return None
+        partitionable = [
+            nb
+            for nb in neighbors
+            if not (not nb["is_immutable"] and nb.get("subtree_mut_height", 0) >= 1)
+        ]
+        if not partitionable:
+            partitionable = list(neighbors)
+        res = self._execute_split_and_rewire(
+            target_node=target_node,
+            mode="max_coverage",
+            target_neighbors_to_rewire=partitionable,
+            project_id=project_id,
+            emitted_events=events,
+        )
+        if not res:
+            return None
+        return {
+            "action": "SPLIT_CONCEPT",
+            "concept_id": target_node.id,
+            "parent_title": res["parent_title"],
+            "parent_description": res["parent_description"],
+            "sub_concepts": res["sub_concepts"],
+            "rewired_edges": res["rewired_edges"],
+        }
+
     def reorganize_overclustered_nodes(
         self,
         explored_nodes: list[GraphNode] | None = None,
@@ -500,47 +591,12 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             degree_threshold = settings.DEGREE_THRESHOLD
 
         tree = MutableTreeIndex(project_id=project_id)
-        all_edges = db_engine.get_edges(project_id)
-        node_id_set = {n.id for n in explored_nodes}
         node_map = {n.id: n for n in explored_nodes}
 
-        # Filter edges active within the explored sub-graph partition
-        subgraph_edges = [
-            e
-            for e in all_edges
-            if e.source_id in node_id_set or e.target_id in node_id_set
-        ]
-
-        degree_map: Dict[str, int] = defaultdict(int)
-        neighbor_map: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-
-        def _make_neighbor(n_id: str, direction: str, rel_type: str) -> Dict[str, Any]:
-            n_node = db_engine.get_node(n_id)
-            return {
-                "neighbor_id": n_id,
-                "neighbor_title": n_node.title if n_node else n_id,
-                "direction": direction,
-                "relation_type": rel_type,
-            }
-
-        for e in subgraph_edges:
-            degree_map[e.source_id] += 1
-            degree_map[e.target_id] += 1
-
-            if e.source_id in node_id_set:
-                neighbor_map[e.source_id].append(
-                    _make_neighbor(e.target_id, "outgoing", e.description)
-                )
-            if e.target_id in node_id_set:
-                neighbor_map[e.target_id].append(
-                    _make_neighbor(e.source_id, "incoming", e.description)
-                )
-
-        # Count mutable candidate nodes meeting the degree threshold
         qualifying_nodes = [
             n
             for n in explored_nodes
-            if not n.is_immutable and degree_map.get(n.id, 0) >= degree_threshold
+            if not n.is_immutable and tree.effective_degree(n.id) >= degree_threshold
         ]
 
         evt_disc_start = {
@@ -587,14 +643,15 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                     "candidate_index": c_idx,
                     "title": n.title,
                     "description": n.description,
-                    "connection_degree": degree_map.get(n.id, 0),
+                    "connection_degree": tree.effective_degree(n.id),
                     "connected_neighbor_context": [
                         {
-                            "neighbor_title": nb["neighbor_title"],
-                            "relation": nb["relation_type"],
-                            "direction": nb["direction"],
+                            "neighbor_title": nb["title"],
+                            "relation": nb.get("relation_to_target", "RELEVANT_TO"),
+                            "direction": nb.get("direction", "incoming"),
+                            "is_immutable": nb.get("is_immutable", False),
                         }
-                        for nb in neighbor_map.get(n.id, [])
+                        for nb in self._neighbor_entries_for_hub(n.id, project_id, tree)
                     ],
                 }
             )
@@ -662,192 +719,27 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
 
         reorg_commands: List[Dict[str, Any]] = []
 
-        # STEPS 2 & 3: Separated Sub-Concept Formulation & Neighbor Edge Re-Wiring per candidate concept node
         for c_id in candidate_ids:
-            target_node = node_map.get(c_id) or db_engine.get_node(c_id)
-            if not target_node:
-                skip_evt = {
-                    "event": "reorg_candidate_skipped",
-                    "persona_id": self.department_id,
-                    "department_name": self.department_name,
-                    "concept_id": c_id,
-                    "reason": "Node not found in graph",
-                    "message": f"[{self.department_name}] Skipped candidate '{c_id}': not found in graph.",
-                    "timestamp": time.time(),
-                }
-                emitted_events.append(skip_evt)
-                continue
-
-            if target_node.is_immutable:
-                skip_evt = {
-                    "event": "reorg_candidate_skipped",
-                    "persona_id": self.department_id,
-                    "department_name": self.department_name,
-                    "concept_id": c_id,
-                    "node_title": target_node.title,
-                    "reason": "Node is immutable (Root or intra-document concept)",
-                    "message": f"[{self.department_name}] Skipped candidate '{target_node.title}': immutable node.",
-                    "timestamp": time.time(),
-                }
-                emitted_events.append(skip_evt)
-                continue
-
-            neighbors = neighbor_map.get(c_id, [])
-
-            # Classify direct neighbors into immutable evidence concepts and mutable concepts
-            immutable_evidence_concepts = []
-            mutable_concepts = []
-            for nb in neighbors:
-                nb_id = nb.get("neighbor_id")
-                nb_node = (
-                    (node_map.get(nb_id) or db_engine.get_node(nb_id))
-                    if nb_id
-                    else None
-                )
-                if nb_node:
-                    entry = {
-                        "id": nb_node.id,
-                        "title": nb_node.title,
-                        "description": nb_node.description,
-                        "is_immutable": nb_node.is_immutable,
-                        "node_type": nb_node.node_type,
-                        "relation_to_target": nb.get("relation_type", "RELEVANT_TO"),
-                        "direction": nb.get("direction", "incoming"),
-                    }
-                    if nb_node.is_immutable:
-                        immutable_evidence_concepts.append(entry)
-                    else:
-                        if tree.subtree_mut_height.get(nb_id, 0) >= 1:
-                            continue
-                        mutable_concepts.append(entry)
-
-            total_neighbors = len(immutable_evidence_concepts) + len(mutable_concepts)
-            if total_neighbors == 0:
-                continue
-
-            # STEP 2 & 3: Immutable-First Neighborhood Routing
-            # 1. If any immutable leaves exist (|N_imm| > 0):
-            #    - Purely Immutable (|N_mut| == 0): Direct outward leaf clustering.
-            #    - Mixed (|N_mut| > 0): Phase 2a (Leaf Outward Movement with negative mutable context).
-            #      After rewiring, re-evaluate post-2a degree. If still >= threshold, the node's mutable
-            #      neighborhood is updated so it naturally flows into the mutable split below.
-            if immutable_evidence_concepts:
-                mode = "pure_immutable" if not mutable_concepts else "leaf_outward"
-                phase_2a_res = self._execute_split_and_rewire(
-                    target_node=target_node,
-                    mode=mode,
-                    target_neighbors_to_rewire=immutable_evidence_concepts,
-                    project_id=project_id,
-                    emitted_events=emitted_events,
-                    negative_mutable_context=mutable_concepts
-                    if mutable_concepts
-                    else None,
-                )
-                if not phase_2a_res:
-                    skip_evt = {
+            cmd = self.build_split_command_for_hub(
+                c_id, project_id=project_id, emitted_events=emitted_events
+            )
+            if cmd:
+                reorg_commands.append(cmd)
+            else:
+                target_node = node_map.get(c_id) or db_engine.get_node(c_id)
+                title = target_node.title if target_node else c_id
+                emitted_events.append(
+                    {
                         "event": "reorg_candidate_skipped",
                         "persona_id": self.department_id,
                         "department_name": self.department_name,
                         "concept_id": c_id,
-                        "node_title": target_node.title,
-                        "reason": f"Sub-concept formulation returned 0 concepts ({mode})",
-                        "message": f"[{self.department_name}] Skipped candidate '{target_node.title}': {mode} produced 0 sub-concepts.",
+                        "node_title": title,
+                        "reason": "Partition returned no sub-concepts",
+                        "message": f"[{self.department_name}] Skipped candidate '{title}': partition produced no split.",
                         "timestamp": time.time(),
                     }
-                    emitted_events.append(skip_evt)
-                    continue
-
-                reorg_commands.append(
-                    {
-                        "action": "SPLIT_CONCEPT",
-                        "concept_id": target_node.id,
-                        "parent_title": phase_2a_res["parent_title"],
-                        "parent_description": phase_2a_res["parent_description"],
-                        "sub_concepts": phase_2a_res["sub_concepts"],
-                        "rewired_edges": phase_2a_res["rewired_edges"],
-                    }
                 )
-
-                # If there were no mutable concepts, reorganization for this node is complete.
-                if not mutable_concepts:
-                    continue
-
-                # In mixed mode: dynamically re-evaluate degree after leaf absorption.
-                post_2a_degree = len(mutable_concepts) + len(
-                    phase_2a_res["sub_concepts"]
-                )
-                if post_2a_degree < degree_threshold:
-                    decongest_evt = {
-                        "event": "reorg_node_decongested",
-                        "persona_id": self.department_id,
-                        "department_name": self.department_name,
-                        "node_id": target_node.id,
-                        "node_title": target_node.title,
-                        "pre_degree": total_neighbors,
-                        "post_2a_degree": post_2a_degree,
-                        "threshold": degree_threshold,
-                        "message": (
-                            f"[{self.department_name}] Node '{target_node.title}' successfully decongested "
-                            f"(degree: {total_neighbors} -> {post_2a_degree} < threshold {degree_threshold}). "
-                            f"Phase 2b skipped."
-                        ),
-                        "timestamp": time.time(),
-                    }
-                    emitted_events.append(decongest_evt)
-                    event_queue.push(project_id, decongest_evt)
-                    continue
-
-                # Node remains over-clustered: absorb the newly created sub-concepts into the mutable set
-                # and fall through directly into the mutable split logic.
-                new_sub_nodes = [
-                    {
-                        "id": f"sub_{s.get('sub_id_alias', idx)}",
-                        "title": s.get("title"),
-                        "description": s.get("description"),
-                        "is_immutable": False,
-                        "node_type": "CONCEPT",
-                        "relation_to_target": "SUBSET_OF",
-                        "direction": "incoming",
-                    }
-                    for idx, s in enumerate(phase_2a_res["sub_concepts"])
-                ]
-                mutable_concepts = mutable_concepts + new_sub_nodes
-
-            # 2. Purely Mutable Outward Split:
-            # Handles either:
-            # - Nodes that originally had ONLY mutable neighbors (|N_imm| == 0, Scenario B)
-            # - Mixed nodes where post-2a degree was still >= threshold (Phase 2b of Scenario C)
-            if mutable_concepts:
-                mut_res = self._execute_split_and_rewire(
-                    target_node=target_node,
-                    mode="mutable_partition",
-                    target_neighbors_to_rewire=mutable_concepts,
-                    project_id=project_id,
-                    emitted_events=emitted_events,
-                )
-                if mut_res:
-                    reorg_commands.append(
-                        {
-                            "action": "SPLIT_CONCEPT",
-                            "concept_id": target_node.id,
-                            "parent_title": mut_res["parent_title"],
-                            "parent_description": mut_res["parent_description"],
-                            "sub_concepts": mut_res["sub_concepts"],
-                            "rewired_edges": mut_res["rewired_edges"],
-                        }
-                    )
-                else:
-                    skip_evt = {
-                        "event": "reorg_candidate_skipped",
-                        "persona_id": self.department_id,
-                        "department_name": self.department_name,
-                        "concept_id": c_id,
-                        "node_title": target_node.title,
-                        "reason": "Mutable sub-concept formulation returned 0 concepts",
-                        "message": f"[{self.department_name}] Skipped candidate '{target_node.title}': mutable partition produced 0 sub-concepts.",
-                        "timestamp": time.time(),
-                    }
-                    emitted_events.append(skip_evt)
 
         health = tree.health_metrics(k=settings.REACHABILITY_HOP_K)
         emitted_events.append(

@@ -11,7 +11,15 @@ pytestmark = pytest.mark.xdist_group(name="worker1")
 
 def test_wrapper_split_mints_departments_under_genesis():
     proj = ["proj_sim_wrapper"]
-    genesis = db_engine.get_node("concept_genesis")
+    genesis = GraphNode(
+        _id="concept_genesis",
+        node_type="CONCEPT",
+        title="Everything",
+        description="Genesis",
+        project_ids=proj,
+        metadata={"immutable": False, "is_genesis": True},
+    )
+    db_engine.upsert_node(genesis)
     imm_ids = []
     for i in range(7):
         cid = f"imm_sim_{i}"
@@ -135,7 +143,83 @@ def test_lateral_split_keeps_immutable_depth_invariant():
             for i in range(7)
         ],
     }
-    graph_ingestion_engine.execute_single_command(cmd, "sim", proj)
+    evt = graph_ingestion_engine.execute_single_command(cmd, "sim", proj)
     tree_after = MutableTreeIndex(project_id=proj[0])
     assert tree_after.parent_of("h_lat") == "p_lat"
     assert depth_before == tree_after.tree_depth_from_genesis.get("p_lat", 0)
+    assert evt.get("reorg_strategy") == "replacement"
+
+
+def test_replacement_split_ancestor_leftover_no_link_class():
+    proj = ["proj_sim_ancestor"]
+    parent = GraphNode(
+        _id="p_anc",
+        title="Parent Hub",
+        project_ids=proj,
+        metadata={"immutable": False},
+    )
+    hub = GraphNode(
+        _id="h_anc",
+        title="Hot Hub",
+        project_ids=proj,
+        metadata={"immutable": False},
+    )
+    grouped = GraphNode(
+        _id="imm_g",
+        title="Grouped",
+        project_ids=proj,
+        metadata={"immutable": True},
+    )
+    leftover = GraphNode(
+        _id="imm_l",
+        title="Leftover",
+        project_ids=proj,
+        metadata={"immutable": True},
+    )
+    for n in [parent, hub, grouped, leftover]:
+        db_engine.upsert_node(n)
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="e_hp",
+            source_id="h_anc",
+            target_id="p_anc",
+            description="SUBSET_OF",
+            project_ids=proj,
+        )
+    )
+    for imm, eid in [(grouped, "e_g"), (leftover, "e_l")]:
+        db_engine.upsert_edge(
+            GraphEdge(
+                _id=eid,
+                source_id=imm.id,
+                target_id="h_anc",
+                description="RELEVANT_TO",
+                project_ids=proj,
+            )
+        )
+
+    cmd = {
+        "action": "SPLIT_CONCEPT",
+        "concept_id": "h_anc",
+        "parent_title": "Hot Hub A",
+        "parent_description": "First sibling",
+        "sub_concepts": [
+            {"sub_id_alias": "a", "title": "Hot Hub A", "description": "A"},
+            {"sub_id_alias": "b", "title": "Hot Hub B", "description": "B"},
+        ],
+        "rewired_edges": [
+            {"neighbor_id": "imm_g", "connect_to_sub_alias": "a"},
+            {"neighbor_id": "imm_l", "connect_to_sub_alias": "ANCESTOR"},
+        ],
+    }
+    evt = graph_ingestion_engine.execute_single_command(cmd, "sim", proj)
+    assert evt.get("ungrouped_to_ancestor_count") == 1
+    edges = db_engine.get_edges(proj[0])
+    leftover_targets = [
+        e.target_id
+        for e in edges
+        if e.source_id == "imm_l" and e.description == "RELEVANT_TO"
+    ]
+    assert leftover_targets == ["p_anc"]
+    for e in edges:
+        assert "link_class" not in (e.metadata or {})

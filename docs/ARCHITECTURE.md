@@ -55,8 +55,8 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
    - **Phase 1**: Document fetch, scale-adaptive chunking (1–30 passages), LLM concept extraction and consolidation (same tiering as v0.1).
    - **Phase 2**: Genesis-rooted tree traversal (same navigator as retrieval).
    - **Phase 3**: Collective cross-document linking (immutable intra-doc concepts → best mutable parent).
-   - **Phase 3.5**: Target generalization on all mutable nodes that received new edges; **miscellaneous** neighbors remain in-scope for parent description updates.
-   - **Phase 4**: `reorganize_mutable_hub` on the genesis traversal **explored** node set (mutable nodes selected during Phase 2, refreshed from DB after linking) when degree ≥ `DEGREE_THRESHOLD` (default **7**); engine commits **wrapper** split at Genesis only, **lateral** split elsewhere.
+   - **Phase 3.5**: Target generalization on all mutable nodes that received new edges in this ingestion pass (direct immutable neighbors included in parent scope).
+   - **Phase 4**: Reorganization on **link-affected mutable targets** (Phase 3 `CREATE_EDGE` targets) with refreshed **effective degree** ≥ `DEGREE_THRESHOLD` (default **7**); LLM discover picks hubs; **max-coverage** partition + rewire; upward **ancestor cascade** after each split (`MAX_UPWARD_REORG_ITERATIONS`, default **5**). Engine: **wrapper** at Genesis, **replacement** elsewhere; leftovers → parent (Genesis leftovers stay on Everything). No `link_class` bucket.
 
 ---
 
@@ -92,8 +92,7 @@ graph TD
    - **Mutable hubs** (`immutable: false`) — Created during ingestion; `EDIT_CONCEPT`, `SPLIT_CONCEPT`, generalization allowed.
 3. **Genesis** — `metadata.is_genesis`; title locked to **Everything**; **single user/LLM-editable `description`** (project scope).
 4. **Edges (`GraphEdge`)**
-   - Qualitative `description` (relation type).
-   - **`metadata.link_class`**: `"clustered"` (default) | `"miscellaneous"` — outlier bucket under a parent; still valid for generalization and search, not excluded from Phase 3.5.
+   - Qualitative `description` (relation type, e.g. `RELEVANT_TO`, `SUBSET_OF`). No semantic attachment bucket metadata.
 
 Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_depth_from_genesis`, `subtree_mut_height`, `strahler_order`, `subtree_immutable_count`.
 
@@ -102,7 +101,7 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 | Layer | Mutability | Reorg commit shape |
 |-------|------------|-------------------|
 | Genesis (`Everything`) | Mutable; title fixed | **Wrapper** — department hubs under Genesis |
-| Other mutable hubs | Mutable | **Lateral** — dissolve hub into siblings under `Parent(H)`; unclustered immutables promote to parent as `miscellaneous` |
+| Other mutable hubs | Mutable | **Replacement** — hub becomes first sibling; additional sub-concepts minted under `Parent(H)`; ungroupable neighbors rewire to `Parent(H)` |
 | Intra-doc concepts | Immutable | N/A |
 | Root nodes | Immutable | N/A |
 
@@ -126,30 +125,28 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 ### 4.2 Linking
 
 - `link_intradoc_concepts` emits zero-consensus commands (`CREATE_EDGE`, `CREATE_INTERMEDIATE`, `EDIT_CONCEPT`, `SPLIT_CONCEPT` on mutable nodes only).
-- Attach with `link_class: miscellaneous` when no matching sub-branch exists (including under Genesis); Phase 3.5 still runs on that parent.
+- When no sub-branch fits during linking, attach directly to the chosen mutable parent; Phase 3.5 widens that parent’s description.
 
-### 4.3 Reorganization (LLM proposes; engine commits)
+### 4.3 Reorganization (v0.2.1 — LLM proposes; engine commits)
 
-**Single LLM payload** (discover → split sub-concepts → rewire). The LLM does **not** emit `SPLIT_LATERAL` vs `SPLIT_WRAPPER`.
+**Discovery (initial pass only):** Mutable nodes that received new `CREATE_EDGE` targets this ingestion → filter `effective_degree ≥ τ` → LLM **`graph_reorg_discover`** → split **selected** hubs only.
+
+**Partition (per hub):** One **`max_coverage`** split + rewire over **all** direct neighbors (mutable and immutable). Maximize neighbors assigned to sub-concepts; leftovers use LLM alias **`ANCESTOR`** (non-Genesis → `Parent(H)`) or **`EVERYTHING`** (Genesis → stay on Everything). Mutable neighbors with **`subtree_mut_height ≥ 1`** are excluded from partition (keep direct edge to hub).
 
 **On `SPLIT_CONCEPT` commit** (`graph_ingestion_engine.py`):
 
 ```python
 if target.is_genesis:
-    apply_wrapper_split(payload)   # sub-hubs under Everything
+    apply_wrapper_split(payload)      # sub-hubs under Everything; Genesis preserved
 else:
-    apply_lateral_split(payload)   # siblings under Parent(H); UNCLUSTERED → parent (miscellaneous)
+    apply_replacement_split(payload)  # siblings under Parent(H); ANCESTOR → parent
 ```
 
-**Gates (orchestration in `reorganize_mutable_hub`):**
+**Cascade:** After each discover split, walk upward while `effective_degree(Parent(H)) ≥ τ` (same partition LLM, no second discover), capped by **`MAX_UPWARD_REORG_ITERATIONS`**.
 
-- **Gate A (sibling absorption):** Low-degree siblings may absorb overflow via normal edge delete/create in the same transaction (not a separate REDISTRIBUTE command).
-- **Gate B:** Neighbors with `subtree_mut_height >= 1` excluded from mutable partition batch (keep direct edge to hub).
-- **Gate C:** Wrapper vs lateral chosen by **`is_genesis`**, not by the LLM.
+Cardinality: sub-concept count bounded by **⌊n/2⌋**. Parent hub title/description updates required on split (Genesis title unchanged).
 
-Cardinality: sub-concept count bounded by **⌊n/2⌋** (existing mixed/pure immutable/mutable scenarios). Parent hub title/description updates required on split (Genesis title unchanged).
-
-**Telemetry:** `reorg_completed` may include `reorg_strategy: wrapper|lateral`; `graph_health_metrics` (Sackin, max depth, K-hop immutable reachability via `MutableTreeIndex`).
+**Telemetry:** `reorg_completed` includes `reorg_strategy: wrapper|replacement`, `ungrouped_to_ancestor_count`; `graph_health_metrics` via `MutableTreeIndex`.
 
 **Out of v0.2 scope:** `COLLAPSE_CONCEPT` (UI delete uses existing delete-node API); optional PPR/shortcut edges deferred.
 

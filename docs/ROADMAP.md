@@ -25,7 +25,7 @@ The roadmap bridges core engine implementation with real-time UI interactivity, 
    ├── Node Mutability Enforcement: Root & Intra-Doc nodes (Immutable), Domain Hubs (Mutable)
    ├── Genesis-Rooted Tree Traversal: `GraphNavigator` + `MutableTreeIndex` (no Voronoi / eigenvector hubs)
    ├── Single-Source Genesis Hub: Primordial 'Everything' hub anchor across workspaces
-   ├── Phase 3.5 Dynamic Target Generalization: Post-linking LLM pass (includes miscellaneous neighbors)
+   ├── Phase 3.5 Dynamic Target Generalization: Post-linking LLM pass on link-affected mutable targets
    └── Engine-Dispatch Reorganization: Wrapper at Genesis, lateral sibling split elsewhere ($n // 2$ caps)
 
   [ Goal 2: Comprehensive Backend Testing & Telemetry ] — COMPLETED

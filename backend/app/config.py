@@ -35,6 +35,9 @@ class Settings:
     MIN_CLUSTER_SIZE: int = int(os.getenv("MIN_CLUSTER_SIZE", "2"))
     MAX_TRAVERSAL_DEPTH: int = int(os.getenv("MAX_TRAVERSAL_DEPTH", "4"))
     REACHABILITY_HOP_K: int = int(os.getenv("REACHABILITY_HOP_K", "3"))
+    MAX_UPWARD_REORG_ITERATIONS: int = int(
+        os.getenv("MAX_UPWARD_REORG_ITERATIONS", "5")
+    )
 
 
 settings = Settings()

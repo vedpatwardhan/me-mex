@@ -87,6 +87,16 @@ class MutableTreeIndex:
     def degree(self, node_id: str) -> int:
         return len(self._direct_neighbors.get(node_id, []))
 
+    def effective_degree(self, node_id: str) -> int:
+        """Neighbor count for reorg triggers (excludes ROOT document nodes)."""
+        count = 0
+        for nid in self._direct_neighbors.get(node_id, []):
+            n = self.node_map.get(nid)
+            if n and n.is_root_node:
+                continue
+            count += 1
+        return count
+
     def direct_immutable_neighbors(self, node_id: str) -> List[GraphNode]:
         imm: List[GraphNode] = []
         seen: Set[str] = set()
@@ -240,13 +250,14 @@ class MutableTreeIndex:
         for n in self.nodes:
             if n.is_immutable or n.is_root_node:
                 continue
-            misc_ids = [m.id for m in self.direct_immutable_neighbors(n.id)]
+            direct_imm = [m.id for m in self.direct_immutable_neighbors(n.id)]
             meta = dict(n.metadata)
             meta["tree_depth_from_genesis"] = self.tree_depth_from_genesis.get(n.id, 0)
             meta["subtree_mut_height"] = self.subtree_mut_height.get(n.id, 0)
             meta["strahler_order"] = self.strahler_order.get(n.id, 1)
             meta["subtree_immutable_count"] = self.subtree_immutable_count.get(n.id, 0)
-            meta["miscellaneous_immutable_ids"] = misc_ids
+            meta["direct_immutable_neighbor_ids"] = direct_imm
+            meta.pop("miscellaneous_immutable_ids", None)
             n.metadata = meta
             n.updated_at = __import__("time").time()
             db_engine.upsert_node(n)

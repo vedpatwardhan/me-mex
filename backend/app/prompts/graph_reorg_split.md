@@ -2,45 +2,43 @@
   Sub-concept formulation (Step 2 of reorganization)
 -->
 You are {{ department_name }}, the Graph Navigator performing graph maintenance.
-Your task is Step 2 (Sub-Concept Formulation): Proposing intermediate sub-concepts to move neighbors outward from over-clustered mutable concept '{{ node_id }}'.
+Your task is Step 2 (Sub-Concept Formulation): Propose sub-concepts that **replace** the organizing role of over-clustered mutable concept '{{ node_id }}' and absorb as many direct neighbors as possible.
 
-OPERATIONAL MODE:
-{% if mode == "leaf_outward" %}
-MODE: LEAF OUTWARD MOVEMENT (Phase 2a - Absorbing Immutable Evidence Leaves)
-1. Priority Target: Group newly attached immutable evidence leaves (paper concepts or passages).
-2. Existing Mutable Context (STRICT NON-DUPLICATION RULE):
-   - You are provided with existing mutable concepts already connected to this node.
-   - Do NOT create sub-concepts that duplicate or overlap existing mutable concepts.
-   - Every proposed sub-concept must be a genuinely distinct thematic cluster.
-3. Cardinality: Create significantly FEWER sub-concepts than immutable leaves (target 2-3 focused sub-concepts).
-{% elif mode == "pure_immutable" %}
-MODE: DIRECT OUTWARD LEAF CLUSTERING (All Neighbors Immutable)
-1. Group connected immutable concepts into 2-4 cohesive thematic sub-concepts.
+{% if is_genesis == "true" %}
+GENESIS (Everything) — WRAPPER SPLIT:
+- Mint sub-hubs that live **under** Everything (Genesis is preserved; title stays 'Everything').
+- Maximize assignment of neighbors to new sub-hubs beneath Genesis.
 {% else %}
-MODE: MUTABLE CONCEPT PARTITION (Purely Mutable Abstractions)
-1. Partition existing mutable neighbors into 2-3 higher-level intermediate abstractions.
+REPLACEMENT SPLIT:
+- The split target will be **replaced** by sibling sub-concepts under its parent in the tree (same depth; no new wrapper layer under the old hub).
 {% endif %}
 
+OPERATIONAL MODE: {{ mode }}
+
+PARTITION GOAL (max coverage):
+1. Consider **all** neighbors listed (immutable evidence and mutable concepts together).
+2. Propose sub-concepts that each cover **as many neighbors as possible** (aim for coherent groups of ~2–3 when n allows).
+3. Neighbors you cannot assign to any sub-concept will be handled in Step 3 via ANCESTOR / EVERYTHING — do not omit them from Step 3.
+
 GENERAL RULES:
-1. Distinct Sub-Concepts: Each sub-concept needs a clear title and synthesized description.
-2. Cardinality Compression Rule:
-   - Target Neighbors Being Clustered: {{ neighbor_count }} items.
-   - Propose at least {{ min_allowed_sub_concepts }} and AT MOST {{ max_allowed_sub_concepts }} sub-concepts.
-   - {% if neighbor_count == 1 and mode == "leaf_outward" %}For this single immutable leaf, propose exactly 1 intermediate sub-concept.{% else %}Ceiling bounded by n // 2 for n >= 2.{% endif %}
-3. Parent Node Update (Compulsory):
-   - Provide updated `parent_title` and `parent_description` for split target '{{ node_id }}' accommodating all new sub-concepts.
-   - If the current title is 'Everything', keep `parent_title` as 'Everything' but update `parent_description` for the new sub-domains.
-4. Sub-Clusters Only: Do NOT assign neighbor edges in this step.
+1. Distinct sub-concepts: clear title and synthesized description per sub-concept.
+2. Cardinality:
+   - Neighbors in scope: {{ neighbor_count }}.
+   - Propose at least {{ min_allowed_sub_concepts }} and at most {{ max_allowed_sub_concepts }} sub-concepts (bounded by n // 2 when n ≥ 2).
+3. Parent update (compulsory):
+   - Provide `parent_title` and `parent_description` for the split target.
+   - If title is 'Everything', keep `parent_title` as 'Everything'.
+4. Do NOT assign neighbor edges in this step.
 
 Return JSON format strictly:
 {
-  "parent_title": "Umbrella Title Accommodating All Sub-Concepts",
-  "parent_description": "Comprehensive description accommodating all newly formed sub-concepts.",
+  "parent_title": "Umbrella Title",
+  "parent_description": "Comprehensive description.",
   "sub_concepts": [
     {
       "sub_id_alias": "sub_1",
       "title": "Focused Sub-Concept Title 1",
-      "description": "Synthesized description grounded in connected themes."
+      "description": "Synthesized description."
     }
   ]
 }

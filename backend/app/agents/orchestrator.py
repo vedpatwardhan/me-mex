@@ -31,7 +31,7 @@ from app.models import (
 )
 from app.config import settings
 from app.agents.graph_navigator import GraphNavigator
-from app.services.graph_analytics import graph_analytics
+from app.services.graph_analytics import graph_analytics, MutableTreeIndex
 from app.services.logger import logger
 from app.services.event_queue import event_queue
 from app.services.graph_analytics import graph_analytics
@@ -1007,22 +1007,30 @@ Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payloa
             ):
                 yield gen_evt
 
-        # Phase 4: Post-linking reorganization on the traversal explored set
-        reorg_nodes = [self.db.get_node(n.id) for n in explored_nodes]
+        # Phase 4: Reorganization on link-affected mutable targets (degree ≥ τ → LLM discover → split)
+        tree_post_link = MutableTreeIndex(project_id=project_id)
+        reorg_candidates = [
+            n
+            for n in mutable_targets
+            if n and tree_post_link.effective_degree(n.id) >= settings.DEGREE_THRESHOLD
+        ]
         reorg_res = await asyncio.to_thread(
             navigator.reorganize_overclustered_nodes,
-            explored_nodes=reorg_nodes,
+            explored_nodes=reorg_candidates,
             project_id=project_id,
             degree_threshold=settings.DEGREE_THRESHOLD,
         )
         for reorg_evt in reorg_res.get("emitted_events", []):
             yield reorg_evt
-        for cmd in reorg_res.get("commands", []):
-            cmd["navigator_id"] = navigator.navigator_id
-            cmd["navigator_name"] = navigator.navigator_name
-            evt = self.ingestion_engine.execute_single_command(cmd, title, proj_list)
-            if evt:
-                yield evt
+
+        async for cascade_evt in self._execute_reorg_commands_with_cascade(
+            navigator=navigator,
+            commands=reorg_res.get("commands", []),
+            doc_title=title,
+            proj_list=proj_list,
+            project_id=project_id,
+        ):
+            yield cascade_evt
         graph_analytics.refresh_tree_metadata(project_id)
 
         yield {
@@ -1033,6 +1041,85 @@ Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payloa
             "message": f"Document '{title}' successfully ingested and merged into knowledge graph.",
             "timestamp": time.time(),
         }
+
+    async def _execute_reorg_commands_with_cascade(
+        self,
+        navigator: GraphNavigator,
+        commands: List[Dict[str, Any]],
+        doc_title: str,
+        proj_list: List[str],
+        project_id: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Execute split commands sequentially; cascade upward while ancestor degree ≥ τ."""
+        for cmd in commands:
+            hub_id = cmd.get("concept_id")
+            tree_before = MutableTreeIndex(project_id=project_id)
+            parent_before = tree_before.parent_of(hub_id) if hub_id else None
+            hub_node = self.db.get_node(hub_id) if hub_id else None
+            is_genesis_hub = bool(
+                hub_node
+                and (
+                    hub_node.metadata.get("is_genesis")
+                    or hub_node.title.strip().lower() == "everything"
+                )
+            )
+
+            cmd["navigator_id"] = navigator.navigator_id
+            cmd["navigator_name"] = navigator.navigator_name
+            evt = self.ingestion_engine.execute_single_command(
+                cmd, doc_title, proj_list
+            )
+            if evt:
+                yield evt
+            graph_analytics.refresh_tree_metadata(project_id)
+
+            check_id = parent_before
+            if check_id is None and is_genesis_hub and hub_id:
+                check_id = hub_id
+
+            for iteration in range(settings.MAX_UPWARD_REORG_ITERATIONS):
+                if not check_id:
+                    break
+                tree = MutableTreeIndex(project_id=project_id)
+                if tree.effective_degree(check_id) < settings.DEGREE_THRESHOLD:
+                    break
+                cascade_cmd = await asyncio.to_thread(
+                    navigator.build_split_command_for_hub,
+                    check_id,
+                    project_id,
+                    [],
+                )
+                if not cascade_cmd:
+                    break
+                yield {
+                    "event": "reorg_cascade_iteration",
+                    "ancestor_id": check_id,
+                    "iteration": iteration + 1,
+                    "timestamp": time.time(),
+                }
+                parent_of_check = tree.parent_of(check_id)
+                is_gen = False
+                cn = self.db.get_node(check_id)
+                if cn:
+                    is_gen = bool(
+                        cn.metadata.get("is_genesis")
+                        or cn.title.strip().lower() == "everything"
+                    )
+                cascade_cmd["navigator_id"] = navigator.navigator_id
+                cascade_cmd["navigator_name"] = navigator.navigator_name
+                c_evt = self.ingestion_engine.execute_single_command(
+                    cascade_cmd, doc_title, proj_list
+                )
+                if c_evt:
+                    yield c_evt
+                graph_analytics.refresh_tree_metadata(project_id)
+                check_id = parent_of_check
+                if check_id is None and is_gen and cn:
+                    tree2 = MutableTreeIndex(project_id=project_id)
+                    if tree2.effective_degree(cn.id) >= settings.DEGREE_THRESHOLD:
+                        check_id = cn.id
+                    else:
+                        break
 
     async def _generalize_affected_target_nodes(
         self,

@@ -338,8 +338,10 @@ def test_reorganize_overclustered_nodes_selects_qualifying_mutable_candidate(
     assert len(cmd["sub_concepts"]) == 2
 
 
-def test_reorganize_overclustered_nodes_mixed_decongested_skips_phase_2b(monkeypatch):
-    """Verify that in mixed neighborhood, Phase 2a runs and if post_2a_degree < threshold, Phase 2b is skipped."""
+def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_split(
+    monkeypatch,
+):
+    """Mixed mutable+immutable neighbors produce one max_coverage SPLIT_CONCEPT command."""
     project_id = "proj_mixed_decongested_test"
     hub = GraphNode(
         _id="hub_mixed_1",
@@ -405,11 +407,8 @@ def test_reorganize_overclustered_nodes_mixed_decongested_skips_phase_2b(monkeyp
         ):
             return '{"candidates": [{"candidate_index": 1, "rationale": "High degree mixed hub."}]}'
         elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
-            if "leaf_outward" in messages[1]["content"]:
-                captured_modes.append("leaf_outward")
-            elif "mutable_partition" in messages[1]["content"]:
-                captured_modes.append("mutable_partition")
-            # Return 2 sub-concepts for Phase 2a
+            if "max_coverage" in messages[1]["content"]:
+                captured_modes.append("max_coverage")
             return json.dumps(
                 {
                     "parent_title": "AI Foundations & Generative Models",
@@ -455,147 +454,10 @@ def test_reorganize_overclustered_nodes_mixed_decongested_skips_phase_2b(monkeyp
         explored_nodes=[hub], project_id=project_id, degree_threshold=5
     )
 
-    # Pre-split degree: 6 (5 imm + 1 mut).
-    # Phase 2a compresses 5 imm into 2 sub_concepts.
-    # Post-2a degree = 1 mut + 2 new = 3.
-    # 3 < dynamic_threshold (5) -> Decongested! Phase 2b skipped!
-    assert "leaf_outward" in captured_modes
-    assert "mutable_partition" not in captured_modes
-
-    events = [e["event"] for e in res["emitted_events"]]
-    assert "reorg_node_decongested" in events
+    assert "max_coverage" in captured_modes
     assert len(res["commands"]) == 1
     assert res["commands"][0]["action"] == "SPLIT_CONCEPT"
     assert len(res["commands"][0]["sub_concepts"]) == 2
-
-
-def test_reorganize_overclustered_nodes_mixed_overclustered_triggers_phase_2b(
-    monkeypatch,
-):
-    """Verify that in mixed neighborhood, if post_2a_degree >= threshold, Phase 2b executes."""
-    project_id = "proj_mixed_phase2b_test"
-    hub = GraphNode(
-        _id="hub_mixed_2",
-        node_type="CONCEPT",
-        title="High Degree Root Hub",
-        description="Over-clustered mutable hub with many mutable neighbors.",
-        passage_ids=[],
-        project_ids=[project_id],
-        metadata={"immutable": False},
-    )
-    db_engine.upsert_node(hub)
-
-    # 4 immutable leaves + 5 mutable concepts = 9 >= threshold 5
-    for i in range(4):
-        imm_node = GraphNode(
-            _id=f"imm2_{i}",
-            node_type="CONCEPT",
-            title=f"Leaf 2_{i}",
-            project_ids=[project_id],
-            metadata={"immutable": True},
-        )
-        db_engine.upsert_node(imm_node)
-        db_engine.upsert_edge(
-            GraphEdge(
-                _id=f"edge_imm2_{i}",
-                source_id=f"imm2_{i}",
-                target_id="hub_mixed_2",
-                description="RELEVANT_TO",
-                project_ids=[project_id],
-            )
-        )
-
-    for i in range(5):
-        mut_node = GraphNode(
-            _id=f"mut2_{i}",
-            node_type="CONCEPT",
-            title=f"Branch 2_{i}",
-            project_ids=[project_id],
-            metadata={"immutable": False},
-        )
-        db_engine.upsert_node(mut_node)
-        db_engine.upsert_edge(
-            GraphEdge(
-                _id=f"edge_mut2_{i}",
-                source_id=f"mut2_{i}",
-                target_id="hub_mixed_2",
-                description="SUBSET_OF",
-                project_ids=[project_id],
-            )
-        )
-
-    agent = GraphNavigator("global")
-
-    import json
-
-    captured_modes = []
-
-    def mock_chat_completion(messages, **kwargs):
-        sys_content = messages[0]["content"]
-        if (
-            "reorganize_discover" in sys_content
-            or "candidate_index" in sys_content
-            or "candidates" in sys_content
-        ):
-            return '{"candidates": [{"candidate_index": 1, "rationale": "High degree mixed hub."}]}'
-        elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
-            user_content = messages[1]["content"]
-            if "leaf_outward" in user_content:
-                captured_modes.append("leaf_outward")
-            elif "mutable_partition" in user_content:
-                captured_modes.append("mutable_partition")
-            return json.dumps(
-                {
-                    "parent_title": "High Degree Root Hub (Generalized)",
-                    "parent_description": "Overarching domain accommodating all child sub-concepts.",
-                    "sub_concepts": [
-                        {
-                            "sub_id_alias": "sub_1",
-                            "title": "Sub 1",
-                            "description": "Desc 1",
-                        },
-                        {
-                            "sub_id_alias": "sub_2",
-                            "title": "Sub 2",
-                            "description": "Desc 2",
-                        },
-                    ],
-                }
-            )
-        elif "reorganize_rewire" in sys_content or "rewired_edges" in sys_content:
-            return json.dumps(
-                {
-                    "rewired_edges": [
-                        {
-                            "neighbor_index": 1,
-                            "connect_to_sub_alias": "sub_1",
-                            "relation_type": "RELEVANT_TO",
-                        },
-                        {
-                            "neighbor_index": 2,
-                            "connect_to_sub_alias": "sub_2",
-                            "relation_type": "RELEVANT_TO",
-                        },
-                    ]
-                }
-            )
-        return "{}"
-
-    from app.services.llm_gateway import llm_gateway
-
-    monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
-
-    res = agent.reorganize_overclustered_nodes(
-        explored_nodes=[hub], project_id=project_id, degree_threshold=5
-    )
-
-    # Pre-split degree: 9 (4 imm + 5 mut).
-    # Phase 2a creates 2 sub_concepts.
-    # Post-2a degree = 5 mut + 2 = 7.
-    # 7 >= 5 -> Phase 2b triggers!
-    assert "leaf_outward" in captured_modes
-    assert "mutable_partition" in captured_modes
-    assert len(res["commands"]) == 2  # Phase 2a command + Phase 2b command
 
 
 def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier(monkeypatch):
@@ -705,6 +567,14 @@ def test_reorganize_overclustered_nodes_updates_parent_hub_title_and_description
     from app.services.graph_ingestion_engine import GraphIngestionEngine
 
     project_id = "proj_hub_generalize_test"
+    tree_parent = GraphNode(
+        _id="hub_tree_parent",
+        node_type="CONCEPT",
+        title="Tree Parent",
+        description="Parent in mutable tree.",
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
     parent_hub = GraphNode(
         _id="hub_specialized",
         node_type="CONCEPT",
@@ -713,7 +583,17 @@ def test_reorganize_overclustered_nodes_updates_parent_hub_title_and_description
         project_ids=[project_id],
         metadata={"immutable": False},
     )
+    db_engine.upsert_node(tree_parent)
     db_engine.upsert_node(parent_hub)
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="e_hub_parent",
+            source_id="hub_specialized",
+            target_id="hub_tree_parent",
+            description="SUBSET_OF",
+            project_ids=[project_id],
+        )
+    )
 
     split_cmd = {
         "action": "SPLIT_CONCEPT",
