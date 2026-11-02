@@ -31,7 +31,7 @@ from app.models import (
 )
 from app.config import settings
 from app.agents.graph_navigator import GraphNavigator
-from app.services.graph_analytics import MutableTreeIndex, graph_analytics
+from app.services.graph_analytics import graph_analytics
 from app.services.logger import logger
 from app.services.event_queue import event_queue
 from app.services.graph_analytics import graph_analytics
@@ -1007,15 +1007,8 @@ Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payloa
             ):
                 yield gen_evt
 
-        # Phase 4: Post-linking reorganization (explored path + ancestors)
-        tree = MutableTreeIndex(project_id=project_id)
-        reorg_ids: set[str] = {n.id for n in explored_nodes}
-        for nid in list(reorg_ids):
-            for anc in tree.ancestors(nid):
-                reorg_ids.add(anc)
-        reorg_nodes = [
-            self.db.get_node(nid) for nid in reorg_ids if self.db.get_node(nid)
-        ]
+        # Phase 4: Post-linking reorganization on the traversal explored set
+        reorg_nodes = [self.db.get_node(n.id) for n in explored_nodes]
         reorg_res = await asyncio.to_thread(
             navigator.reorganize_overclustered_nodes,
             explored_nodes=reorg_nodes,

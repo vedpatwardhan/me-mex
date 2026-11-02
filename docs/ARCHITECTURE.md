@@ -56,7 +56,7 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
    - **Phase 2**: Genesis-rooted tree traversal (same navigator as retrieval).
    - **Phase 3**: Collective cross-document linking (immutable intra-doc concepts → best mutable parent).
    - **Phase 3.5**: Target generalization on all mutable nodes that received new edges; **miscellaneous** neighbors remain in-scope for parent description updates.
-   - **Phase 4**: `reorganize_mutable_hub` on explored path + ancestors when degree ≥ `DEGREE_THRESHOLD` (default **7**); engine commits **wrapper** split at Genesis only, **lateral** split elsewhere.
+   - **Phase 4**: `reorganize_mutable_hub` on the genesis traversal **explored** node set (mutable nodes selected during Phase 2, refreshed from DB after linking) when degree ≥ `DEGREE_THRESHOLD` (default **7**); engine commits **wrapper** split at Genesis only, **lateral** split elsewhere.
 
 ---
 
