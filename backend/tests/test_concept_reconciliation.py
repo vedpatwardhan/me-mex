@@ -153,7 +153,9 @@ def test_mutable_concept_node_splitting():
 
     # New focused sub-concepts inserted into DB
     all_nodes = db_engine.get_nodes(project_id="global")
-    sub_nodes = [n for n in all_nodes if n.metadata.get("sub_of_hub") == mutable_hub_id]
+    sub_nodes = [
+        n for n in all_nodes if n.metadata.get("split_under_genesis") == mutable_hub_id
+    ]
     assert len(sub_nodes) == 2
     titles = [n.title for n in sub_nodes]
     assert "Sub-Concept Alpha" in titles

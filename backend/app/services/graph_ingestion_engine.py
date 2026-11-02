@@ -33,8 +33,10 @@ class GraphIngestionEngine:
         proj_list: List[str],
     ) -> Optional[Dict[str, Any]]:
         action = item.get("action") or item.get("command_type")
-        dept_name = item.get("department_name", "Graph Navigator")
-        persona_id = item.get("persona_id") or item.get("navigator_id")
+        dept_name = item.get("navigator_name") or item.get(
+            "department_name", "Graph Navigator"
+        )
+        persona_id = item.get("navigator_id") or item.get("persona_id")
 
         if action in ["CREATE_EDGE", "CONNECT_DIRECT", "CONSTRUCT_EDGE"]:
             return self._create_edge(item, proj_list, dept_name, persona_id)
@@ -202,7 +204,7 @@ class GraphIngestionEngine:
                 description=sub.get("description", ""),
                 passage_ids=sub.get("passage_ids", target_node.passage_ids),
                 project_ids=proj_list,
-                metadata={"immutable": False, "sub_of_hub": concept_id},
+                metadata={"immutable": False, "split_under_genesis": concept_id},
             )
             self.db.upsert_node(sub_node)
             self.db.upsert_edge(
@@ -220,7 +222,10 @@ class GraphIngestionEngine:
             concept_id, rewired_edges, sub_alias_map, current_edges, proj_list
         )
 
-        new_desc = item.get("hub_description")
+        new_title = item.get("parent_title") or item.get("hub_title")
+        if new_title and not _is_genesis(target_node):
+            target_node.title = new_title.strip()
+        new_desc = item.get("parent_description") or item.get("hub_description")
         if new_desc:
             target_node.description = new_desc.strip()
         target_node.updated_at = time.time()
@@ -231,7 +236,7 @@ class GraphIngestionEngine:
             "node_id": concept_id,
             "node_title": target_node.title,
             "message": (
-                f"Genesis wrapper split: {len(sub_concepts)} department hub(s), "
+                f"Genesis wrapper split: {len(sub_concepts)} intermediate concept(s), "
                 f"{len(deleted_neighbors)} neighbors rewired."
             ),
             "timestamp": time.time(),
@@ -257,8 +262,18 @@ class GraphIngestionEngine:
         if sub_concepts:
             first = sub_concepts[0]
             sub_alias_map[first.get("sub_id_alias", "sub_1")] = target_node.id
-            target_node.title = first.get("title", target_node.title)
-            target_node.description = first.get("description", target_node.description)
+            parent_title = item.get("parent_title") or item.get("hub_title")
+            parent_desc = item.get("parent_description") or item.get("hub_description")
+            if parent_title and not _is_genesis(target_node):
+                target_node.title = parent_title.strip()
+            else:
+                target_node.title = first.get("title", target_node.title)
+            if parent_desc:
+                target_node.description = parent_desc.strip()
+            else:
+                target_node.description = first.get(
+                    "description", target_node.description
+                )
             target_node.updated_at = time.time()
             self.db.upsert_node(target_node)
 
@@ -308,7 +323,7 @@ class GraphIngestionEngine:
             )
 
         deleted = self._rewire_neighbors_lateral(
-            hub_id=target_node.id,
+            split_target_id=target_node.id,
             parent_id=parent_id,
             rewired_edges=rewired_edges,
             sub_alias_map=sub_alias_map,
@@ -322,14 +337,14 @@ class GraphIngestionEngine:
             "node_title": target_node.title,
             "message": (
                 f"Lateral split under parent '{parent_id}': "
-                f"{len(sub_concepts)} sibling hub(s), {len(deleted)} neighbors rewired."
+                f"{len(sub_concepts)} sibling concept(s), {len(deleted)} neighbors rewired."
             ),
             "timestamp": time.time(),
         }
 
     def _rewire_neighbors(
         self,
-        hub_id: str,
+        split_target_id: str,
         rewired_edges: List[Dict],
         sub_alias_map: Dict[str, str],
         current_edges: List[GraphEdge],
@@ -346,9 +361,9 @@ class GraphIngestionEngine:
                 for old_edge in current_edges:
                     if (
                         old_edge.source_id == neighbor_id
-                        and old_edge.target_id == hub_id
+                        and old_edge.target_id == split_target_id
                     ) or (
-                        old_edge.source_id == hub_id
+                        old_edge.source_id == split_target_id
                         and old_edge.target_id == neighbor_id
                     ):
                         self.db.delete_edge(old_edge.id)
@@ -367,7 +382,7 @@ class GraphIngestionEngine:
 
     def _rewire_neighbors_lateral(
         self,
-        hub_id: str,
+        split_target_id: str,
         parent_id: str,
         rewired_edges: List[Dict],
         sub_alias_map: Dict[str, str],
@@ -384,9 +399,9 @@ class GraphIngestionEngine:
                 for old_edge in list(current_edges):
                     if (
                         old_edge.source_id == neighbor_id
-                        and old_edge.target_id == hub_id
+                        and old_edge.target_id == split_target_id
                     ) or (
-                        old_edge.source_id == hub_id
+                        old_edge.source_id == split_target_id
                         and old_edge.target_id == neighbor_id
                     ):
                         self.db.delete_edge(old_edge.id)

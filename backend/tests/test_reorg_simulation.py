@@ -38,8 +38,8 @@ def test_wrapper_split_mints_departments_under_genesis():
     cmd = {
         "action": "SPLIT_CONCEPT",
         "concept_id": genesis.id,
-        "hub_title": "Everything",
-        "hub_description": "Updated genesis scope",
+        "parent_title": "Everything",
+        "parent_description": "Updated genesis scope",
         "sub_concepts": [
             {"sub_id_alias": "s1", "title": "Dept A", "description": "Cluster A"},
             {"sub_id_alias": "s2", "title": "Dept B", "description": "Cluster B"},
@@ -124,8 +124,8 @@ def test_lateral_split_keeps_immutable_depth_invariant():
     cmd = {
         "action": "SPLIT_CONCEPT",
         "concept_id": "h_lat",
-        "hub_title": "Overflow A",
-        "hub_description": "Split half",
+        "parent_title": "Overflow A",
+        "parent_description": "Split half",
         "sub_concepts": [
             {"sub_id_alias": "a", "title": "Hub A", "description": "A"},
             {"sub_id_alias": "b", "title": "Hub B", "description": "B"},

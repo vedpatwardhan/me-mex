@@ -6,7 +6,7 @@ Aligned with docs/ARCHITECTURE.md Section 3:
 - First-Class Temporal Reasoning: Explicit creation/update timestamps (`created_at`, `updated_at`) on all nodes/edges without artificial numerical weight decay.
 - Node Mutability Hierarchy:
     - Root Nodes (`ROOT`) & Intra-Document Concept Nodes (direct extracted concepts connected to Root Nodes) are Immutable (`metadata.immutable = True`).
-    - Persona-created Domain Hubs & Intermediate Nodes are Mutable (`metadata.immutable = False`).
+    - Navigator-created intermediate concept nodes are mutable (`metadata.immutable = False`).
 """
 
 import time
@@ -57,43 +57,6 @@ class GraphNode(BaseModel):
     def to_prompt_dict(self) -> Dict[str, str]:
         """Returns clean representation (id, title, description) for LLM prompts."""
         return {"id": self.id, "title": self.title, "description": self.description}
-
-
-class ConceptHubCandidate(BaseModel):
-    """
-    Candidate Concept Hub Entity identified via graph centrality analytics.
-    Exposes explicit schema guarantees for ID, Title, Description, and centrality score.
-    Supports unpacking or tuple indexing for backward compatibility.
-    """
-
-    node: GraphNode
-    centrality_score: float
-
-    @property
-    def id(self) -> str:
-        return self.node.id
-
-    @property
-    def title(self) -> str:
-        return self.node.title
-
-    @property
-    def description(self) -> str:
-        return self.node.description
-
-    def __getitem__(self, item: int):
-        """Enable tuple unpacking / indexing (candidate[0] -> node, candidate[1] -> score)."""
-        if item == 0:
-            return self.node
-        elif item == 1:
-            return self.centrality_score
-        raise IndexError(
-            "ConceptHubCandidate only supports indices 0 (node) and 1 (score)"
-        )
-
-    def __iter__(self):
-        """Enable unpacking: node, score = candidate."""
-        return iter((self.node, self.centrality_score))
 
 
 class GraphEdge(BaseModel):
@@ -149,7 +112,7 @@ class PassageRecord(BaseModel):
 class MacroDocumentRecord(BaseModel):
     id: str = Field(alias="_id")
     department_name: str
-    hub_concept_ids: List[str] = Field(default_factory=list)
+    scope_concept_ids: List[str] = Field(default_factory=list)
     summary_text: str
     last_updated: float = Field(default_factory=time.time)
 
@@ -307,21 +270,11 @@ class ConsolidatedConceptsPayload(BaseModel):
     concepts: List[CanonicalConceptItem]
 
 
-class ExploredDomainContext(BaseModel):
-    """Typed context for an explored department persona domain."""
-
-    department_id: str
-    department_name: str
-    hub_node: GraphNode
-    explored_nodes: List[GraphNode] = Field(default_factory=list)
-
-
 class EdgeCommandPayload(BaseModel):
     source_index: int
     target_index: int
     relation_type: str = "RELEVANT_TO"
     description: str = ""
-    domain_hub_index: Optional[int] = None
 
 
 class ConceptEditPayload(BaseModel):
@@ -334,17 +287,10 @@ class LinkingCommand(BaseModel):
     action: Literal["CREATE_EDGE", "EDIT_CONCEPT"] = "CREATE_EDGE"
     edge: Optional[EdgeCommandPayload] = None
     concept: Optional[ConceptEditPayload] = None
-    department_name: Optional[str] = None
-    persona_id: Optional[str] = None
 
 
 class CollectiveLinkingPayload(BaseModel):
     commands: List[LinkingCommand]
-
-
-class PersonaRouteRelevancePayload(BaseModel):
-    selected_hub_indices: List[int]
-    reasoning: Optional[str] = None
 
 
 class DiscoveredCandidateItem(BaseModel):
@@ -363,13 +309,13 @@ class SubConceptItem(BaseModel):
 
 
 class ReorgSplitPayload(BaseModel):
-    hub_title: str = Field(
+    parent_title: str = Field(
         ...,
-        description="Updated umbrella title for the parent hub that accommodates all newly formed sub-concepts and their rewired relations.",
+        description="Updated umbrella title for the split target node accommodating all newly formed sub-concepts and their rewired relations.",
     )
-    hub_description: str = Field(
+    parent_description: str = Field(
         ...,
-        description="Updated comprehensive description for the parent hub synthesizing its broader scope and accommodating all sub-concepts.",
+        description="Updated comprehensive description for the split target synthesizing its broader scope and accommodating all sub-concepts.",
     )
     sub_concepts: List[SubConceptItem]
 
@@ -411,5 +357,4 @@ class SelectedNeighborItem(BaseModel):
 
 
 class PersonaExplorationPayload(BaseModel):
-    synthesized_insight: Optional[str] = None
     selected_neighbors: List[SelectedNeighborItem] = Field(default_factory=list)

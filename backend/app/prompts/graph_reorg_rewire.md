@@ -1,27 +1,26 @@
 <!--
-  Specialist Persona Neighbor Edge Re-Wiring Prompt Template (Step 3 of 3)
-  Iterates over direct neighbor nodes to assign them to newly created intermediate sub-concepts.
+  Neighbor edge re-wiring (Step 3 of reorganization)
 -->
-You are {{ department_name }}, a Specialist Persona Agent in the knowledge graph.
-Your task is Step 3 (Neighbor Edge Re-Wiring): Iterating over direct neighbor nodes connected to concept hub '{{ node_id }}' and assigning each neighbor node to the single most appropriate newly created sub-concept alias.
+You are {{ department_name }}, the Graph Navigator performing graph maintenance.
+Step 3 (Neighbor Edge Re-Wiring): Assign each direct neighbor of mutable concept '{{ node_id }}' to the most appropriate new sub-concept alias.
 
 OPERATIONAL MODE:
 {% if mode == "leaf_outward" %}
 MODE: LEAF OUTWARD REWIRING (Phase 2a)
-- You are rewiring ground-truth immutable evidence leaves outward to the newly formed sub-concepts (or optionally to an existing mutable concept if it is a perfect semantic home).
-- Direct connections between the leaves and the hub '{{ node_id }}' will be replaced by connections through the sub-concepts.
+- Rewire immutable evidence leaves to new sub-concepts (or an existing mutable node if it is the perfect semantic home).
+- Replace direct leaf-to-target edges with connections through sub-concepts.
 {% elif mode == "pure_immutable" %}
 MODE: DIRECT OUTWARD LEAF REWIRING
 - Rewire each immutable leaf to its designated sub-concept alias.
 {% else %}
 MODE: MUTABLE CONCEPT REWIRING
-- Rewire connected mutable concepts underneath their matching new intermediate sub-concepts.
+- Rewire mutable neighbors to matching new intermediate sub-concepts.
 {% endif %}
 
 RULES:
-1. Complete Target Neighbor Coverage: You MUST evaluate and rewire every target neighbor node provided in the input list.
-2. Distinct Assignment: Assign each target neighbor node to AT LEAST ONE `sub_id_alias` (or multiple aliases if genuinely relevant to more than one sub-concept).
-3. Complete Sub-Concept Coverage: Ensure EVERY newly formulated sub-concept alias receives AT LEAST ONE connecting neighbor. No sub-concept may be left idle without neighbor connections.
+1. Cover every target neighbor in the input list.
+2. Each neighbor connects to at least one `sub_id_alias` (multiple only if genuinely cross-cutting).
+3. Every sub-concept alias receives at least one neighbor — no idle sub-concepts.
 
 Return JSON format strictly:
 {
@@ -30,13 +29,7 @@ Return JSON format strictly:
       "neighbor_index": 1,
       "connect_to_sub_alias": "sub_1",
       "relation_type": "RELEVANT_TO",
-      "description": "Re-wired connection from neighbor to specific sub-concept."
-    },
-    {
-      "neighbor_index": 2,
-      "connect_to_sub_alias": "sub_2",
-      "relation_type": "RELEVANT_TO",
-      "description": "Re-wired connection ensuring sub_2 is also covered."
+      "description": "Re-wired connection from neighbor to sub-concept."
     }
   ]
 }

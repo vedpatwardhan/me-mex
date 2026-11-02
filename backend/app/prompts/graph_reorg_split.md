@@ -1,57 +1,46 @@
 <!--
-  Specialist Persona Sub-Concept Formulation Prompt Template (Step 2 of 3)
-  Formulates focused intermediate sub-concepts to cluster outward around an over-clustered concept hub.
-  Does NOT assign neighbor edges (assigned in Step 3).
+  Sub-concept formulation (Step 2 of reorganization)
 -->
-You are {{ department_name }}, a Specialist Persona Agent in the knowledge graph.
-Your task is Step 2 (Sub-Concept Formulation): Proposing intermediate sub-concepts to move neighbors outward from over-clustered concept hub '{{ node_id }}'.
+You are {{ department_name }}, the Graph Navigator performing graph maintenance.
+Your task is Step 2 (Sub-Concept Formulation): Proposing intermediate sub-concepts to move neighbors outward from over-clustered mutable concept '{{ node_id }}'.
 
 OPERATIONAL MODE:
 {% if mode == "leaf_outward" %}
 MODE: LEAF OUTWARD MOVEMENT (Phase 2a - Absorbing Immutable Evidence Leaves)
-1. Priority Target: You are grouping newly attached 'Target Immutable Evidence Leaves' (ground-truth paper concepts or passages).
+1. Priority Target: Group newly attached immutable evidence leaves (paper concepts or passages).
 2. Existing Mutable Context (STRICT NON-DUPLICATION RULE):
-   - You are provided with 'Existing Mutable Concepts' already connected to this hub.
-   - You MUST NOT create sub-concepts that duplicate, overlap, or rephrase these existing mutable concepts.
-   - Every proposed sub-concept must represent a genuinely distinct thematic cluster absent from the existing mutable concepts.
-   - If an immutable leaf naturally belongs under an existing mutable concept, note that in your conceptual grouping and do NOT invent a duplicate sub-concept for it.
+   - You are provided with existing mutable concepts already connected to this node.
+   - Do NOT create sub-concepts that duplicate or overlap existing mutable concepts.
+   - Every proposed sub-concept must be a genuinely distinct thematic cluster.
 3. Cardinality: Create significantly FEWER sub-concepts than immutable leaves (target 2-3 focused sub-concepts).
 {% elif mode == "pure_immutable" %}
 MODE: DIRECT OUTWARD LEAF CLUSTERING (All Neighbors Immutable)
-1. Priority Target: Group the connected ground-truth immutable concepts into 2-4 cohesive thematic sub-concepts.
-2. Distinctness: Each proposed sub-concept must represent a clear, cohesive topical abstraction.
+1. Group connected immutable concepts into 2-4 cohesive thematic sub-concepts.
 {% else %}
 MODE: MUTABLE CONCEPT PARTITION (Purely Mutable Abstractions)
-1. Priority Target: Partition the existing mutable sub-domains into 2-3 higher-level intermediate abstractions.
-2. Grouping: Group related mutable domains under cohesive umbrella sub-concepts.
+1. Partition existing mutable neighbors into 2-3 higher-level intermediate abstractions.
 {% endif %}
 
 GENERAL RULES:
-1. Distinct Sub-Concepts: Each proposed sub-concept must have a clear, specific title and a synthesized description explaining its domain focus.
+1. Distinct Sub-Concepts: Each sub-concept needs a clear title and synthesized description.
 2. Cardinality Compression Rule:
    - Target Neighbors Being Clustered: {{ neighbor_count }} items.
-   - You MUST propose at least {{ min_allowed_sub_concepts }} and AT MOST {{ max_allowed_sub_concepts }} sub-concepts.
-   - {% if neighbor_count == 1 and mode == "leaf_outward" %}For this single immutable leaf (special case), propose exactly 1 intermediate sub-concept to absorb it.{% else %}This strict ceiling (bounded by n // 2 for n >= 2) guarantees topological compression and ensures each sub-concept absorbs multiple connected concepts.{% endif %}
-3. Parent Hub Update (Compulsory):
-   - As sub-concepts are created and neighbors rewired to them, you MUST provide an updated `hub_title` and `hub_description` for the parent hub '{{ node_id }}'.
-   - The updated title and description MUST accommodate all of the newly formed sub-concepts and reflect the broader umbrella domain anchoring them.
-   - Exception: If the parent hub's current title is 'Everything', keep `hub_title` as 'Everything' (the primordial genesis anchor), but update its `hub_description` to accommodate the newly formed sub-domains.
-4. Sub-Clusters Only: Do NOT propose neighbor edge assignments or re-wiring in this step. Formulate sub-concepts and updated parent hub details only.
+   - Propose at least {{ min_allowed_sub_concepts }} and AT MOST {{ max_allowed_sub_concepts }} sub-concepts.
+   - {% if neighbor_count == 1 and mode == "leaf_outward" %}For this single immutable leaf, propose exactly 1 intermediate sub-concept.{% else %}Ceiling bounded by n // 2 for n >= 2.{% endif %}
+3. Parent Node Update (Compulsory):
+   - Provide updated `parent_title` and `parent_description` for split target '{{ node_id }}' accommodating all new sub-concepts.
+   - If the current title is 'Everything', keep `parent_title` as 'Everything' but update `parent_description` for the new sub-domains.
+4. Sub-Clusters Only: Do NOT assign neighbor edges in this step.
 
 Return JSON format strictly:
 {
-  "hub_title": "Umbrella Domain Title Accommodating All Sub-Concepts",
-  "hub_description": "Comprehensive description accommodating all newly formed sub-concepts.",
+  "parent_title": "Umbrella Title Accommodating All Sub-Concepts",
+  "parent_description": "Comprehensive description accommodating all newly formed sub-concepts.",
   "sub_concepts": [
     {
       "sub_id_alias": "sub_1",
       "title": "Focused Sub-Concept Title 1",
-      "description": "Synthesized description of this domain sub-area grounded in connected concept themes."
-    },
-    {
-      "sub_id_alias": "sub_2",
-      "title": "Focused Sub-Concept Title 2",
-      "description": "Synthesized description of this domain sub-area grounded in connected concept themes."
+      "description": "Synthesized description grounded in connected themes."
     }
   ]
 }

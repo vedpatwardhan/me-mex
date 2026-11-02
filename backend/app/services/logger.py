@@ -245,12 +245,12 @@ class RichLogger:
                 f"{proj_badge}   ├─ 🔗 [bold cyan]Intra-Document Concepts Created[/bold cyan]: [bold]{count} concepts[/bold] linked to [dim]{root_id}[/dim]"
             )
 
-        elif event_type == "hubs_calculated":
-            count = event_data.get("count", 0)
-            hubs = event_data.get("hubs", [])
-            hub_str = ", ".join(f"'{h.get('title')}' ({h.get('score')})" for h in hubs)
+        elif event_type == "graph_health_metrics":
+            metrics = event_data.get("metrics", {})
             console.print(
-                f"{proj_badge}   ├─ 🌐 [bold blue]Top Concept Hubs Computed[/bold blue]: {count} hubs ({hub_str})"
+                f"{proj_badge}   ├─ 📊 [bold blue]Tree health[/bold blue]: "
+                f"max_depth={metrics.get('max_tree_depth')}, "
+                f"sackin={metrics.get('sackin_index')}"
             )
 
         elif event_type == "persona_routing_completed":

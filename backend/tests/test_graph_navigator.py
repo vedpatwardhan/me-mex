@@ -4,7 +4,7 @@ Test Suite: Graph Navigator tree traversal & reorganization
 Aligned with docs/ARCHITECTURE.md Section 4:
 - Validates Genesis-rooted mutable tree traversal (`traverse_mutable_tree_from_genesis`).
 - Validates Root Node Traversal Blocking (Root Nodes provide summary context, but expansion past Root Nodes is strictly blocked).
-- Validates passage-grounded hub reorganization (`reorganize_mutable_hub`).
+- Validates passage-grounded hub reorganization (`reorganize_overclustered_nodes`).
 """
 
 import pytest
@@ -38,7 +38,7 @@ def test_graph_navigator_shared_exploration():
     )
 
     assert exploration["department_id"] == "nav_concept_genesis"
-    assert exploration["hub_node_id"] == "concept_genesis"
+    assert exploration["genesis_node_id"] == "concept_genesis"
     assert "concept_genesis" in exploration["traversed_node_ids"]
     assert len(exploration["traversed_node_ids"]) >= 1
     assert "explored_nodes" in exploration
@@ -171,8 +171,8 @@ def test_mutable_tree_candidates_exclude_non_subset_mutable_edges():
     assert "concept_outside_tree" not in candidates
 
 
-def test_reorganize_mutable_hub_emits_telemetry_events(monkeypatch):
-    """Verify that GraphNavigator.reorganize_mutable_hub emits discovery telemetry
+def test_reorganize_overclustered_nodes_emits_telemetry_events(monkeypatch):
+    """Verify that GraphNavigator.reorganize_overclustered_nodes emits discovery telemetry
 
     events even when no nodes qualify or when explored_nodes is empty.
     """
@@ -188,7 +188,7 @@ def test_reorganize_mutable_hub_emits_telemetry_events(monkeypatch):
     agent = GraphNavigator("global")
 
     # 1. Empty explored nodes
-    res_empty = agent.reorganize_mutable_hub(
+    res_empty = agent.reorganize_overclustered_nodes(
         explored_nodes=[], project_id="proj_reorg_telemetry"
     )
     assert res_empty["commands"] == []
@@ -204,7 +204,7 @@ def test_reorganize_mutable_hub_emits_telemetry_events(monkeypatch):
     )
 
     db_engine.upsert_node(hub)
-    res = agent.reorganize_mutable_hub(
+    res = agent.reorganize_overclustered_nodes(
         explored_nodes=[hub], project_id="proj_reorg_telemetry", degree_threshold=5
     )
     events = res.get("emitted_events", [])
@@ -220,7 +220,9 @@ def test_reorganize_mutable_hub_emits_telemetry_events(monkeypatch):
     assert "cohesive" in done_evt["message"]
 
 
-def test_reorganize_mutable_hub_selects_qualifying_mutable_candidate(monkeypatch):
+def test_reorganize_overclustered_nodes_selects_qualifying_mutable_candidate(
+    monkeypatch,
+):
     """Verify that when a mutable hub has degree >= threshold, it is passed to LLM and selected."""
     project_id = "proj_qualifying_hub_test"
     hub = GraphNode(
@@ -287,8 +289,8 @@ def test_reorganize_mutable_hub_selects_qualifying_mutable_candidate(monkeypatch
         elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
             return json.dumps(
                 {
-                    "hub_title": "Everything",
-                    "hub_description": "Universal domain hub updated to accommodate all sub-concepts.",
+                    "parent_title": "Everything",
+                    "parent_description": "Universal domain hub updated to accommodate all sub-concepts.",
                     "sub_concepts": [
                         {
                             "sub_id_alias": "sub_1",
@@ -326,7 +328,7 @@ def test_reorganize_mutable_hub_selects_qualifying_mutable_candidate(monkeypatch
 
     monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
 
-    res = agent.reorganize_mutable_hub(
+    res = agent.reorganize_overclustered_nodes(
         explored_nodes=[hub], project_id=project_id, degree_threshold=5
     )
     assert len(res["commands"]) == 1
@@ -336,7 +338,7 @@ def test_reorganize_mutable_hub_selects_qualifying_mutable_candidate(monkeypatch
     assert len(cmd["sub_concepts"]) == 2
 
 
-def test_reorganize_mutable_hub_mixed_decongested_skips_phase_2b(monkeypatch):
+def test_reorganize_overclustered_nodes_mixed_decongested_skips_phase_2b(monkeypatch):
     """Verify that in mixed neighborhood, Phase 2a runs and if post_2a_degree < threshold, Phase 2b is skipped."""
     project_id = "proj_mixed_decongested_test"
     hub = GraphNode(
@@ -410,8 +412,8 @@ def test_reorganize_mutable_hub_mixed_decongested_skips_phase_2b(monkeypatch):
             # Return 2 sub-concepts for Phase 2a
             return json.dumps(
                 {
-                    "hub_title": "AI Foundations & Generative Models",
-                    "hub_description": "Overarching domain accommodating Sub A and Sub B.",
+                    "parent_title": "AI Foundations & Generative Models",
+                    "parent_description": "Overarching domain accommodating Sub A and Sub B.",
                     "sub_concepts": [
                         {
                             "sub_id_alias": "sub_a",
@@ -449,7 +451,7 @@ def test_reorganize_mutable_hub_mixed_decongested_skips_phase_2b(monkeypatch):
 
     monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
 
-    res = agent.reorganize_mutable_hub(
+    res = agent.reorganize_overclustered_nodes(
         explored_nodes=[hub], project_id=project_id, degree_threshold=5
     )
 
@@ -461,13 +463,15 @@ def test_reorganize_mutable_hub_mixed_decongested_skips_phase_2b(monkeypatch):
     assert "mutable_partition" not in captured_modes
 
     events = [e["event"] for e in res["emitted_events"]]
-    assert "reorg_hub_decongested" in events
+    assert "reorg_node_decongested" in events
     assert len(res["commands"]) == 1
     assert res["commands"][0]["action"] == "SPLIT_CONCEPT"
     assert len(res["commands"][0]["sub_concepts"]) == 2
 
 
-def test_reorganize_mutable_hub_mixed_overclustered_triggers_phase_2b(monkeypatch):
+def test_reorganize_overclustered_nodes_mixed_overclustered_triggers_phase_2b(
+    monkeypatch,
+):
     """Verify that in mixed neighborhood, if post_2a_degree >= threshold, Phase 2b executes."""
     project_id = "proj_mixed_phase2b_test"
     hub = GraphNode(
@@ -542,8 +546,8 @@ def test_reorganize_mutable_hub_mixed_overclustered_triggers_phase_2b(monkeypatc
                 captured_modes.append("mutable_partition")
             return json.dumps(
                 {
-                    "hub_title": "High Degree Root Hub (Generalized)",
-                    "hub_description": "Overarching domain accommodating all child sub-concepts.",
+                    "parent_title": "High Degree Root Hub (Generalized)",
+                    "parent_description": "Overarching domain accommodating all child sub-concepts.",
                     "sub_concepts": [
                         {
                             "sub_id_alias": "sub_1",
@@ -581,7 +585,7 @@ def test_reorganize_mutable_hub_mixed_overclustered_triggers_phase_2b(monkeypatc
 
     monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
 
-    res = agent.reorganize_mutable_hub(
+    res = agent.reorganize_overclustered_nodes(
         explored_nodes=[hub], project_id=project_id, degree_threshold=5
     )
 
@@ -694,7 +698,9 @@ def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier(monkeypatc
     assert "mut_branch" in res["traversed_node_ids"]
 
 
-def test_reorganize_mutable_hub_updates_parent_hub_title_and_description(monkeypatch):
+def test_reorganize_overclustered_nodes_updates_parent_hub_title_and_description(
+    monkeypatch,
+):
     """Verify that SPLIT_CONCEPT updates parent hub title & description to accommodate new sub-concepts."""
     from app.services.graph_ingestion_engine import GraphIngestionEngine
 
@@ -712,8 +718,8 @@ def test_reorganize_mutable_hub_updates_parent_hub_title_and_description(monkeyp
     split_cmd = {
         "action": "SPLIT_CONCEPT",
         "concept_id": "hub_specialized",
-        "hub_title": "Comprehensive World Modeling Dynamics",
-        "hub_description": "Overarching domain accommodating perception, prediction, and control sub-concepts.",
+        "parent_title": "Comprehensive World Modeling Dynamics",
+        "parent_description": "Overarching domain accommodating perception, prediction, and control sub-concepts.",
         "sub_concepts": [
             {
                 "sub_id_alias": "sub_1",
@@ -743,7 +749,7 @@ def test_reorganize_mutable_hub_updates_parent_hub_title_and_description(monkeyp
     )
 
 
-def test_reorganize_mutable_hub_caps_subconcepts_to_half_degree(monkeypatch):
+def test_reorganize_overclustered_nodes_caps_subconcepts_to_half_degree(monkeypatch):
     """Verify that formulated sub-concepts are strictly capped to max(2, n // 2) for compression."""
     import json
 
@@ -789,8 +795,8 @@ def test_reorganize_mutable_hub_caps_subconcepts_to_half_degree(monkeypatch):
             # Model attempts to return 4 sub-concepts for 5 neighbors (which would violate n // 2 = 2)
             return json.dumps(
                 {
-                    "hub_title": "Generalized Umbrella Hub",
-                    "hub_description": "Accommodating all sub-concepts.",
+                    "parent_title": "Generalized Umbrella Hub",
+                    "parent_description": "Accommodating all sub-concepts.",
                     "sub_concepts": [
                         {
                             "sub_id_alias": f"sub_{i}",
@@ -820,7 +826,7 @@ def test_reorganize_mutable_hub_caps_subconcepts_to_half_degree(monkeypatch):
 
     monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
 
-    res = agent.reorganize_mutable_hub(
+    res = agent.reorganize_overclustered_nodes(
         explored_nodes=[hub],
         project_id=project_id,
         degree_threshold=5,

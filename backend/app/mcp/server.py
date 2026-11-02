@@ -47,13 +47,13 @@ def get_passages_by_ids(passage_ids: List[str]) -> str:
 
 @mcp.tool()
 def get_macro_documents() -> str:
-    """Retrieve Department Macro Documents with top hub concept IDs and summaries."""
+    """Retrieve department macro documents with scope concept IDs and summaries."""
     macros = db_engine.get_macros()
     return json.dumps([m.model_dump(by_alias=True) for m in macros], indent=2)
 
 
 @mcp.tool()
-def calculate_hub_rankings() -> str:
+def calculate_tree_health_metrics() -> str:
     """Return mutable tree health metrics (depth, Sackin index, reachability)."""
     metrics = graph_analytics.refresh_tree_metadata()
     return json.dumps(metrics, indent=2)

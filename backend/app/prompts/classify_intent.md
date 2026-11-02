@@ -4,7 +4,7 @@
   Classifies input queries into exactly ONE of 3 execution paths:
   1. CONVERSATION: Fast single-step execution straightaway to final LLM response.
   2. RETRIEVAL: Mutually exclusive sub-graph traversal & relevance evaluation leading to final conversation response.
-  3. INGESTION: Document scraping, out-of-graph passage storage, sub-graph traversal, multi-hub linking, concept splitting & final conversation.
+  3. INGESTION: Document scraping, out-of-graph passage storage, Genesis tree traversal, collective linking, concept splitting & final conversation.
 -->
 You are the Executive Orchestrator intent classifier.
 Analyze the conversation history and current user message, then classify the primary intent into exactly ONE category:

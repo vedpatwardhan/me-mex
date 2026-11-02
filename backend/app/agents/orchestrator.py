@@ -7,7 +7,7 @@ Aligned with docs/ARCHITECTURE.md Section 2:
 - Path Lifecycle:
     - `CONVERSATION`: Direct execution -> Final conversation response.
     - `RETRIEVAL`: Mutually exclusive sub-graph traversal (Step 1) -> Relevance evaluation (Step 2) -> Final conversation response.
-    - `INGESTION`: Fetch URL/PDF & build intra-doc graph (Step 1) -> Partitioned sub-graph traversal, relevance eval, multi-hub linking & passage-grounded concept splitting (Step 2) -> Final conversation response.
+    - `INGESTION`: Fetch URL/PDF & build intra-doc graph (Step 1) -> Genesis tree traversal, collective linking & passage-grounded concept splitting (Step 2) -> Final conversation response.
 - Creates Root Nodes (`ROOT`) and extracted Intra-Document Concepts (`node_type="CONCEPT"`) with `immutable: True`.
 """
 
@@ -27,7 +27,6 @@ from app.models import (
     PassageConceptsPayload,
     ConsolidatedConceptsPayload,
     CollectiveLinkingPayload,
-    ExploredDomainContext,
     TargetGeneralizationPayload,
 )
 from app.config import settings
@@ -47,14 +46,13 @@ from app.services.graph_ingestion_engine import graph_ingestion_engine
 class ExecutiveOrchestrator:
     """Executive Orchestrator agent acting as central intent classifier and lifecycle coordinator."""
 
-    def __init__(self, max_k_hubs: int = 5):  # legacy param unused in v0.2
+    def __init__(self):
         self.db = db_engine
         self.analytics = graph_analytics
         self.llm = llm_gateway
         self.tools = search_tools
         self.event_queue = event_queue
         self.ingestion_engine = graph_ingestion_engine
-        self.max_k_hubs = max_k_hubs
 
     @staticmethod
     def _extract_markdown_title(text: str) -> Optional[str]:
@@ -526,7 +524,7 @@ class ExecutiveOrchestrator:
         chat_history: List[Dict[str, str]],
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Path 2: RETRIEVAL (Step 1: Partitioned Hub Traversal -> Step 2: Relevance Evaluation -> Final Conversation)."""
+        """Path 2: RETRIEVAL (Genesis tree traversal -> relevance evaluation -> conversation)."""
         logger.phase_header(
             "🔍 PATH 2: RETRIEVAL & SUB-GRAPH TRAVERSAL",
             f"Project: {project_id} • Query: '{query}'",
@@ -578,7 +576,7 @@ class ExecutiveOrchestrator:
         target_info: IntentClassificationPayload,
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Path 3: INGESTION (Step 1: Fetch & Intra-Doc Graph -> Step 2: Hub Traversal, Relevance Eval, Linking & Reorganization -> Final Conversation)."""
+        """Path 3: INGESTION (Fetch & intra-doc graph -> tree traversal, linking, reorganization -> conversation)."""
         source_url = target_info.source_url
         raw_payload = target_info.raw_text
 
@@ -871,14 +869,6 @@ class ExecutiveOrchestrator:
         explored_nodes = list(
             {n.id: n for n in traversal_finding.get("explored_nodes", [])}.values()
         )
-        collective_explored_trees: Dict[str, ExploredDomainContext] = {
-            navigator.genesis_node.id: ExploredDomainContext(
-                department_id=navigator.navigator_id,
-                department_name=navigator.navigator_name,
-                hub_node=navigator.genesis_node,
-                explored_nodes=explored_nodes,
-            )
-        }
 
         yield {
             "event": "graph_traversal_active",
@@ -898,30 +888,15 @@ class ExecutiveOrchestrator:
                 {"concept_index": c_idx, "title": n.title, "description": n.description}
             )
 
-        available_domains_payload = []
-        for d_info in collective_explored_trees.values():
-            hub_idx = linking_concept_mapper.register(d_info.hub_node.id)
-            intermediate_nodes_payload = []
-            for n in d_info.explored_nodes:
-                if n.id != d_info.hub_node.id:
-                    n_idx = linking_concept_mapper.register(n.id)
-                    intermediate_nodes_payload.append(
-                        {
-                            "target_index": n_idx,
-                            "title": n.title,
-                            "description": n.description,
-                        }
-                    )
-            available_domains_payload.append(
+        explored_tree_payload = []
+        for n in explored_nodes:
+            n_idx = linking_concept_mapper.register(n.id)
+            explored_tree_payload.append(
                 {
-                    "domain_hub_index": hub_idx,
-                    "domain_name": d_info.department_name,
-                    "central_hub_node": {
-                        "target_index": hub_idx,
-                        "title": d_info.hub_node.title,
-                        "description": d_info.hub_node.description,
-                    },
-                    "intermediate_explored_concepts": intermediate_nodes_payload,
+                    "target_index": n_idx,
+                    "title": n.title,
+                    "description": n.description,
+                    "is_genesis": n.id == navigator.genesis_node.id,
                 }
             )
 
@@ -932,8 +907,8 @@ User Query: "{query}"
 Newly Extracted Intra-Document Concepts ({len(intra_concepts_payload)} items, IMMUTABLE):
 {json.dumps(intra_concepts_payload, indent=2)}
 
-Available Active Persona Domains and Explored Sub-Graph Nodes:
-{json.dumps(available_domains_payload, indent=2)}"""
+Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payload)} nodes):
+{json.dumps(explored_tree_payload, indent=2)}"""
         collective_commands = []
         try:
             payload_collective = self.llm.generate_structured_completion(
@@ -954,18 +929,12 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
                 if c.action == "CREATE_EDGE" and c.edge:
                     src_id = linking_concept_mapper.to_id(c.edge.source_index)
                     tgt_id = linking_concept_mapper.to_id(c.edge.target_index)
-                    domain_id = (
-                        linking_concept_mapper.to_id(c.edge.domain_hub_index)
-                        if c.edge.domain_hub_index
-                        else None
-                    )
                     if src_id and tgt_id:
                         cmd_dict["edge"] = {
                             "source_id": src_id,
                             "target_id": tgt_id,
                             "relation_type": c.edge.relation_type,
                             "description": c.edge.description,
-                            "domain_hub_id": domain_id,
                         }
                         collective_commands.append(cmd_dict)
                 elif c.action == "EDIT_CONCEPT" and c.concept:
@@ -992,18 +961,15 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
             if cmd.get("edge", {}).get("source_id")
         }
 
-        # Fallback target: strictly prioritize primordial Genesis ('Everything') hub
-        genesis_hub = self.db.get_genesis_node(project_id)
+        genesis_node = navigator.genesis_node
         for intra in intra_doc_nodes:
             if intra.id not in connected_concepts:
                 filtered_commands.append(
                     {
                         "action": "CREATE_EDGE",
-                        "department_name": genesis_hub.title,
-                        "persona_id": genesis_hub.id,
                         "edge": {
                             "source_id": intra.id,
-                            "target_id": genesis_hub.id,
+                            "target_id": genesis_node.id,
                             "relation_type": "RELEVANT_TO",
                             "description": "Fallback foundational connection ensuring complete graph connectivity.",
                         },
@@ -1011,8 +977,8 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
                 )
 
         for cmd in filtered_commands:
-            cmd.setdefault("department_name", navigator.navigator_name)
-            cmd.setdefault("persona_id", navigator.navigator_id)
+            cmd.setdefault("navigator_id", navigator.navigator_id)
+            cmd.setdefault("navigator_name", navigator.navigator_name)
             evt = self.ingestion_engine.execute_single_command(cmd, title, proj_list)
             if evt:
                 yield evt
@@ -1051,7 +1017,7 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
             self.db.get_node(nid) for nid in reorg_ids if self.db.get_node(nid)
         ]
         reorg_res = await asyncio.to_thread(
-            navigator.reorganize_mutable_hub,
+            navigator.reorganize_overclustered_nodes,
             explored_nodes=reorg_nodes,
             project_id=project_id,
             degree_threshold=settings.DEGREE_THRESHOLD,
@@ -1059,8 +1025,8 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
         for reorg_evt in reorg_res.get("emitted_events", []):
             yield reorg_evt
         for cmd in reorg_res.get("commands", []):
-            cmd["department_name"] = navigator.navigator_name
-            cmd["persona_id"] = navigator.navigator_id
+            cmd["navigator_id"] = navigator.navigator_id
+            cmd["navigator_name"] = navigator.navigator_name
             evt = self.ingestion_engine.execute_single_command(cmd, title, proj_list)
             if evt:
                 yield evt
@@ -1100,19 +1066,17 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
             target_map[n_idx] = node
 
             # Gather connected neighbors
-            neighbor_summaries = []
+            neighbors = []
             for edge in adj_map.get(node.id, []):
                 nb_id = edge.target_id if edge.source_id == node.id else edge.source_id
                 nb_node = self.db.get_node(nb_id)
                 if nb_node:
-                    neighbor_summaries.append(
+                    neighbors.append(
                         {
                             "title": nb_node.title,
+                            "description": nb_node.description,
                             "relation": edge.description or "CONNECTED_TO",
                             "is_immutable": nb_node.is_immutable,
-                            "summary": nb_node.description[:150]
-                            if nb_node.description
-                            else "",
                         }
                     )
 
@@ -1122,8 +1086,8 @@ Available Active Persona Domains and Explored Sub-Graph Nodes:
                     "current_title": node.title,
                     "current_description": node.description,
                     "is_genesis_node": node.title.lower() == "everything",
-                    "connected_concepts_count": len(neighbor_summaries),
-                    "connected_concepts": neighbor_summaries,
+                    "connected_concepts_count": len(neighbors),
+                    "connected_concepts": neighbors,
                 }
             )
 

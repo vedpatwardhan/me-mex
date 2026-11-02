@@ -41,11 +41,6 @@ class GraphNavigator:
         self.last_explored_nodes: List[GraphNode] = [self.genesis_node]
 
     @property
-    def hub_node(self) -> GraphNode:
-        """Backward-compatible alias for traversal anchor (Genesis)."""
-        return self.genesis_node
-
-    @property
     def department_id(self) -> str:
         return self.navigator_id
 
@@ -160,23 +155,25 @@ class GraphNavigator:
         )
         tree = MutableTreeIndex(project_id=pid)
 
-        visited_node_ids = set([self.hub_node.id])
-        current_frontier = [self.hub_node.id]
-        explored_nodes_map: Dict[str, GraphNode] = {self.hub_node.id: self.hub_node}
+        visited_node_ids = set([self.genesis_node.id])
+        current_frontier = [self.genesis_node.id]
+        explored_nodes_map: Dict[str, GraphNode] = {
+            self.genesis_node.id: self.genesis_node
+        }
         emitted_events: List[Dict[str, Any]] = []
 
-        # Emit node_touched event for Hop 0 Hub Node
-        hub_evt = {
+        # Emit node_touched event for Hop 0 Genesis anchor
+        genesis_touch_evt = {
             "event": "node_touched",
             "persona_id": self.department_id,
             "persona_name": self.department_name,
-            "node_id": self.hub_node.id,
-            "node_title": self.hub_node.title,
-            "message": f"Concept '{self.hub_node.title}' touched by {self.department_name}.",
+            "node_id": self.genesis_node.id,
+            "node_title": self.genesis_node.title,
+            "message": f"Concept '{self.genesis_node.title}' touched by {self.department_name}.",
             "timestamp": time.time(),
         }
-        event_queue.push(pid, hub_evt)
-        emitted_events.append(hub_evt)
+        event_queue.push(pid, genesis_touch_evt)
+        emitted_events.append(genesis_touch_evt)
 
         for hop in range(1, max_traversal_depth + 1):
             if not current_frontier:
@@ -210,7 +207,7 @@ class GraphNavigator:
             prompt_payload = f"""Genesis / Project Scope (Everything):
 {self.genesis_node.description}
 
-Current Frontier Hub: '{current_frontier[0] if current_frontier else self.hub_node.title}'
+Current traversal frontier node: '{current_frontier[0] if current_frontier else self.genesis_node.title}'
 User Query / Context: "{query}"
 Current Hop Level: {hop} / {max_traversal_depth}
 
@@ -221,7 +218,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     "role": "system",
                     "content": load_prompt(
                         "graph_tree_traversal",
-                        hub_title=self.genesis_node.title,
+                        genesis_title=self.genesis_node.title,
                         max_depth=max_traversal_depth,
                     ),
                 }
@@ -286,7 +283,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         return {
             "department_id": self.department_id,
             "department_name": self.department_name,
-            "hub_node_id": self.hub_node.id,
+            "genesis_node_id": self.genesis_node.id,
             "explored_nodes": self.last_explored_nodes,
             "traversed_node_ids": list(visited_node_ids),
             "emitted_events": emitted_events,
@@ -338,7 +335,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             indexed_neighbors_to_rewire.append(entry)
 
         split_context_parts = [
-            f"Target Over-Clustered Concept Hub: '{target_node.title}' (ID: {target_node.id})",
+            f"Target over-clustered mutable concept: '{target_node.title}' (ID: {target_node.id})",
             f"Current Description: {target_node.description}",
             f"Reorganization Mode: {mode}",
             f"Target Neighbors to Move Outward ({len(indexed_neighbors_to_rewire)} items):",
@@ -414,7 +411,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             node_id=target_node.id,
             mode=mode,
         )
-        user_rewire = f"""Target Concept Hub: '{target_node.title}' (ID: {target_node.id})
+        user_rewire = f"""Target mutable concept: '{target_node.title}' (ID: {target_node.id})
 Reorganization Mode: {mode}
 
 Formulated Sub-Concepts Available for Connection:
@@ -473,13 +470,13 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
         event_queue.push(project_id, rewire_event)
 
         return {
-            "hub_title": payload_split.hub_title,
-            "hub_description": payload_split.hub_description,
+            "parent_title": payload_split.parent_title,
+            "parent_description": payload_split.parent_description,
             "sub_concepts": formulated_subs,
             "rewired_edges": rewired,
         }
 
-    def reorganize_mutable_hub(
+    def reorganize_overclustered_nodes(
         self,
         explored_nodes: list[GraphNode] | None = None,
         project_id: str = "global",
@@ -490,7 +487,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
 
         Step 1 (Discovery): Inspects full sub-graph payload to discover candidate over-clustered mutable concept nodes.
         Step 2 (Formulation): Formulates 2-3 focused sub-concepts around each target node using passage text grounding.
-        Step 3 (Neighbor Re-Wiring): Re-wires direct neighbor edges to connect through the new sub-concepts while preserving the original concept hub as an umbrella node.
+        Step 3 (Neighbor Re-Wiring): Re-wires direct neighbor edges to connect through the new sub-concepts while preserving the original mutable concept as an umbrella node.
 
         Returns a dictionary containing both executable commands and emitted telemetry events:
         {"commands": List[Dict[str, Any]], "emitted_events": List[Dict[str, Any]]}
@@ -606,7 +603,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             "graph_reorg_discover", department_name=self.department_name
         )
         user_discover = (
-            "Candidate Mutable Concept Hubs Eligible for Subdivision "
+            "Candidate mutable concepts eligible for Subdivision "
             f"({len(qualifying_nodes)} candidate(s)):\n"
             f"{json.dumps(nodes_payload, indent=2)}"
         )
@@ -714,7 +711,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                         "description": nb_node.description,
                         "is_immutable": nb_node.is_immutable,
                         "node_type": nb_node.node_type,
-                        "relation_to_hub": nb.get("relation_type", "RELEVANT_TO"),
+                        "relation_to_target": nb.get("relation_type", "RELEVANT_TO"),
                         "direction": nb.get("direction", "incoming"),
                     }
                     if nb_node.is_immutable:
@@ -732,7 +729,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             # 1. If any immutable leaves exist (|N_imm| > 0):
             #    - Purely Immutable (|N_mut| == 0): Direct outward leaf clustering.
             #    - Mixed (|N_mut| > 0): Phase 2a (Leaf Outward Movement with negative mutable context).
-            #      After rewiring, re-evaluate post-2a degree. If still >= threshold, the hub's mutable
+            #      After rewiring, re-evaluate post-2a degree. If still >= threshold, the node's mutable
             #      neighborhood is updated so it naturally flows into the mutable split below.
             if immutable_evidence_concepts:
                 mode = "pure_immutable" if not mutable_concepts else "leaf_outward"
@@ -764,14 +761,14 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                     {
                         "action": "SPLIT_CONCEPT",
                         "concept_id": target_node.id,
-                        "hub_title": phase_2a_res["hub_title"],
-                        "hub_description": phase_2a_res["hub_description"],
+                        "parent_title": phase_2a_res["parent_title"],
+                        "parent_description": phase_2a_res["parent_description"],
                         "sub_concepts": phase_2a_res["sub_concepts"],
                         "rewired_edges": phase_2a_res["rewired_edges"],
                     }
                 )
 
-                # If there were no mutable concepts, reorganization for this hub is complete.
+                # If there were no mutable concepts, reorganization for this node is complete.
                 if not mutable_concepts:
                     continue
 
@@ -781,7 +778,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                 )
                 if post_2a_degree < degree_threshold:
                     decongest_evt = {
-                        "event": "reorg_hub_decongested",
+                        "event": "reorg_node_decongested",
                         "persona_id": self.department_id,
                         "department_name": self.department_name,
                         "node_id": target_node.id,
@@ -790,7 +787,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                         "post_2a_degree": post_2a_degree,
                         "threshold": degree_threshold,
                         "message": (
-                            f"[{self.department_name}] Hub '{target_node.title}' successfully decongested "
+                            f"[{self.department_name}] Node '{target_node.title}' successfully decongested "
                             f"(degree: {total_neighbors} -> {post_2a_degree} < threshold {degree_threshold}). "
                             f"Phase 2b skipped."
                         ),
@@ -800,7 +797,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                     event_queue.push(project_id, decongest_evt)
                     continue
 
-                # Hub remains over-clustered: absorb the newly created sub-concepts into the mutable set
+                # Node remains over-clustered: absorb the newly created sub-concepts into the mutable set
                 # and fall through directly into the mutable split logic.
                 new_sub_nodes = [
                     {
@@ -809,7 +806,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                         "description": s.get("description"),
                         "is_immutable": False,
                         "node_type": "CONCEPT",
-                        "relation_to_hub": "SUBSET_OF",
+                        "relation_to_target": "SUBSET_OF",
                         "direction": "incoming",
                     }
                     for idx, s in enumerate(phase_2a_res["sub_concepts"])
@@ -818,8 +815,8 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
 
             # 2. Purely Mutable Outward Split:
             # Handles either:
-            # - Hubs that originally had ONLY mutable neighbors (|N_imm| == 0, Scenario B)
-            # - Mixed hubs where post-2a degree was still >= threshold (Phase 2b of Scenario C)
+            # - Nodes that originally had ONLY mutable neighbors (|N_imm| == 0, Scenario B)
+            # - Mixed nodes where post-2a degree was still >= threshold (Phase 2b of Scenario C)
             if mutable_concepts:
                 mut_res = self._execute_split_and_rewire(
                     target_node=target_node,
@@ -833,8 +830,8 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                         {
                             "action": "SPLIT_CONCEPT",
                             "concept_id": target_node.id,
-                            "hub_title": mut_res["hub_title"],
-                            "hub_description": mut_res["hub_description"],
+                            "parent_title": mut_res["parent_title"],
+                            "parent_description": mut_res["parent_description"],
                             "sub_concepts": mut_res["sub_concepts"],
                             "rewired_edges": mut_res["rewired_edges"],
                         }
@@ -874,7 +871,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
         """Independent zero-consensus graph ingestion step.
 
         Emits commands (`CONNECT_DIRECT`, `CREATE_INTERMEDIATE`, `EDIT_CONCEPT` on mutable nodes,
-        and `SPLIT_CONCEPT` on mutable nodes) to link extracted intra-document concepts to domain hubs.
+        and `SPLIT_CONCEPT` on mutable nodes) to link extracted intra-document concepts to mutable tree nodes.
         """
 
         def _format_nodes(nodes: List[GraphNode]) -> List[Dict[str, Any]]:
@@ -912,7 +909,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             {
                 "role": "system",
                 "content": load_prompt(
-                    "graph_link_intradoc", hub_title=self.hub_node.title
+                    "graph_link_intradoc", genesis_title=self.genesis_node.title
                 ),
             }
         ]
@@ -934,7 +931,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             return {
                 "department_id": self.department_id,
                 "department_name": self.department_name,
-                "hub_node_id": self.hub_node.id,
+                "genesis_node_id": self.genesis_node.id,
                 "traversed_node_ids": [n.id for n in explored_nodes],
                 "subgraph_nodes": explored_nodes,
                 "commands": raw_cmds,

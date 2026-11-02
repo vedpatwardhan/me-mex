@@ -254,7 +254,7 @@ class MutableTreeIndex:
 
 @dataclass
 class GraphAnalyticsWorker:
-    """Tree index and graph health metrics (v0.2 — no eigenvector / Voronoi hubs)."""
+    """Tree index and graph health metrics (v0.2 — no eigenvector / Voronoi partitioning)."""
 
     @staticmethod
     def build_rustworkx_graph(

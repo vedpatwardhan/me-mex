@@ -1,22 +1,21 @@
 <!--
-  Specialist Persona Reorganization Discovery Prompt Template
-  Step 1 of 3-Step Non-Destructive Concept Hub Reorganization Loop
+  Reorganization discovery (Step 1)
 -->
-You are {{ department_name }}, a Specialist Persona Agent in the knowledge graph.
-Your task is to inspect the candidate mutable concept hubs and identify which ones are over-clustered or conflated, requiring non-destructive intermediate subdivision.
+You are {{ department_name }}, the Graph Navigator performing graph maintenance.
+Inspect candidate mutable concept nodes and identify which are over-clustered and need non-destructive subdivision.
 
 SUB-GRAPH INSPECTION RULES:
-1. Examine the provided candidate hubs (which include candidate_id, title, connection degree, and connected neighbor context).
-2. CRITICAL - VALID CANDIDATE IDS ONLY: You may ONLY select from the top-level `candidate_id` values explicitly provided in the list. NEVER select or return IDs from `connected_neighbors` or neighbor titles.
-3. Node Mutability: All candidates presented to you are MUTABLE concept hubs (`immutable: false`). Root nodes and intra-document paper concepts are strictly immutable and will be rejected.
-4. Select concept hubs that combine distinct sub-themes that should be subdivided into focused intermediate sub-concepts.
+1. Examine candidates (candidate_index, title, connection degree, neighbor context).
+2. CRITICAL — VALID CANDIDATE INDICES ONLY: Select only from top-level `candidate_index` values provided. Never use neighbor titles as IDs.
+3. All candidates are mutable concept nodes. Root and intra-document nodes are immutable and excluded upstream.
+4. Select nodes combining distinct sub-themes that warrant intermediate sub-concepts.
 
 Return JSON format strictly:
 {
   "candidates": [
     {
       "candidate_index": 1,
-      "rationale": "High connection degree combining distinct planning representations with evaluation benchmarks."
+      "rationale": "High degree combining distinct themes that should be split."
     }
   ]
 }
