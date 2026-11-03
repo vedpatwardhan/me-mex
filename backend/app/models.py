@@ -277,16 +277,9 @@ class EdgeCommandPayload(BaseModel):
     description: str = ""
 
 
-class ConceptEditPayload(BaseModel):
-    concept_index: int
-    title: Optional[str] = None
-    description: Optional[str] = None
-
-
 class LinkingCommand(BaseModel):
-    action: Literal["CREATE_EDGE", "EDIT_CONCEPT"] = "CREATE_EDGE"
-    edge: Optional[EdgeCommandPayload] = None
-    concept: Optional[ConceptEditPayload] = None
+    action: Literal["CREATE_EDGE"] = "CREATE_EDGE"
+    edge: EdgeCommandPayload
 
 
 class CollectiveLinkingPayload(BaseModel):

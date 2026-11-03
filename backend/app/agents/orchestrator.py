@@ -953,29 +953,20 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
             )
             # Decode model integer indices back to string database IDs
             for c in payload_collective.commands:
-                cmd_dict = {"action": c.action}
-                if c.action == "CREATE_EDGE" and c.edge:
-                    src_id = linking_concept_mapper.to_id(c.edge.source_index)
-                    tgt_id = linking_concept_mapper.to_id(c.edge.target_index)
-                    if src_id and tgt_id:
-                        cmd_dict["edge"] = {
-                            "source_id": src_id,
-                            "target_id": tgt_id,
-                            "relation_type": c.edge.relation_type,
-                            "description": c.edge.description,
+                src_id = linking_concept_mapper.to_id(c.edge.source_index)
+                tgt_id = linking_concept_mapper.to_id(c.edge.target_index)
+                if src_id and tgt_id:
+                    collective_commands.append(
+                        {
+                            "action": c.action,
+                            "edge": {
+                                "source_id": src_id,
+                                "target_id": tgt_id,
+                                "relation_type": c.edge.relation_type,
+                                "description": c.edge.description,
+                            },
                         }
-                        collective_commands.append(cmd_dict)
-                elif c.action == "EDIT_CONCEPT" and c.concept:
-                    real_concept_id = linking_concept_mapper.to_id(
-                        c.concept.concept_index
                     )
-                    if real_concept_id:
-                        cmd_dict["concept"] = {
-                            "id": real_concept_id,
-                            "title": c.concept.title,
-                            "description": c.concept.description,
-                        }
-                        collective_commands.append(cmd_dict)
         except Exception as e:
             print(f"[ExecutiveOrchestrator] Collective ingestion linking error: {e}")
             collective_commands = []

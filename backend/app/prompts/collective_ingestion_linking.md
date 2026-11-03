@@ -16,16 +16,11 @@ CRITICAL INGESTION & TOPOLOGY INVARIANTS:
 3. SELECTIVE ATTACHMENT:
    - Link only where the relation is genuine. Prefer the best anchor on an explored path over attaching everything to Genesis.
 4. STRICT NODE MUTABILITY:
-   - Intra-document concepts are IMMUTABLE — only `CREATE_EDGE` from them (as source). Mutable explored nodes may receive `EDIT_CONCEPT` to generalize title/description when absorbing new evidence.
+   - Intra-document concepts are IMMUTABLE — only emit `CREATE_EDGE` from them (as source). Do not edit mutable target titles or descriptions here; Phase 3.5 generalizes affected targets after linking.
 
-Command Actions Allowed:
-1. "CREATE_EDGE":
-   - Connect an immutable intra-document concept (source_index) to an explored mutable target (target_index).
-   - edge: {"source_index": 1, "target_index": 2, "relation_type": "SUBSET_OF" | "SUPERSET_OF" | "RELEVANT_TO" | "BUILDS_UPON" | "SUPERSEDES" | "PARALLEL_TO" | "CONTRASTS_WITH", "description": "..."}
-
-2. "EDIT_CONCEPT" (MUTABLE TARGETS ONLY):
-   - Update or generalize an existing mutable explored node's title or description.
-   - concept: {"concept_index": 2, "title": "...", "description": "..."}
+Command action (only):
+- "CREATE_EDGE": Connect an immutable intra-document concept (source_index) to an explored mutable target (target_index).
+- edge: {"source_index": 1, "target_index": 2, "relation_type": "SUBSET_OF" | "SUPERSET_OF" | "RELEVANT_TO" | "BUILDS_UPON" | "SUPERSEDES" | "PARALLEL_TO" | "CONTRASTS_WITH", "description": "..."}
 
 Return JSON format strictly:
 {
