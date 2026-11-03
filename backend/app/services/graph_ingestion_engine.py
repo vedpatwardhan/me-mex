@@ -11,6 +11,10 @@ from app.db import db_engine
 from app.models import GraphNode, GraphEdge
 from app.services.event_queue import event_queue
 from app.services.graph_analytics import MutableTreeIndex, graph_analytics
+from app.services.reorg_rewire_utils import (
+    finalize_rewire_edges,
+    resolve_rewire_relation_type,
+)
 
 
 def _is_genesis(node: GraphNode) -> bool:
@@ -166,11 +170,18 @@ class GraphIngestionEngine:
         if not target_node or target_node.is_immutable:
             return None
         sub_concepts = item.get("sub_concepts", [])
-        rewired_edges = item.get("rewired_edges", [])
+        rewired_edges = list(item.get("rewired_edges", []))
         if not sub_concepts:
             return None
 
         project_scope = proj_list[0] if proj_list else None
+        rewired_edges = finalize_rewire_edges(
+            concept_id,
+            project_scope,
+            rewired_edges,
+            is_genesis_split=_is_genesis(target_node),
+            explicit_neighbor_ids=item.get("partition_neighbor_ids"),
+        )
         ungrouped = 0
         if _is_genesis(target_node):
             evt = self._apply_wrapper_split(
@@ -395,12 +406,18 @@ class GraphIngestionEngine:
                 target_id = fallback_target_id
                 ungrouped_count += 1
 
+            relation = resolve_rewire_relation_type(
+                neighbor_id,
+                split_target_id,
+                current_edges,
+                rewired.get("relation_type"),
+            )
             self.db.upsert_edge(
                 GraphEdge(
                     _id=f"edge_{uuid.uuid4().hex[:8]}",
                     source_id=neighbor_id,
                     target_id=target_id,
-                    description=rewired.get("relation_type", "RELEVANT_TO"),
+                    description=relation,
                     project_ids=proj_list,
                 )
             )

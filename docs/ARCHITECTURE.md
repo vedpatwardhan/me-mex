@@ -54,9 +54,9 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
 3. **Path 3: `INGESTION`**
    - **Phase 1**: Document fetch, scale-adaptive chunking (1–30 passages), LLM concept extraction and consolidation (same tiering as v0.1).
    - **Phase 2**: Genesis-rooted tree traversal (same navigator as retrieval).
-   - **Phase 3**: Collective cross-document linking (immutable intra-doc concepts → best mutable parent).
-   - **Phase 3.5**: Target generalization on all mutable nodes that received new edges in this ingestion pass (direct immutable neighbors included in parent scope).
-   - **Phase 4**: Reorganization on **link-affected mutable targets** (Phase 3 `CREATE_EDGE` targets) with refreshed **effective degree** ≥ `DEGREE_THRESHOLD` (default **7**); LLM discover picks hubs; **max-coverage** partition + rewire; upward **ancestor cascade** after each split (`MAX_UPWARD_REORG_ITERATIONS`, default **5**). Engine: **wrapper** at Genesis, **replacement** elsewhere; leftovers → parent (Genesis leftovers stay on Everything). No `link_class` bucket.
+   - **Phase 3**: Collective linking — each immutable → **highest suitable mutable anchor** on a Genesis path (not forced deepest frontier); paths supplied in prompt payload.
+   - **Phase 3.5**: Target generalization on mutable nodes that received new edges this pass.
+   - **Phase 4**: Reorganization on **link-affected mutable targets** only (no preloaded ancestor list). Discover + **max-coverage** over **all** direct hub neighbors; deterministic rewire **closure**; dynamic queue (discover splits FIFO, **cascade parents FILO** after orphan promotion shows overload). Engine: **wrapper** at Genesis, **replacement** elsewhere; orphans → tree parent or Everything. **`SUBSET_OF`** preserved when reparenting mutable tree children.
 
 ---
 
@@ -124,14 +124,15 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 
 ### 4.2 Linking
 
-- `link_intradoc_concepts` emits zero-consensus commands (`CREATE_EDGE`, `CREATE_INTERMEDIATE`, `EDIT_CONCEPT`, `SPLIT_CONCEPT` on mutable nodes only).
-- When no sub-branch fits during linking, attach directly to the chosen mutable parent; Phase 3.5 widens that parent’s description.
+- Phase 3 orchestrator prompt **`collective_ingestion_linking`** (with **`mutable anchor paths`**: Genesis → each traversal frontier).
+- Rule: **highest suitable anchor** — shallowest mutable on a path that is semantically better than any descendant on that path; Genesis fallback only if no path node qualifies.
+- `link_intradoc_concepts` remains available for alternate call sites; ingestion uses collective linking + Phase 3.5 generalization.
 
 ### 4.3 Reorganization (v0.2.1 — LLM proposes; engine commits)
 
 **Discovery (initial pass only):** Mutable nodes that received new `CREATE_EDGE` targets this ingestion → filter `effective_degree ≥ τ` → LLM **`graph_reorg_discover`** → split **selected** hubs only.
 
-**Partition (per hub):** One **`max_coverage`** split + rewire over **all** direct neighbors (mutable and immutable). Maximize neighbors assigned to sub-concepts; leftovers use LLM alias **`ANCESTOR`** (non-Genesis → `Parent(H)`) or **`EVERYTHING`** (Genesis → stay on Everything). Mutable neighbors with **`subtree_mut_height ≥ 1`** are excluded from partition (keep direct edge to hub).
+**Partition (per hub):** One **`max_coverage`** split + rewire over **all** direct neighbors (mutable with or without subtrees, plus immutables). Leftovers use **`ANCESTOR`** / **`EVERYTHING`**; backend **`finalize_rewire_edges`** closes any LLM omissions.
 
 **On `SPLIT_CONCEPT` commit** (`graph_ingestion_engine.py`):
 
@@ -142,7 +143,7 @@ else:
     apply_replacement_split(payload)  # siblings under Parent(H); ANCESTOR → parent
 ```
 
-**Cascade:** After each discover split, walk upward while `effective_degree(Parent(H)) ≥ τ` (same partition LLM, no second discover), capped by **`MAX_UPWARD_REORG_ITERATIONS`**.
+**Cascade:** After each split commit, if tree parent (or Genesis self-check after wrapper) has **`effective_degree ≥ τ`** post-orphan promotion, enqueue parent split at **front** of work queue (FILO); no ancestor preload at Phase 4 start; discover LLM runs on initial link-affected seeds only.
 
 Cardinality: sub-concept count bounded by **⌊n/2⌋**. Parent hub title/description updates required on split (Genesis title unchanged).
 

@@ -15,7 +15,7 @@ import json
 import uuid
 import time
 import asyncio
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import List, Dict, Any, AsyncGenerator, Generator, Optional, Union
 from app.db import db_engine
 from app.models import (
@@ -889,6 +889,9 @@ class ExecutiveOrchestrator:
             )
 
         explored_tree_payload = []
+        link_tree = MutableTreeIndex(project_id=project_id)
+        genesis_id = navigator.genesis_node.id
+        mutable_anchor_paths = []
         for n in explored_nodes:
             n_idx = linking_concept_mapper.register(n.id)
             explored_tree_payload.append(
@@ -896,7 +899,28 @@ class ExecutiveOrchestrator:
                     "target_index": n_idx,
                     "title": n.title,
                     "description": n.description,
-                    "is_genesis": n.id == navigator.genesis_node.id,
+                    "is_genesis": n.id == genesis_id,
+                }
+            )
+            path_ids = list(reversed(link_tree.path_to_genesis(n.id)))
+            path_from_genesis = []
+            for depth, pid in enumerate(path_ids):
+                pnode = self.db.get_node(pid)
+                if not pnode or pnode.is_root_node:
+                    continue
+                p_idx = linking_concept_mapper.register(pid)
+                path_from_genesis.append(
+                    {
+                        "target_index": p_idx,
+                        "title": pnode.title,
+                        "depth_from_genesis": depth,
+                        "is_genesis": pid == genesis_id,
+                    }
+                )
+            mutable_anchor_paths.append(
+                {
+                    "frontier_target_index": n_idx,
+                    "path_from_genesis": path_from_genesis,
                 }
             )
 
@@ -908,7 +932,10 @@ Newly Extracted Intra-Document Concepts ({len(intra_concepts_payload)} items, IM
 {json.dumps(intra_concepts_payload, indent=2)}
 
 Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payload)} nodes):
-{json.dumps(explored_tree_payload, indent=2)}"""
+{json.dumps(explored_tree_payload, indent=2)}
+
+Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor linking):
+{json.dumps(mutable_anchor_paths, indent=2)}"""
         collective_commands = []
         try:
             payload_collective = self.llm.generate_structured_completion(
@@ -994,10 +1021,9 @@ Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payloa
             if cmd.get("action") == "CREATE_EDGE"
             and cmd.get("edge", {}).get("target_id")
         }
+        mutable_targets = [self.db.get_node(t_id) for t_id in affected_target_ids]
         mutable_targets = [
-            self.db.get_node(t_id)
-            for t_id in affected_target_ids
-            if self.db.get_node(t_id) and not self.db.get_node(t_id).is_immutable
+            n for n in mutable_targets if n is not None and not n.is_immutable
         ]
 
         if mutable_targets:
@@ -1008,15 +1034,9 @@ Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payloa
                 yield gen_evt
 
         # Phase 4: Reorganization on link-affected mutable targets (degree ≥ τ → LLM discover → split)
-        tree_post_link = MutableTreeIndex(project_id=project_id)
-        reorg_candidates = [
-            n
-            for n in mutable_targets
-            if n and tree_post_link.effective_degree(n.id) >= settings.DEGREE_THRESHOLD
-        ]
         reorg_res = await asyncio.to_thread(
             navigator.reorganize_overclustered_nodes,
-            explored_nodes=reorg_candidates,
+            explored_nodes=mutable_targets,
             project_id=project_id,
             degree_threshold=settings.DEGREE_THRESHOLD,
         )
@@ -1042,6 +1062,21 @@ Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payloa
             "timestamp": time.time(),
         }
 
+    @staticmethod
+    def _reorg_cascade_parent_id(
+        tree: MutableTreeIndex, hub_id: str, hub_node: Optional[GraphNode]
+    ) -> Optional[str]:
+        """Tree parent to check for overload after orphans land (Genesis may check itself)."""
+        parent_id = tree.parent_of(hub_id)
+        if parent_id:
+            return parent_id
+        if hub_node and (
+            hub_node.metadata.get("is_genesis")
+            or hub_node.title.strip().lower() == "everything"
+        ):
+            return hub_id
+        return None
+
     async def _execute_reorg_commands_with_cascade(
         self,
         navigator: GraphNavigator,
@@ -1050,19 +1085,16 @@ Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payloa
         proj_list: List[str],
         project_id: str,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Execute split commands sequentially; cascade upward while ancestor degree ≥ τ."""
-        for cmd in commands:
+        """
+        Dynamic reorg queue: discover-initial splits FIFO; cascade parents FILO (prepend).
+        Parents enter the queue only after a child split commits and orphan promotion
+        shows effective_degree ≥ τ.
+        """
+        pending: deque = deque(commands)
+        while pending:
+            cmd = pending.popleft()
             hub_id = cmd.get("concept_id")
-            tree_before = MutableTreeIndex(project_id=project_id)
-            parent_before = tree_before.parent_of(hub_id) if hub_id else None
             hub_node = self.db.get_node(hub_id) if hub_id else None
-            is_genesis_hub = bool(
-                hub_node
-                and (
-                    hub_node.metadata.get("is_genesis")
-                    or hub_node.title.strip().lower() == "everything"
-                )
-            )
 
             cmd["navigator_id"] = navigator.navigator_id
             cmd["navigator_name"] = navigator.navigator_name
@@ -1073,53 +1105,32 @@ Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payloa
                 yield evt
             graph_analytics.refresh_tree_metadata(project_id)
 
-            check_id = parent_before
-            if check_id is None and is_genesis_hub and hub_id:
-                check_id = hub_id
+            if not hub_id:
+                continue
 
-            for iteration in range(settings.MAX_UPWARD_REORG_ITERATIONS):
-                if not check_id:
-                    break
-                tree = MutableTreeIndex(project_id=project_id)
-                if tree.effective_degree(check_id) < settings.DEGREE_THRESHOLD:
-                    break
-                cascade_cmd = await asyncio.to_thread(
-                    navigator.build_split_command_for_hub,
-                    check_id,
-                    project_id,
-                    [],
-                )
-                if not cascade_cmd:
-                    break
-                yield {
-                    "event": "reorg_cascade_iteration",
-                    "ancestor_id": check_id,
-                    "iteration": iteration + 1,
-                    "timestamp": time.time(),
-                }
-                parent_of_check = tree.parent_of(check_id)
-                is_gen = False
-                cn = self.db.get_node(check_id)
-                if cn:
-                    is_gen = bool(
-                        cn.metadata.get("is_genesis")
-                        or cn.title.strip().lower() == "everything"
-                    )
-                cascade_cmd["navigator_id"] = navigator.navigator_id
-                cascade_cmd["navigator_name"] = navigator.navigator_name
-                c_evt = self.ingestion_engine.execute_single_command(
-                    cascade_cmd, doc_title, proj_list
-                )
-                if c_evt:
-                    yield c_evt
-                graph_analytics.refresh_tree_metadata(project_id)
-                check_id = parent_of_check
-                if check_id is None and is_gen and cn:
-                    tree2 = MutableTreeIndex(project_id=project_id)
-                    if tree2.effective_degree(cn.id) >= settings.DEGREE_THRESHOLD:
-                        check_id = cn.id
-                    else:
-                        break
+            tree = MutableTreeIndex(project_id=project_id)
+            cascade_parent = self._reorg_cascade_parent_id(tree, hub_id, hub_node)
+            if not cascade_parent:
+                continue
+            tree = MutableTreeIndex(project_id=project_id)
+            if tree.effective_degree(cascade_parent) < settings.DEGREE_THRESHOLD:
+                continue
+
+            cascade_cmd = await asyncio.to_thread(
+                navigator.build_split_command_for_hub,
+                cascade_parent,
+                project_id,
+                [],
+            )
+            if not cascade_cmd:
+                continue
+            yield {
+                "event": "reorg_cascade_iteration",
+                "ancestor_id": cascade_parent,
+                "queued_front": True,
+                "timestamp": time.time(),
+            }
+            pending.appendleft(cascade_cmd)
 
     async def _generalize_affected_target_nodes(
         self,

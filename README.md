@@ -129,7 +129,8 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 - **`app/services/prompt_mapper.py`**: Dual-cache ID mapping boundary (`PromptIdMapper`) providing bidirectional translation between canonical MongoDB string IDs and 1-based integer indices for prompt isolation.
 - **`app/services/graph_analytics.py`**: `MutableTreeIndex` (depth, Strahler, Sackin, reachability) and `rustworkx` graph construction.
 - **`app/tools/search_tools.py`**: ArXiv research paper search and Trafilatura web article text extractor.
-- **`app/agents/graph_navigator.py`**: Genesis-rooted tree traversal, linking (`link_intradoc_concepts`), and reorganization (`reorganize_mutable_hub`).
+- **`app/agents/graph_navigator.py`**: Genesis-rooted tree traversal, linking (`link_intradoc_concepts`), and reorganization (`reorganize_overclustered_nodes`, `build_split_command_for_hub`).
+- **`app/services/reorg_rewire_utils.py`**: Reorg rewire neighbor closure and SUBSET_OF-safe relation resolution.
 - **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating Direct Conversation, Ingestion, and Genesis tree retrieval with `chat_history` context-aware intent classification.
 - **`app/api/sse.py`**: FastAPI SSE endpoint (`/api/sse/chat`) streaming live graph traversal telemetry.
 - **`main.py`**: REST API endpoints for unified chat (`POST /api/chat`), project workspaces (`GET/POST /api/projects`), project chat history (`GET /api/projects/{id}/chat`), and graph querying (`GET /api/graph?project_id=...`).

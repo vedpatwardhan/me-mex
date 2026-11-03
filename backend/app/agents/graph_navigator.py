@@ -20,6 +20,7 @@ from app.models import (
     PersonaExplorationPayload,
 )
 from app.services.graph_analytics import MutableTreeIndex, graph_analytics
+from app.services.reorg_rewire_utils import finalize_rewire_edges
 from app.services.llm_gateway import llm_gateway
 from app.services.event_queue import event_queue
 from app.services.prompt_mapper import PromptIdMapper
@@ -467,6 +468,15 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                 f"[{self.department_name}] Step 3 Neighbor edge re-wiring failed for {target_node.id} (mode={mode}): {e}"
             ) from e
 
+        partition_ids = [nb["id"] for nb in target_neighbors_to_rewire if nb.get("id")]
+        rewired = finalize_rewire_edges(
+            target_node.id,
+            project_id,
+            rewired,
+            is_genesis_split=is_genesis_hub,
+            explicit_neighbor_ids=partition_ids,
+        )
+
         rewire_event = {
             "event": "reorg_rewire_completed",
             "persona_id": self.department_id,
@@ -509,6 +519,11 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                 continue
             if not nb_id or nb_id in seen:
                 continue
+            parent_id = tree.parent_of(hub_id)
+            if parent_id and nb_id == parent_id:
+                desc = (e.description or "").upper()
+                if "SUBSET" in desc:
+                    continue
             seen.add(nb_id)
             nb_node = db_engine.get_node(nb_id)
             if not nb_node or nb_node.is_root_node:
@@ -542,17 +557,10 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
         neighbors = self._neighbor_entries_for_hub(hub_id, project_id, tree)
         if not neighbors:
             return None
-        partitionable = [
-            nb
-            for nb in neighbors
-            if not (not nb["is_immutable"] and nb.get("subtree_mut_height", 0) >= 1)
-        ]
-        if not partitionable:
-            partitionable = list(neighbors)
         res = self._execute_split_and_rewire(
             target_node=target_node,
             mode="max_coverage",
-            target_neighbors_to_rewire=partitionable,
+            target_neighbors_to_rewire=neighbors,
             project_id=project_id,
             emitted_events=events,
         )
@@ -565,6 +573,7 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             "parent_description": res["parent_description"],
             "sub_concepts": res["sub_concepts"],
             "rewired_edges": res["rewired_edges"],
+            "partition_neighbor_ids": [nb["id"] for nb in neighbors],
         }
 
     def reorganize_overclustered_nodes(
@@ -574,14 +583,13 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
         degree_threshold: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        3-Step Non-Destructive Concept Node Reorganization & Subdivision during Ingestion.
+        Reorganization discover + max-coverage split for link-affected mutable hubs.
 
-        Step 1 (Discovery): Inspects full sub-graph payload to discover candidate over-clustered mutable concept nodes.
-        Step 2 (Formulation): Formulates 2-3 focused sub-concepts around each target node using passage text grounding.
-        Step 3 (Neighbor Re-Wiring): Re-wires direct neighbor edges to connect through the new sub-concepts while preserving the original mutable concept as an umbrella node.
+        Step 1: LLM discover among degree-qualified nodes from the provided seed set only.
+        Step 2–3: Sub-concept formulation and neighbor rewire (wrapper at Genesis, replacement elsewhere).
+        Orphan neighbors promote to tree parent or Everything; engine closes any LLM omissions.
 
-        Returns a dictionary containing both executable commands and emitted telemetry events:
-        {"commands": List[Dict[str, Any]], "emitted_events": List[Dict[str, Any]]}
+        Returns {"commands": List[Dict], "emitted_events": List[Dict]}.
         """
         emitted_events: List[Dict[str, Any]] = []
         if not explored_nodes:

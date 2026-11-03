@@ -26,7 +26,7 @@ The roadmap bridges core engine implementation with real-time UI interactivity, 
    ├── Genesis-Rooted Tree Traversal: `GraphNavigator` + `MutableTreeIndex` (no Voronoi / eigenvector hubs)
    ├── Single-Source Genesis Hub: Primordial 'Everything' hub anchor across workspaces
    ├── Phase 3.5 Dynamic Target Generalization: Post-linking LLM pass on link-affected mutable targets
-   └── Engine-Dispatch Reorganization: Wrapper at Genesis, lateral sibling split elsewhere ($n // 2$ caps)
+   └── Engine-Dispatch Reorganization: Wrapper at Genesis, replacement split elsewhere; scratchpad queue + rewire closure ($n // 2$ caps)
 
   [ Goal 2: Comprehensive Backend Testing & Telemetry ] — COMPLETED
    ├── Unit Test Suite: 50+ passing tests with 2-worker isolation (`pytest -n 2`)
