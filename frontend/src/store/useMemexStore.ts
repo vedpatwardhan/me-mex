@@ -214,7 +214,7 @@ export const useMemexStore = create<MemexState>((set, get) => ({
     });
 
     try {
-      const currentHistory = (get().chatHistory[projId] || []).map((m) => ({
+      const currentHistory = currentMsgs.map((m) => ({
         role: m.sender === "user" ? "user" : "assistant",
         content: m.text,
       }));
