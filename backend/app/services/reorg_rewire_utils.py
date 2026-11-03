@@ -8,6 +8,36 @@ from app.db import db_engine
 from app.models import GraphEdge
 from app.services.graph_analytics import MutableTreeIndex
 
+OVERFLOW_REWIRE_ALIASES = frozenset(
+    {
+        "UNCLUSTERED",
+        "MISC",
+        "PARENT",
+        "ANCESTOR",
+        "EVERYTHING",
+    }
+)
+
+
+def is_overflow_rewire_alias(sub_alias: str) -> bool:
+    """Aliases that keep neighbors on the split target (Genesis / parent), not a new wrapper."""
+    return (sub_alias or "").upper() in OVERFLOW_REWIRE_ALIASES
+
+
+def sub_aliases_with_assigned_neighbors(
+    rewired_edges: List[Dict[str, Any]],
+) -> Set[str]:
+    """Sub-concept aliases that receive at least one neighbor in a rewire batch."""
+    used: Set[str] = set()
+    for rewired in rewired_edges:
+        if not rewired.get("neighbor_id"):
+            continue
+        alias = (rewired.get("connect_to_sub_alias") or "").strip()
+        if not alias or is_overflow_rewire_alias(alias):
+            continue
+        used.add(alias)
+    return used
+
 
 def _is_subset_edge(edge: GraphEdge) -> bool:
     desc = (edge.description or "").upper()

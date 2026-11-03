@@ -1154,7 +1154,6 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
                     ),
                     "timestamp": time.time(),
                 }
-                event_queue.push(project_id, evt)
                 yield evt
 
         except Exception as e:

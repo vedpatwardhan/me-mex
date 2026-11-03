@@ -63,6 +63,119 @@ def test_wrapper_split_mints_departments_under_genesis():
     assert len(depts) >= 2
 
 
+def _genesis_wrapper_children(project_id: str, genesis_id: str) -> list:
+    return [
+        n
+        for n in db_engine.get_nodes(project_id)
+        if n.metadata.get("split_under_genesis") == genesis_id
+    ]
+
+
+def test_wrapper_split_skips_unassigned_sub_concepts():
+    proj = ["proj_sim_wrapper_lazy"]
+    genesis = GraphNode(
+        _id="concept_genesis_lazy",
+        node_type="CONCEPT",
+        title="Everything",
+        description="Genesis",
+        project_ids=proj,
+        metadata={"immutable": False, "is_genesis": True},
+    )
+    db_engine.upsert_node(genesis)
+    imm_ids = []
+    for i in range(4):
+        cid = f"imm_lazy_{i}"
+        imm_ids.append(cid)
+        db_engine.upsert_node(
+            GraphNode(
+                _id=cid,
+                node_type="CONCEPT",
+                title=f"Topic {i}",
+                project_ids=proj,
+                metadata={"immutable": True},
+            )
+        )
+        db_engine.upsert_edge(
+            GraphEdge(
+                _id=f"e_{cid}_g",
+                source_id=cid,
+                target_id=genesis.id,
+                description="RELEVANT_TO",
+                project_ids=proj,
+            )
+        )
+
+    cmd = {
+        "action": "SPLIT_CONCEPT",
+        "concept_id": genesis.id,
+        "parent_title": "Everything",
+        "parent_description": "Updated genesis scope",
+        "sub_concepts": [
+            {"sub_id_alias": "s1", "title": "Dept A", "description": "Cluster A"},
+            {"sub_id_alias": "s2", "title": "Dept B", "description": "Unused cluster"},
+        ],
+        "rewired_edges": [
+            {"neighbor_id": imm_id, "connect_to_sub_alias": "s1"} for imm_id in imm_ids
+        ],
+    }
+    graph_ingestion_engine.execute_single_command(cmd, "sim", proj)
+    wrappers = _genesis_wrapper_children(proj[0], genesis.id)
+    assert len(wrappers) == 1
+    assert wrappers[0].title == "Dept A"
+
+
+def test_wrapper_split_all_everything_mints_none():
+    proj = ["proj_sim_wrapper_everything"]
+    genesis = GraphNode(
+        _id="concept_genesis_ev",
+        node_type="CONCEPT",
+        title="Everything",
+        description="Genesis",
+        project_ids=proj,
+        metadata={"immutable": False, "is_genesis": True},
+    )
+    db_engine.upsert_node(genesis)
+    imm_ids = []
+    for i in range(3):
+        cid = f"imm_ev_{i}"
+        imm_ids.append(cid)
+        db_engine.upsert_node(
+            GraphNode(
+                _id=cid,
+                node_type="CONCEPT",
+                title=f"Topic {i}",
+                project_ids=proj,
+                metadata={"immutable": True},
+            )
+        )
+        db_engine.upsert_edge(
+            GraphEdge(
+                _id=f"e_{cid}_g",
+                source_id=cid,
+                target_id=genesis.id,
+                description="RELEVANT_TO",
+                project_ids=proj,
+            )
+        )
+
+    cmd = {
+        "action": "SPLIT_CONCEPT",
+        "concept_id": genesis.id,
+        "parent_title": "Everything",
+        "parent_description": "No new departments",
+        "sub_concepts": [
+            {"sub_id_alias": "s1", "title": "Unused A", "description": "A"},
+            {"sub_id_alias": "s2", "title": "Unused B", "description": "B"},
+        ],
+        "rewired_edges": [
+            {"neighbor_id": imm_id, "connect_to_sub_alias": "EVERYTHING"}
+            for imm_id in imm_ids
+        ],
+    }
+    graph_ingestion_engine.execute_single_command(cmd, "sim", proj)
+    assert len(_genesis_wrapper_children(proj[0], genesis.id)) == 0
+
+
 def test_lateral_split_keeps_immutable_depth_invariant():
     proj = ["proj_sim_lateral"]
     genesis = GraphNode(

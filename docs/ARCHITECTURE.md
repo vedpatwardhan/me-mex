@@ -100,7 +100,7 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 
 | Layer | Mutability | Reorg commit shape |
 |-------|------------|-------------------|
-| Genesis (`Everything`) | Mutable; title fixed | **Wrapper** — department hubs under Genesis |
+| Genesis (`Everything`) | Mutable; title fixed | **Wrapper** — mint department hubs under Genesis only for sub-concepts that receive ≥1 neighbor in rewire; ungrouped neighbors stay on Everything (`EVERYTHING` alias) |
 | Other mutable hubs | Mutable | **Replacement** — hub becomes first sibling; additional sub-concepts minted under `Parent(H)`; ungroupable neighbors rewire to `Parent(H)` |
 | Intra-doc concepts | Immutable | N/A |
 | Root nodes | Immutable | N/A |
@@ -120,7 +120,7 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 1. Start at `get_genesis_node(project_id)`; inject Genesis **description** as scope.
 2. Each hop: LLM selects mutable **tree children** (`SUBSET_OF` backbone); immutables shown but not expandable.
 3. Depth capped by `MAX_TRAVERSAL_DEPTH` (default 3–4); depth penalty in prompt.
-4. Returns `explored_nodes`, `traversed_node_ids`, SSE `node_touched` events.
+4. Returns `explored_nodes`, `traversed_node_ids`, and `node_touched` entries in `emitted_events` (orchestrator persists to the event queue when streaming).
 
 ### 4.2 Linking
 
@@ -141,7 +141,7 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 3. If tree parent is hot **and** discover **siblings** under that parent are drained → **prepend parent hub ID** (FILO); split built on that hub’s pop.
 4. Repeat until queue empty; cascade prepends capped by **`MAX_UPWARD_REORG_ITERATIONS`** per Phase 4 pass. `plan_only` runs the pop/build loop without execute or cascade enqueue.
 
-**Partition / commit:** **`max_coverage`** over all direct hub neighbors; **`finalize_rewire_edges`**; wrapper at Genesis, replacement elsewhere (`graph_ingestion_engine.py`).
+**Partition / commit:** **`max_coverage`** over all direct hub neighbors; **`finalize_rewire_edges`**; wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`).
 
 Cardinality: sub-concept count bounded by **⌊n/2⌋**. **`graph_health_metrics`** emitted once after the queue drains.
 

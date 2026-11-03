@@ -13,7 +13,9 @@ from app.services.event_queue import event_queue
 from app.services.graph_analytics import MutableTreeIndex, graph_analytics
 from app.services.reorg_rewire_utils import (
     finalize_rewire_edges,
+    is_overflow_rewire_alias,
     resolve_rewire_relation_type,
+    sub_aliases_with_assigned_neighbors,
 )
 
 
@@ -24,13 +26,7 @@ def _is_genesis(node: GraphNode) -> bool:
 
 
 def _ancestor_aliases(sub_alias: str) -> bool:
-    return (sub_alias or "").upper() in (
-        "UNCLUSTERED",
-        "MISC",
-        "PARENT",
-        "ANCESTOR",
-        "EVERYTHING",
-    )
+    return is_overflow_rewire_alias(sub_alias)
 
 
 class GraphIngestionEngine:
@@ -212,8 +208,12 @@ class GraphIngestionEngine:
         project_scope: Optional[str],
     ) -> Optional[Dict[str, Any]]:
         concept_id = target_node.id
+        used_aliases = sub_aliases_with_assigned_neighbors(rewired_edges)
+        sub_concepts_to_mint = [
+            sub for sub in sub_concepts if sub.get("sub_id_alias") in used_aliases
+        ]
         sub_alias_map: Dict[str, str] = {}
-        for sub in sub_concepts:
+        for sub in sub_concepts_to_mint:
             new_sub_id = f"concept_{uuid.uuid4().hex[:8]}"
             alias = sub.get("sub_id_alias")
             if alias:
@@ -260,7 +260,7 @@ class GraphIngestionEngine:
             "node_id": concept_id,
             "node_title": target_node.title,
             "message": (
-                f"Genesis wrapper split: {len(sub_concepts)} intermediate concept(s), "
+                f"Genesis wrapper split: {len(sub_alias_map)} intermediate concept(s) minted, "
                 f"{len(deleted_neighbors)} neighbors rewired, {ungrouped} left on Everything."
             ),
             "timestamp": time.time(),

@@ -27,7 +27,6 @@ from app.services.graph_ingestion_engine import (
 from app.services.reorg_queue import ReorgQueue, ReorgWorkItem, cascade_parent_id
 from app.services.reorg_rewire_utils import finalize_rewire_edges
 from app.services.llm_gateway import llm_gateway
-from app.services.event_queue import event_queue
 from app.services.prompt_mapper import PromptIdMapper
 from app.prompts import load_prompt
 from app.tools.search_tools import search_tools
@@ -178,7 +177,6 @@ class GraphNavigator:
             "message": f"Concept '{self.genesis_node.title}' touched by {self.department_name}.",
             "timestamp": time.time(),
         }
-        event_queue.push(pid, genesis_touch_evt)
         emitted_events.append(genesis_touch_evt)
 
         for hop in range(1, max_traversal_depth + 1):
@@ -280,7 +278,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                         ),
                         "timestamp": time.time(),
                     }
-                    event_queue.push(pid, evt)
                     emitted_events.append(evt)
 
             current_frontier = next_frontier
@@ -393,7 +390,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             "timestamp": time.time(),
         }
         emitted_events.append(split_event)
-        event_queue.push(project_id, split_event)
 
         # Re-wiring step
         is_genesis_hub = bool(
@@ -480,7 +476,6 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             "timestamp": time.time(),
         }
         emitted_events.append(rewire_event)
-        event_queue.push(project_id, rewire_event)
 
         return {
             "parent_title": payload_split.parent_title,
