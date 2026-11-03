@@ -131,6 +131,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 - **`app/tools/search_tools.py`**: ArXiv research paper search and Trafilatura web article text extractor.
 - **`app/agents/graph_navigator.py`**: Genesis-rooted tree traversal, linking (`link_intradoc_concepts`), and reorganization (`reorganize_overclustered_nodes`, `build_split_command_for_hub`).
 - **`app/services/reorg_rewire_utils.py`**: Reorg rewire neighbor closure and SUBSET_OF-safe relation resolution.
+- **`app/services/reorg_queue.py`**: Phase 4 hybrid FIFO/FILO work queue and sibling deferral before parent cascade.
 - **`app/agents/orchestrator.py`**: Executive Orchestrator coordinating Direct Conversation, Ingestion, and Genesis tree retrieval with `chat_history` context-aware intent classification.
 - **`app/api/sse.py`**: FastAPI SSE endpoint (`/api/sse/chat`) streaming live graph traversal telemetry.
 - **`main.py`**: REST API endpoints for unified chat (`POST /api/chat`), project workspaces (`GET/POST /api/projects`), project chat history (`GET /api/projects/{id}/chat`), and graph querying (`GET /api/graph?project_id=...`).

@@ -56,7 +56,7 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
    - **Phase 2**: Genesis-rooted tree traversal (same navigator as retrieval).
    - **Phase 3**: Collective linking — each immutable → **highest suitable mutable anchor** on a Genesis path (not forced deepest frontier); paths supplied in prompt payload.
    - **Phase 3.5**: Target generalization on mutable nodes that received new edges this pass.
-   - **Phase 4**: Reorganization on **link-affected mutable targets** only (no preloaded ancestor list). Discover + **max-coverage** over **all** direct hub neighbors; deterministic rewire **closure**; dynamic queue (discover splits FIFO, **cascade parents FILO** after orphan promotion shows overload). Engine: **wrapper** at Genesis, **replacement** elsewhere; orphans → tree parent or Everything. **`SUBSET_OF`** preserved when reparenting mutable tree children.
+   - **Phase 4**: Single call **`GraphNavigator.reorganize_overclustered_nodes`** (discover, execute, cascade). Seeds = link-affected mutables only. **`ReorgQueue`**: discover splits FIFO; parent cascade **FILO** after orphan promotion; **sibling deferral** (parent split waits until discover siblings under same tree parent finish). Cap: **`MAX_UPWARD_REORG_ITERATIONS`**. Engine: wrapper/replacement + rewire closure + **`SUBSET_OF`** on tree reparent.
 
 ---
 
@@ -128,26 +128,22 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 - Rule: **highest suitable anchor** — shallowest mutable on a path that is semantically better than any descendant on that path; Genesis fallback only if no path node qualifies.
 - `link_intradoc_concepts` remains available for alternate call sites; ingestion uses collective linking + Phase 3.5 generalization.
 
-### 4.3 Reorganization (v0.2.1 — LLM proposes; engine commits)
+### 4.3 Reorganization (v0.2.3 — unified Phase 4 in navigator)
 
-**Discovery (initial pass only):** Mutable nodes that received new `CREATE_EDGE` targets this ingestion → filter `effective_degree ≥ τ` → LLM **`graph_reorg_discover`** → split **selected** hubs only.
+**Entry point:** `GraphNavigator.reorganize_overclustered_nodes` with `plan_only=False` (orchestrator passes `doc_title`, `proj_list`). Tests use `plan_only=True` for command payloads only.
 
-**Partition (per hub):** One **`max_coverage`** split + rewire over **all** direct neighbors (mutable with or without subtrees, plus immutables). Leftovers use **`ANCESTOR`** / **`EVERYTHING`**; backend **`finalize_rewire_edges`** closes any LLM omissions.
+**Discovery (once):** Link-affected mutable targets → `effective_degree ≥ τ` → LLM **`graph_reorg_discover`** → build split commands for selected hubs.
 
-**On `SPLIT_CONCEPT` commit** (`graph_ingestion_engine.py`):
+**Work queue** (`app/services/reorg_queue.py`):
 
-```python
-if target.is_genesis:
-    apply_wrapper_split(payload)      # sub-hubs under Everything; Genesis preserved
-else:
-    apply_replacement_split(payload)  # siblings under Parent(H); ANCESTOR → parent
-```
+1. After LLM discover, enqueue **hub IDs only** at **tail** (FIFO).
+2. Pop front → **`build_split_command_for_hub(hub_id)`** (same for discover and cascade) → **`execute_single_command`** → refresh metadata.
+3. If tree parent is hot **and** discover **siblings** under that parent are drained → **prepend parent hub ID** (FILO); split built on that hub’s pop.
+4. Repeat until queue empty; cascade prepends capped by **`MAX_UPWARD_REORG_ITERATIONS`** per Phase 4 pass. `plan_only` runs the pop/build loop without execute or cascade enqueue.
 
-**Cascade:** After each split commit, if tree parent (or Genesis self-check after wrapper) has **`effective_degree ≥ τ`** post-orphan promotion, enqueue parent split at **front** of work queue (FILO); no ancestor preload at Phase 4 start; discover LLM runs on initial link-affected seeds only.
+**Partition / commit:** **`max_coverage`** over all direct hub neighbors; **`finalize_rewire_edges`**; wrapper at Genesis, replacement elsewhere (`graph_ingestion_engine.py`).
 
-Cardinality: sub-concept count bounded by **⌊n/2⌋**. Parent hub title/description updates required on split (Genesis title unchanged).
-
-**Telemetry:** `reorg_completed` includes `reorg_strategy: wrapper|replacement`, `ungrouped_to_ancestor_count`; `graph_health_metrics` via `MutableTreeIndex`.
+Cardinality: sub-concept count bounded by **⌊n/2⌋**. **`graph_health_metrics`** emitted once after the queue drains.
 
 **Out of v0.2 scope:** `COLLAPSE_CONCEPT` (UI delete uses existing delete-node API); optional PPR/shortcut edges deferred.
 

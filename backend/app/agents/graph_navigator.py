@@ -20,6 +20,11 @@ from app.models import (
     PersonaExplorationPayload,
 )
 from app.services.graph_analytics import MutableTreeIndex, graph_analytics
+from app.services.graph_ingestion_engine import (
+    GraphIngestionEngine,
+    graph_ingestion_engine,
+)
+from app.services.reorg_queue import ReorgQueue, ReorgWorkItem, cascade_parent_id
 from app.services.reorg_rewire_utils import finalize_rewire_edges
 from app.services.llm_gateway import llm_gateway
 from app.services.event_queue import event_queue
@@ -561,34 +566,139 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             "partition_neighbor_ids": [nb["id"] for nb in neighbors],
         }
 
+    def _process_reorg_queue(
+        self,
+        queue: ReorgQueue,
+        *,
+        project_id: str,
+        degree_threshold: int,
+        doc_title: str,
+        proj_list: List[str],
+        ingestion_engine: Optional[GraphIngestionEngine],
+        emitted_events: List[Dict[str, Any]],
+        plan_only: bool,
+        node_map: Dict[str, GraphNode],
+    ) -> tuple[int, List[Dict[str, Any]]]:
+        """
+        Single Phase 4 loop: pop hub → build_split_command_for_hub → execute or collect.
+        Cascade parents enqueue as hub IDs only (same pipeline at pop).
+        """
+        splits_executed = 0
+        cascade_enqueues = 0
+        collected_commands: List[Dict[str, Any]] = []
+        projects = proj_list or [project_id]
+        engine = ingestion_engine or graph_ingestion_engine
+
+        while queue:
+            item = queue.pop_front()
+            if not item:
+                break
+
+            cmd = self.build_split_command_for_hub(
+                item.hub_id, project_id=project_id, emitted_events=emitted_events
+            )
+            if not cmd:
+                target_node = node_map.get(item.hub_id) or db_engine.get_node(
+                    item.hub_id
+                )
+                title = target_node.title if target_node else item.hub_id
+                emitted_events.append(
+                    {
+                        "event": "reorg_candidate_skipped",
+                        "persona_id": self.department_id,
+                        "department_name": self.department_name,
+                        "concept_id": item.hub_id,
+                        "node_title": title,
+                        "reason": "Partition returned no sub-concepts",
+                        "message": (
+                            f"[{self.department_name}] Skipped hub '{title}': "
+                            "partition produced no split."
+                        ),
+                        "timestamp": time.time(),
+                    }
+                )
+                continue
+
+            if plan_only:
+                collected_commands.append(cmd)
+                continue
+
+            cmd["navigator_id"] = self.navigator_id
+            cmd["navigator_name"] = self.navigator_name
+            evt = engine.execute_single_command(cmd, doc_title, projects)
+            if evt:
+                emitted_events.append(evt)
+            splits_executed += 1
+            graph_analytics.refresh_tree_metadata(project_id)
+
+            hub_id = item.hub_id
+            hub_node = db_engine.get_node(hub_id)
+            tree = MutableTreeIndex(project_id=project_id)
+            parent_check = cascade_parent_id(tree, hub_id, hub_node)
+            if not parent_check:
+                continue
+            if queue.should_defer_parent_cascade(parent_check):
+                continue
+
+            tree = MutableTreeIndex(project_id=project_id)
+            if tree.effective_degree(parent_check) < degree_threshold:
+                continue
+            if cascade_enqueues >= settings.MAX_UPWARD_REORG_ITERATIONS:
+                continue
+
+            cascade_enqueues += 1
+            emitted_events.append(
+                {
+                    "event": "reorg_cascade_iteration",
+                    "ancestor_id": parent_check,
+                    "queued_front": True,
+                    "cascade_index": cascade_enqueues,
+                    "timestamp": time.time(),
+                }
+            )
+            tree = MutableTreeIndex(project_id=project_id)
+            queue.prepend_cascade_filo(
+                ReorgWorkItem(
+                    hub_id=parent_check,
+                    kind="cascade",
+                    tree_parent_id=tree.parent_of(parent_check),
+                )
+            )
+
+        return splits_executed, collected_commands
+
     def reorganize_overclustered_nodes(
         self,
-        explored_nodes: list[GraphNode] | None = None,
+        seed_nodes: list[GraphNode] | None = None,
+        *,
         project_id: str = "global",
         degree_threshold: Optional[int] = None,
+        doc_title: str = "",
+        proj_list: Optional[List[str]] = None,
+        ingestion_engine: Optional[GraphIngestionEngine] = None,
+        plan_only: bool = True,
+        explored_nodes: list[GraphNode] | None = None,
     ) -> Dict[str, Any]:
         """
-        Reorganization discover + max-coverage split for link-affected mutable hubs.
+        Phase 4 reorganization: LLM discover once, then one queue (hub IDs only).
+        Each dequeue runs build_split_command_for_hub → commit → optional parent enqueue.
 
-        Step 1: LLM discover among degree-qualified nodes from the provided seed set only.
-        Step 2–3: Sub-concept formulation and neighbor rewire (wrapper at Genesis, replacement elsewhere).
-        Orphan neighbors promote to tree parent or Everything; engine closes any LLM omissions.
-
-        Returns {"commands": List[Dict], "emitted_events": List[Dict]}.
+        plan_only=True: run queue without execute (no cascade enqueue); returns commands.
         """
+        seeds = seed_nodes if seed_nodes is not None else explored_nodes
         emitted_events: List[Dict[str, Any]] = []
-        if not explored_nodes:
+        if not seeds:
             return {"commands": [], "emitted_events": []}
 
         if degree_threshold is None:
             degree_threshold = settings.DEGREE_THRESHOLD
 
         tree = MutableTreeIndex(project_id=project_id)
-        node_map = {n.id: n for n in explored_nodes}
+        node_map = {n.id: n for n in seeds}
 
         qualifying_nodes = [
             n
-            for n in explored_nodes
+            for n in seeds
             if not n.is_immutable and tree.effective_degree(n.id) >= degree_threshold
         ]
 
@@ -596,11 +706,11 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             "event": "reorg_discovery_started",
             "persona_id": self.department_id,
             "department_name": self.department_name,
-            "evaluated_nodes_count": len(explored_nodes),
+            "evaluated_nodes_count": len(seeds),
             "qualifying_candidates_count": len(qualifying_nodes),
             "qualifying_node_titles": [n.title for n in qualifying_nodes],
             "message": (
-                f"[{self.department_name}] Evaluating {len(explored_nodes)} nodes "
+                f"[{self.department_name}] Evaluating {len(seeds)} nodes "
                 f"({len(qualifying_nodes)} mutable with degree >= {degree_threshold}) for reorganization..."
             ),
             "timestamp": time.time(),
@@ -710,30 +820,30 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
         }
         emitted_events.append(evt_disc_done)
 
-        reorg_commands: List[Dict[str, Any]] = []
-
+        work_queue = ReorgQueue()
+        tree = MutableTreeIndex(project_id=project_id)
         for c_id in candidate_ids:
-            cmd = self.build_split_command_for_hub(
-                c_id, project_id=project_id, emitted_events=emitted_events
-            )
-            if cmd:
-                reorg_commands.append(cmd)
-            else:
-                target_node = node_map.get(c_id) or db_engine.get_node(c_id)
-                title = target_node.title if target_node else c_id
-                emitted_events.append(
-                    {
-                        "event": "reorg_candidate_skipped",
-                        "persona_id": self.department_id,
-                        "department_name": self.department_name,
-                        "concept_id": c_id,
-                        "node_title": title,
-                        "reason": "Partition returned no sub-concepts",
-                        "message": f"[{self.department_name}] Skipped candidate '{title}': partition produced no split.",
-                        "timestamp": time.time(),
-                    }
+            work_queue.enqueue_discover_fifo(
+                ReorgWorkItem(
+                    hub_id=c_id,
+                    kind="discover",
+                    tree_parent_id=tree.parent_of(c_id),
                 )
+            )
 
+        splits_executed, reorg_commands = self._process_reorg_queue(
+            work_queue,
+            project_id=project_id,
+            degree_threshold=degree_threshold,
+            doc_title=doc_title,
+            proj_list=proj_list or [project_id],
+            ingestion_engine=ingestion_engine,
+            emitted_events=emitted_events,
+            plan_only=plan_only,
+            node_map=node_map,
+        )
+
+        tree = MutableTreeIndex(project_id=project_id)
         health = tree.health_metrics(k=settings.REACHABILITY_HOP_K)
         emitted_events.append(
             {
@@ -742,7 +852,13 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
                 "timestamp": time.time(),
             }
         )
-        return {"commands": reorg_commands, "emitted_events": emitted_events}
+
+        if plan_only:
+            return {"commands": reorg_commands, "emitted_events": emitted_events}
+        return {
+            "emitted_events": emitted_events,
+            "splits_executed": splits_executed,
+        }
 
     def link_intradoc_concepts(
         self,

@@ -1,10 +1,8 @@
 """Tests for scratchpad-aligned reorg v0.2.2 (closure, SUBSET_OF, queue, partition scope)."""
 
-from collections import deque
-
 import pytest
 
-from app.agents.orchestrator import ExecutiveOrchestrator
+from app.services.reorg_queue import cascade_parent_id
 from app.db import db_engine
 from app.models import GraphEdge, GraphNode
 from app.services.graph_ingestion_engine import graph_ingestion_engine
@@ -245,17 +243,19 @@ def test_reorg_cascade_parent_id_genesis_and_child():
         )
     )
     tree = MutableTreeIndex(project_id=project_id)
-    pid = ExecutiveOrchestrator._reorg_cascade_parent_id(tree, "child_hub", child)
+    pid = cascade_parent_id(tree, "child_hub", child)
     assert pid == "concept_genesis"
-    pid_gen = ExecutiveOrchestrator._reorg_cascade_parent_id(
-        tree, "concept_genesis", genesis
-    )
+    pid_gen = cascade_parent_id(tree, "concept_genesis", genesis)
     assert pid_gen == "concept_genesis"
 
 
 def test_reorg_queue_filo_prepends_cascade_before_next_discover():
     """Simulate queue: after processing hub A, cascade parent P is prepended before hub B."""
-    pending = deque([{"concept_id": "A"}, {"concept_id": "B"}])
-    pending.appendleft({"concept_id": "P_cascade"})
-    order = [pending.popleft()["concept_id"] for _ in range(3)]
+    from app.services.reorg_queue import ReorgQueue, ReorgWorkItem
+
+    q = ReorgQueue()
+    q.enqueue_discover_fifo(ReorgWorkItem("A", "discover", "P"))
+    q.enqueue_discover_fifo(ReorgWorkItem("B", "discover", "P"))
+    q.prepend_cascade_filo(ReorgWorkItem("P_cascade", "cascade", None))
+    order = [q.pop_front().hub_id for _ in range(3)]
     assert order == ["P_cascade", "A", "B"]

@@ -15,7 +15,7 @@ import json
 import uuid
 import time
 import asyncio
-from collections import defaultdict, deque
+from collections import defaultdict
 from typing import List, Dict, Any, AsyncGenerator, Generator, Optional, Union
 from app.db import db_engine
 from app.models import (
@@ -1037,21 +1037,15 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
         # Phase 4: Reorganization on link-affected mutable targets (degree ≥ τ → LLM discover → split)
         reorg_res = await asyncio.to_thread(
             navigator.reorganize_overclustered_nodes,
-            explored_nodes=mutable_targets,
+            mutable_targets,
             project_id=project_id,
             degree_threshold=settings.DEGREE_THRESHOLD,
+            doc_title=title,
+            proj_list=proj_list,
+            plan_only=False,
         )
         for reorg_evt in reorg_res.get("emitted_events", []):
             yield reorg_evt
-
-        async for cascade_evt in self._execute_reorg_commands_with_cascade(
-            navigator=navigator,
-            commands=reorg_res.get("commands", []),
-            doc_title=title,
-            proj_list=proj_list,
-            project_id=project_id,
-        ):
-            yield cascade_evt
         graph_analytics.refresh_tree_metadata(project_id)
 
         yield {
@@ -1062,76 +1056,6 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
             "message": f"Document '{title}' successfully ingested and merged into knowledge graph.",
             "timestamp": time.time(),
         }
-
-    @staticmethod
-    def _reorg_cascade_parent_id(
-        tree: MutableTreeIndex, hub_id: str, hub_node: Optional[GraphNode]
-    ) -> Optional[str]:
-        """Tree parent to check for overload after orphans land (Genesis may check itself)."""
-        parent_id = tree.parent_of(hub_id)
-        if parent_id:
-            return parent_id
-        if hub_node and (
-            hub_node.metadata.get("is_genesis")
-            or hub_node.title.strip().lower() == "everything"
-        ):
-            return hub_id
-        return None
-
-    async def _execute_reorg_commands_with_cascade(
-        self,
-        navigator: GraphNavigator,
-        commands: List[Dict[str, Any]],
-        doc_title: str,
-        proj_list: List[str],
-        project_id: str,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        Dynamic reorg queue: discover-initial splits FIFO; cascade parents FILO (prepend).
-        Parents enter the queue only after a child split commits and orphan promotion
-        shows effective_degree ≥ τ.
-        """
-        pending: deque = deque(commands)
-        while pending:
-            cmd = pending.popleft()
-            hub_id = cmd.get("concept_id")
-            hub_node = self.db.get_node(hub_id) if hub_id else None
-
-            cmd["navigator_id"] = navigator.navigator_id
-            cmd["navigator_name"] = navigator.navigator_name
-            evt = self.ingestion_engine.execute_single_command(
-                cmd, doc_title, proj_list
-            )
-            if evt:
-                yield evt
-            graph_analytics.refresh_tree_metadata(project_id)
-
-            if not hub_id:
-                continue
-
-            tree = MutableTreeIndex(project_id=project_id)
-            cascade_parent = self._reorg_cascade_parent_id(tree, hub_id, hub_node)
-            if not cascade_parent:
-                continue
-            tree = MutableTreeIndex(project_id=project_id)
-            if tree.effective_degree(cascade_parent) < settings.DEGREE_THRESHOLD:
-                continue
-
-            cascade_cmd = await asyncio.to_thread(
-                navigator.build_split_command_for_hub,
-                cascade_parent,
-                project_id,
-                [],
-            )
-            if not cascade_cmd:
-                continue
-            yield {
-                "event": "reorg_cascade_iteration",
-                "ancestor_id": cascade_parent,
-                "queued_front": True,
-                "timestamp": time.time(),
-            }
-            pending.appendleft(cascade_cmd)
 
     async def _generalize_affected_target_nodes(
         self,
