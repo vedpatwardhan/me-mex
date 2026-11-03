@@ -297,7 +297,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         target_neighbors_to_rewire: List[Dict[str, Any]],
         project_id: str,
         emitted_events: List[Dict[str, Any]],
-        negative_mutable_context: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Formulates intermediate sub-concepts (Step 2) and re-wires direct neighbor edges (Step 3)."""
         # Compute cardinality bounds for sub-concept formulation (n // 2 compression invariant)
@@ -342,20 +341,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             f"Target Neighbors to Move Outward ({len(indexed_neighbors_to_rewire)} items):",
             json.dumps(indexed_neighbors_to_rewire, indent=2),
         ]
-        if negative_mutable_context:
-            indexed_negative_context = []
-            for mut_nb in negative_mutable_context:
-                mut_idx = rewire_concept_mapper.register(mut_nb["id"])
-                mut_entry = dict(mut_nb)
-                mut_entry["concept_index"] = mut_idx
-                mut_entry.pop("id", None)
-                indexed_negative_context.append(mut_entry)
-            split_context_parts.extend(
-                [
-                    f"Existing Mutable Concepts (NEGATIVE CONTEXT - DO NOT DUPLICATE or REPHRASE, {len(indexed_negative_context)} items):",
-                    json.dumps(indexed_negative_context, indent=2),
-                ]
-            )
         user_split = "\n\n".join(split_context_parts)
 
         try:

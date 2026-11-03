@@ -888,6 +888,7 @@ class ExecutiveOrchestrator:
                 {"concept_index": c_idx, "title": n.title, "description": n.description}
             )
 
+        # ToDo: try to get these anchor paths from the traverse_mutable_tree_from_genesis result
         explored_tree_payload = []
         link_tree = MutableTreeIndex(project_id=project_id)
         genesis_id = navigator.genesis_node.id
