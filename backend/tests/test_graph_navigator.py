@@ -271,10 +271,6 @@ def test_reorganize_overclustered_nodes_selects_qualifying_mutable_candidate(
 
     agent = GraphNavigator("global")
 
-    # Mock LLM calls:
-    # 1. Discovery returns candidate hub_qualifying
-    # 2. Split returns 2 sub-concepts
-    # 3. Rewire returns rewired edges
     import json
 
     def mock_chat_completion(messages, **kwargs):
@@ -286,7 +282,7 @@ def test_reorganize_overclustered_nodes_selects_qualifying_mutable_candidate(
             or "candidates" in sys_content
         ):
             return '{"candidates": [{"candidate_index": 1, "rationale": "Over-clustered hub combining distinct themes."}]}'
-        elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
+        if "unified partition" in sys_content.lower():
             return json.dumps(
                 {
                     "parent_title": "Everything",
@@ -303,23 +299,15 @@ def test_reorganize_overclustered_nodes_selects_qualifying_mutable_candidate(
                             "description": "Synthesized description of Sub 2.",
                         },
                     ],
-                }
-            )
-        elif "reorganize_rewire" in sys_content or "rewired_edges" in sys_content:
-            return json.dumps(
-                {
                     "rewired_edges": [
                         {
-                            "neighbor_index": 1,
-                            "connect_to_sub_alias": "sub_1",
+                            "neighbor_index": i,
+                            "connect_to_sub_alias": "sub_1" if i % 2 else "sub_2",
                             "relation_type": "RELEVANT_TO",
-                        },
-                        {
-                            "neighbor_index": 2,
-                            "connect_to_sub_alias": "sub_2",
-                            "relation_type": "RELEVANT_TO",
-                        },
-                    ]
+                            "description": "Re-wired.",
+                        }
+                        for i in range(1, 6)
+                    ],
                 }
             )
         return "{}"
@@ -406,7 +394,7 @@ def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_s
             or "candidates" in sys_content
         ):
             return '{"candidates": [{"candidate_index": 1, "rationale": "High degree mixed hub."}]}'
-        elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
+        if "unified partition" in sys_content.lower():
             if "max_coverage" in messages[1]["content"]:
                 captured_modes.append("max_coverage")
             return json.dumps(
@@ -425,23 +413,15 @@ def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_s
                             "description": "Desc B",
                         },
                     ],
-                }
-            )
-        elif "reorganize_rewire" in sys_content or "rewired_edges" in sys_content:
-            return json.dumps(
-                {
                     "rewired_edges": [
                         {
-                            "neighbor_index": 1,
-                            "connect_to_sub_alias": "sub_a",
+                            "neighbor_index": i,
+                            "connect_to_sub_alias": "sub_a" if i <= 3 else "sub_b",
                             "relation_type": "RELEVANT_TO",
-                        },
-                        {
-                            "neighbor_index": 2,
-                            "connect_to_sub_alias": "sub_b",
-                            "relation_type": "RELEVANT_TO",
-                        },
-                    ]
+                            "description": "Re-wired.",
+                        }
+                        for i in range(1, 7)
+                    ],
                 }
             )
         return "{}"
@@ -671,8 +651,7 @@ def test_reorganize_overclustered_nodes_caps_subconcepts_to_half_degree(monkeypa
             return (
                 '{"candidates": [{"candidate_index": 1, "rationale": "Degree >= 5"}]}'
             )
-        elif "reorganize_split" in sys_content or "sub_concepts" in sys_content:
-            # Model attempts to return 4 sub-concepts for 5 neighbors (which would violate n // 2 = 2)
+        if "unified partition" in sys_content.lower():
             return json.dumps(
                 {
                     "parent_title": "Generalized Umbrella Hub",
@@ -685,19 +664,15 @@ def test_reorganize_overclustered_nodes_caps_subconcepts_to_half_degree(monkeypa
                         }
                         for i in range(4)
                     ],
-                }
-            )
-        elif "reorganize_rewire" in sys_content or "rewired_edges" in sys_content:
-            return json.dumps(
-                {
                     "rewired_edges": [
                         {
                             "neighbor_index": i + 1,
-                            "connect_to_sub_alias": f"sub_{i % 2}",
+                            "connect_to_sub_alias": f"sub_{i}",
                             "relation_type": "RELEVANT_TO",
+                            "description": "Re-wired.",
                         }
                         for i in range(5)
-                    ]
+                    ],
                 }
             )
         return "{}"
@@ -717,3 +692,62 @@ def test_reorganize_overclustered_nodes_caps_subconcepts_to_half_degree(monkeypa
     assert cmd["action"] == "SPLIT_CONCEPT"
     # For n = 5 neighbors, max allowed sub-concepts is 5 // 2 = 2
     assert len(cmd["sub_concepts"]) == 2
+
+
+def test_cap_sub_concepts_and_remap_rewires():
+    from app.agents.graph_navigator import _cap_sub_concepts_and_remap_rewires
+
+    subs = [{"sub_id_alias": f"sub_{i}"} for i in range(4)]
+    rewires = [
+        {
+            "neighbor_index": i + 1,
+            "connect_to_sub_alias": f"sub_{i}",
+            "relation_type": "RELEVANT_TO",
+        }
+        for i in range(4)
+    ]
+    capped_subs, capped_rewires = _cap_sub_concepts_and_remap_rewires(
+        subs, rewires, max_allowed_subs=2, overflow_alias="ANCESTOR"
+    )
+    assert len(capped_subs) == 2
+    assert capped_subs[0]["sub_id_alias"] == "sub_0"
+    assert capped_subs[1]["sub_id_alias"] == "sub_1"
+    for edge in capped_rewires:
+        assert edge["connect_to_sub_alias"] in ("sub_0", "sub_1", "ANCESTOR")
+
+
+def test_reorg_partition_prompt_injects_strategy_without_jinja():
+    from app.agents.graph_navigator import _reorg_split_strategy_block
+    from app.prompts import load_prompt
+
+    block, overflow = _reorg_split_strategy_block(is_genesis=True)
+    prompt = load_prompt(
+        "graph_reorg_partition",
+        department_name="Graph Navigator",
+        node_id="concept_genesis",
+        mode="max_coverage",
+        split_strategy_block=block,
+        overflow_alias=overflow,
+        min_allowed_sub_concepts=2,
+        max_allowed_sub_concepts=3,
+        neighbor_count=7,
+    )
+    assert "{%" not in prompt
+    assert "WRAPPER SPLIT" in prompt
+    assert "EVERYTHING" in prompt
+
+    block_r, overflow_r = _reorg_split_strategy_block(is_genesis=False)
+    prompt_r = load_prompt(
+        "graph_reorg_partition",
+        department_name="Graph Navigator",
+        node_id="hub_x",
+        mode="max_coverage",
+        split_strategy_block=block_r,
+        overflow_alias=overflow_r,
+        min_allowed_sub_concepts=2,
+        max_allowed_sub_concepts=3,
+        neighbor_count=7,
+    )
+    assert "REPLACEMENT SPLIT" in prompt_r
+    assert "sub_1" in prompt_r
+    assert "ANCESTOR" in prompt_r

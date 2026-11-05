@@ -14,8 +14,7 @@ from app.models import (
     GraphNode,
     GraphEdge,
     ReorgDiscoveryPayload,
-    ReorgSplitPayload,
-    ReorgRewirePayload,
+    ReorgPartitionPayload,
     PersonaIngestionCommandsPayload,
     PersonaExplorationPayload,
 )
@@ -25,10 +24,100 @@ from app.services.graph_ingestion_engine import (
     graph_ingestion_engine,
 )
 from app.services.reorg_queue import ReorgQueue, ReorgWorkItem, cascade_parent_id
-from app.services.reorg_rewire_utils import finalize_rewire_edges
+from app.services.reorg_rewire_utils import (
+    finalize_rewire_edges,
+    is_overflow_rewire_alias,
+)
 from app.services.llm_gateway import llm_gateway
 from app.services.prompt_mapper import PromptIdMapper
 from app.prompts import load_prompt
+
+
+def _reorg_split_strategy_block(is_genesis: bool) -> tuple[str, str]:
+    """Genesis wrapper vs replacement split instructions and overflow alias for prompts."""
+    if is_genesis:
+        block = (
+            "GENESIS (Everything) — WRAPPER SPLIT:\n"
+            "- Mint sub-hubs that live **under** Everything (Genesis is preserved; title stays 'Everything').\n"
+            "- Maximize assignment of neighbors to new sub-hubs beneath Genesis."
+        )
+        return block, "EVERYTHING"
+    block = (
+        "REPLACEMENT SPLIT:\n"
+        "- **`sub_1` reuses the split target node id** as the replacement hub — assign the "
+        "largest coherent neighbor cluster to `sub_1` when possible.\n"
+        "- Additional sub-concepts (`sub_2`, …) are new siblings under the tree parent "
+        "(same depth; no new wrapper layer under the old hub)."
+    )
+    return block, "ANCESTOR"
+
+
+def _cap_sub_concepts_and_remap_rewires(
+    formulated_subs: List[Dict[str, Any]],
+    rewired_raw: List[Dict[str, Any]],
+    max_allowed_subs: int,
+    overflow_alias: str,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Enforce n//2 sub cap and remap rewires off dropped sub aliases."""
+    if len(formulated_subs) > max_allowed_subs:
+        formulated_subs = formulated_subs[:max_allowed_subs]
+    kept_aliases = {
+        s.get("sub_id_alias") for s in formulated_subs if s.get("sub_id_alias")
+    }
+    if not kept_aliases:
+        return formulated_subs, rewired_raw
+
+    loads: Dict[str, int] = defaultdict(int)
+    remapped: List[Dict[str, Any]] = []
+    for edge in rewired_raw:
+        alias = (edge.get("connect_to_sub_alias") or "").strip()
+        if is_overflow_rewire_alias(alias) or alias in kept_aliases:
+            remapped.append(edge)
+            if alias in kept_aliases:
+                loads[alias] += 1
+            continue
+        target = min(kept_aliases, key=lambda a: loads.get(a, 0))
+        remapped.append({**edge, "connect_to_sub_alias": target})
+        loads[target] += 1
+
+    for sub in formulated_subs:
+        alias = sub.get("sub_id_alias")
+        if alias and loads.get(alias, 0) == 0:
+            print(
+                f"[Reorg] Sub-concept alias '{alias}' has no assigned neighbors before engine commit."
+            )
+    return formulated_subs, remapped
+
+
+def _log_unbalanced_partition(
+    formulated_subs: List[Dict[str, Any]],
+    rewired: List[Dict[str, Any]],
+    n_neighbors: int,
+) -> None:
+    """Lightweight telemetry when one sub holds many neighbors and another holds one."""
+    if n_neighbors < 6:
+        return
+    alias_to_sub = {
+        s.get("sub_id_alias"): s for s in formulated_subs if s.get("sub_id_alias")
+    }
+    loads: Dict[str, int] = defaultdict(int)
+    for edge in rewired:
+        alias = (edge.get("connect_to_sub_alias") or "").strip()
+        if alias in alias_to_sub and not is_overflow_rewire_alias(alias):
+            loads[alias] += 1
+    if not loads:
+        return
+    max_load = max(loads.values())
+    min_load = min(loads.values())
+    if max_load >= 4 and min_load <= 1:
+        heavy = [a for a, c in loads.items() if c >= 4]
+        light = [a for a, c in loads.items() if c <= 1]
+        print(
+            f"[Reorg] Unbalanced partition: heavy subs {heavy} (≥4 neighbors), "
+            f"light subs {light} (≤1 neighbor) among {n_neighbors} neighbors."
+        )
+
+
 from app.tools.search_tools import search_tools
 
 
@@ -300,8 +389,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         project_id: str,
         emitted_events: List[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        """Formulates intermediate sub-concepts (Step 2) and re-wires direct neighbor edges (Step 3)."""
-        # Compute cardinality bounds for sub-concept formulation (n // 2 compression invariant)
+        """Unified partition: sub-concepts + neighbor re-wiring in one LLM step."""
         n_neighbors = len(target_neighbors_to_rewire)
         if n_neighbors <= 1:
             min_allowed_subs = 1
@@ -310,149 +398,93 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             min_allowed_subs = 2
             max_allowed_subs = max(2, n_neighbors // 2)
 
-        is_genesis = bool(
+        is_genesis_hub = bool(
             target_node.metadata.get("is_genesis")
             or target_node.title.strip().lower() == "everything"
         )
-        system_split = load_prompt(
-            "graph_reorg_split",
+        split_strategy_block, overflow_alias = _reorg_split_strategy_block(
+            is_genesis_hub
+        )
+        system_partition = load_prompt(
+            "graph_reorg_partition",
             department_name=self.department_name,
             node_id=target_node.id,
             mode=mode,
+            split_strategy_block=split_strategy_block,
+            overflow_alias=overflow_alias,
             min_allowed_sub_concepts=min_allowed_subs,
             max_allowed_sub_concepts=max_allowed_subs,
             neighbor_count=n_neighbors,
-            is_genesis=str(is_genesis).lower(),
         )
 
-        # Concept Cache Map for target neighbors being rewired
         rewire_concept_mapper = PromptIdMapper(prefix="concept")
         indexed_neighbors_to_rewire = []
         for nb in target_neighbors_to_rewire:
             nb_idx = rewire_concept_mapper.register(nb["id"])
             entry = dict(nb)
             entry["neighbor_index"] = nb_idx
-            # Exclude raw internal string id from user prompt to prevent model confusion
             entry.pop("id", None)
             indexed_neighbors_to_rewire.append(entry)
 
-        split_context_parts = [
-            f"Target over-clustered mutable concept: '{target_node.title}' (ID: {target_node.id})",
-            f"Current Description: {target_node.description}",
-            f"Reorganization Mode: {mode}",
-            f"Target Neighbors to Move Outward ({len(indexed_neighbors_to_rewire)} items):",
-            json.dumps(indexed_neighbors_to_rewire, indent=2),
-        ]
-        user_split = "\n\n".join(split_context_parts)
+        user_partition = "\n\n".join(
+            [
+                f"Target over-clustered mutable concept: '{target_node.title}' (ID: {target_node.id})",
+                f"Current Description: {target_node.description}",
+                f"Reorganization Mode: {mode}",
+                f"Target Neighbors to Partition ({len(indexed_neighbors_to_rewire)} items):",
+                json.dumps(indexed_neighbors_to_rewire, indent=2),
+            ]
+        )
 
         try:
-            payload_split = llm_gateway.generate_structured_completion(
+            payload = llm_gateway.generate_structured_completion(
                 [
-                    {"role": "system", "content": system_split},
-                    {"role": "user", "content": user_split},
+                    {"role": "system", "content": system_partition},
+                    {"role": "user", "content": user_partition},
                 ],
-                response_model=ReorgSplitPayload,
+                response_model=ReorgPartitionPayload,
                 temperature=0.2,
-                max_tokens=2048,
+                max_tokens=settings.REORG_PARTITION_MAX_TOKENS,
                 max_retries=2,
                 enable_reasoning=False,
-                caller=f"GraphNavigator[{self.department_name}].reorg_split_{mode}",
+                caller=f"GraphNavigator[{self.department_name}].reorg_partition_{mode}",
             )
-            formulated_subs = [s.model_dump() for s in payload_split.sub_concepts]
-            # Programmatic compression guard: enforce max_allowed_subs ceiling
+            formulated_subs = [s.model_dump() for s in payload.sub_concepts]
+            rewired_raw = [r.model_dump() for r in payload.rewired_edges]
             if len(formulated_subs) > max_allowed_subs:
                 print(
                     f"[{self.department_name}] Capping formulated sub-concepts from "
                     f"{len(formulated_subs)} to {max_allowed_subs} (n // 2 compression bound for {n_neighbors} neighbors)."
                 )
-                formulated_subs = formulated_subs[:max_allowed_subs]
+            formulated_subs, rewired_raw = _cap_sub_concepts_and_remap_rewires(
+                formulated_subs,
+                rewired_raw,
+                max_allowed_subs,
+                overflow_alias,
+            )
         except Exception as e:
             print(
-                f"[{self.department_name}] Step 2 Sub-concept formulation error for {target_node.id} (mode={mode}): {e}"
+                f"[{self.department_name}] Unified partition error for {target_node.id} (mode={mode}): {e}"
             )
             raise RuntimeError(
-                f"[{self.department_name}] Step 2 Sub-concept formulation failed for {target_node.id} (mode={mode}): {e}"
+                f"[{self.department_name}] Unified partition failed for {target_node.id} (mode={mode}): {e}"
             ) from e
 
         if not formulated_subs:
             return None
 
-        split_event = {
-            "event": "reorg_split_completed",
-            "persona_id": self.department_id,
-            "department_name": self.department_name,
-            "node_id": target_node.id,
-            "node_title": target_node.title,
-            "reorg_mode": mode,
-            "sub_concepts_count": len(formulated_subs),
-            "sub_concepts": formulated_subs,
-            "message": f"[{self.department_name}] Step 2 ({mode}) Completed: Formulated {len(formulated_subs)} sub-concepts for '{target_node.title}': {[s.get('title') for s in formulated_subs]}",
-            "timestamp": time.time(),
-        }
-        emitted_events.append(split_event)
-
-        # Re-wiring step
-        is_genesis_hub = bool(
-            target_node.metadata.get("is_genesis")
-            or target_node.title.strip().lower() == "everything"
-        )
-        tree_idx = MutableTreeIndex(project_id=project_id)
-        parent = tree_idx.parent_of(target_node.id)
-        ancestor_note = (
-            "Leftovers use connect_to_sub_alias EVERYTHING (stay on Genesis)."
-            if is_genesis_hub
-            else f"Leftovers use connect_to_sub_alias ANCESTOR (rewire to parent '{parent}')."
-        )
-        system_rewire = load_prompt(
-            "graph_reorg_rewire",
-            department_name=self.department_name,
-            node_id=target_node.id,
-            mode=mode,
-            is_genesis=str(is_genesis_hub).lower(),
-        )
-        user_rewire = f"""Target mutable concept: '{target_node.title}' (ID: {target_node.id})
-Reorganization Mode: {mode}
-{ancestor_note}
-
-Formulated Sub-Concepts Available for Connection:
-{json.dumps(formulated_subs, indent=2)}
-
-Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
-{json.dumps(indexed_neighbors_to_rewire, indent=2)}"""
-
-        try:
-            payload_rewire = llm_gateway.generate_structured_completion(
-                [
-                    {"role": "system", "content": system_rewire},
-                    {"role": "user", "content": user_rewire},
-                ],
-                response_model=ReorgRewirePayload,
-                temperature=0.2,
-                max_tokens=4096,
-                max_retries=2,
-                enable_reasoning=False,
-                caller=f"GraphNavigator[{self.department_name}].reorg_rewire_{mode}",
-            )
-            # Decode model integer neighbor_index back to real string neighbor_id
-            rewired = []
-            for r in payload_rewire.rewired_edges:
-                real_nb_id = rewire_concept_mapper.to_id(r.neighbor_index)
-                if real_nb_id:
-                    rewired.append(
-                        {
-                            "neighbor_id": real_nb_id,
-                            "connect_to_sub_alias": r.connect_to_sub_alias,
-                            "relation_type": r.relation_type,
-                            "description": r.description,
-                        }
-                    )
-        except Exception as e:
-            print(
-                f"[{self.department_name}] Step 3 Neighbor edge re-wiring error for {target_node.id} (mode={mode}): {e}"
-            )
-            raise RuntimeError(
-                f"[{self.department_name}] Step 3 Neighbor edge re-wiring failed for {target_node.id} (mode={mode}): {e}"
-            ) from e
+        rewired = []
+        for r in rewired_raw:
+            real_nb_id = rewire_concept_mapper.to_id(r.get("neighbor_index"))
+            if real_nb_id:
+                rewired.append(
+                    {
+                        "neighbor_id": real_nb_id,
+                        "connect_to_sub_alias": r.get("connect_to_sub_alias"),
+                        "relation_type": r.get("relation_type"),
+                        "description": r.get("description", ""),
+                    }
+                )
 
         partition_ids = [nb["id"] for nb in target_neighbors_to_rewire if nb.get("id")]
         rewired = finalize_rewire_edges(
@@ -462,24 +494,30 @@ Target Neighbors to Re-Wire ({len(indexed_neighbors_to_rewire)} items):
             is_genesis_split=is_genesis_hub,
             explicit_neighbor_ids=partition_ids,
         )
+        _log_unbalanced_partition(formulated_subs, rewired, n_neighbors)
 
-        rewire_event = {
-            "event": "reorg_rewire_completed",
+        partition_event = {
+            "event": "reorg_partition_completed",
             "persona_id": self.department_id,
             "department_name": self.department_name,
             "node_id": target_node.id,
             "node_title": target_node.title,
             "reorg_mode": mode,
+            "sub_concepts_count": len(formulated_subs),
+            "sub_concepts": formulated_subs,
             "rewired_edges_count": len(rewired),
             "rewired_edges": rewired,
-            "message": f"[{self.department_name}] Step 3 ({mode}) Completed: Formulated {len(rewired)} re-wired edges for '{target_node.title}'.",
+            "message": (
+                f"[{self.department_name}] Partition ({mode}) completed for '{target_node.title}': "
+                f"{len(formulated_subs)} sub-concept(s), {len(rewired)} re-wired edge(s)."
+            ),
             "timestamp": time.time(),
         }
-        emitted_events.append(rewire_event)
+        emitted_events.append(partition_event)
 
         return {
-            "parent_title": payload_split.parent_title,
-            "parent_description": payload_split.parent_description,
+            "parent_title": payload.parent_title,
+            "parent_description": payload.parent_description,
             "sub_concepts": formulated_subs,
             "rewired_edges": rewired,
         }

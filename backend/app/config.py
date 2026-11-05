@@ -38,6 +38,9 @@ class Settings:
     MAX_UPWARD_REORG_ITERATIONS: int = int(
         os.getenv("MAX_UPWARD_REORG_ITERATIONS", "5")
     )
+    REORG_PARTITION_MAX_TOKENS: int = int(
+        os.getenv("REORG_PARTITION_MAX_TOKENS", "6144")
+    )
 
 
 settings = Settings()

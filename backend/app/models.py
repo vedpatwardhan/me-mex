@@ -324,6 +324,19 @@ class ReorgRewirePayload(BaseModel):
     rewired_edges: List[RewireEdgeItem]
 
 
+class ReorgPartitionPayload(BaseModel):
+    parent_title: str = Field(
+        ...,
+        description="Updated umbrella title for the split target accommodating sub-concepts and rewired relations.",
+    )
+    parent_description: str = Field(
+        ...,
+        description="Updated comprehensive description for the split target synthesizing its broader scope.",
+    )
+    sub_concepts: List[SubConceptItem]
+    rewired_edges: List[RewireEdgeItem]
+
+
 class NodeGeneralizationItem(BaseModel):
     node_index: int
     updated_title: str = Field(

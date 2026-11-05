@@ -113,7 +113,7 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 
 **Module:** `app/agents/graph_navigator.py` — one navigator per ingestion/retrieval, anchored on project Genesis.
 
-**Prompts:** `graph_tree_traversal.md`, `graph_link_intradoc.md`, `graph_reorg_discover.md`, `graph_reorg_split.md`, `graph_reorg_rewire.md`, plus orchestrator prompts (`collective_ingestion_linking`, `target_node_generalization`, etc.).
+**Prompts:** `graph_tree_traversal.md`, `graph_link_intradoc.md`, `graph_reorg_discover.md`, `graph_reorg_partition.md`, plus orchestrator prompts (`collective_ingestion_linking`, `target_node_generalization`, etc.).
 
 ### 4.1 Tree traversal
 
@@ -141,7 +141,9 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 3. If tree parent is hot **and** discover **siblings** under that parent are drained → **prepend parent hub ID** (FILO); split built on that hub’s pop.
 4. Repeat until queue empty; cascade prepends capped by **`MAX_UPWARD_REORG_ITERATIONS`** per Phase 4 pass. `plan_only` runs the pop/build loop without execute or cascade enqueue.
 
-**Partition / commit:** **`max_coverage`** over all direct hub neighbors; **`finalize_rewire_edges`**; wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`).
+**Partition (per hub):** One LLM call — **`graph_reorg_partition`** (`ReorgPartitionPayload`: sub-concepts + `rewired_edges` together; `REORG_PARTITION_MAX_TOKENS` default 6144). Genesis vs replacement rules are injected in Python (no Jinja conditionals). Post-parse: **⌊n/2⌋** sub cap with rewire alias remap, then **`finalize_rewire_edges`**.
+
+**Commit:** wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`).
 
 Cardinality: sub-concept count bounded by **⌊n/2⌋**. **`graph_health_metrics`** emitted once after the queue drains.
 
