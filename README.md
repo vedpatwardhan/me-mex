@@ -111,7 +111,7 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
 
 ## 🛠️ Technology Stack & Engine Architecture
 
-* **Database Engine:** **MongoDB** document database (`documents`, `passages`, `nodes`, `edges`, `macro_documents`, `staging_sandbox`, `projects`, `chat_messages`) with in-memory fallback for local execution.
+* **Database Engine:** **MongoDB** document database (`documents`, `passages`, `nodes`, `edges`, `projects`, `chat_messages`) with in-memory fallback for local execution.
 * **LLM Gateway:** **Ministral 3-8B** running remotely via Colab vLLM server (`http://localhost:8000/v1`) with local rule-based fallback.
 * **Graph Analytics Worker:** **`MutableTreeIndex`** (depth, Strahler, Sackin, K-hop reachability) plus **`rustworkx`** PyDiGraph construction.
 * **Agent Protocol & Tools:** **FastMCP** (Python MCP SDK) exposing typed tools (`search_duckduckgo_web`, `search_arxiv_papers`, `fetch_web_article`, `get_graph_nodes`, `get_passages_by_ids`, `get_macro_documents`, `calculate_hub_rankings`).
