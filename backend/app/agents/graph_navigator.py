@@ -26,7 +26,9 @@ from app.services.graph_ingestion_engine import (
 from app.services.reorg_queue import ReorgQueue, ReorgWorkItem, cascade_parent_id
 from app.services.reorg_rewire_utils import (
     finalize_rewire_edges,
-    is_overflow_rewire_alias,
+    max_allowed_sub_concepts,
+    merge_partition_to_engine_rewires,
+    validate_reorg_partition,
 )
 from app.services.llm_gateway import llm_gateway
 from app.services.prompt_mapper import PromptIdMapper
@@ -50,72 +52,6 @@ def _reorg_split_strategy_block(is_genesis: bool) -> tuple[str, str]:
         "(same depth; no new wrapper layer under the old hub)."
     )
     return block, "ANCESTOR"
-
-
-def _cap_sub_concepts_and_remap_rewires(
-    formulated_subs: List[Dict[str, Any]],
-    rewired_raw: List[Dict[str, Any]],
-    max_allowed_subs: int,
-    overflow_alias: str,
-) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Enforce n//2 sub cap and remap rewires off dropped sub aliases."""
-    if len(formulated_subs) > max_allowed_subs:
-        formulated_subs = formulated_subs[:max_allowed_subs]
-    kept_aliases = {
-        s.get("sub_id_alias") for s in formulated_subs if s.get("sub_id_alias")
-    }
-    if not kept_aliases:
-        return formulated_subs, rewired_raw
-
-    loads: Dict[str, int] = defaultdict(int)
-    remapped: List[Dict[str, Any]] = []
-    for edge in rewired_raw:
-        alias = (edge.get("connect_to_sub_alias") or "").strip()
-        if is_overflow_rewire_alias(alias) or alias in kept_aliases:
-            remapped.append(edge)
-            if alias in kept_aliases:
-                loads[alias] += 1
-            continue
-        target = min(kept_aliases, key=lambda a: loads.get(a, 0))
-        remapped.append({**edge, "connect_to_sub_alias": target})
-        loads[target] += 1
-
-    for sub in formulated_subs:
-        alias = sub.get("sub_id_alias")
-        if alias and loads.get(alias, 0) == 0:
-            print(
-                f"[Reorg] Sub-concept alias '{alias}' has no assigned neighbors before engine commit."
-            )
-    return formulated_subs, remapped
-
-
-def _log_unbalanced_partition(
-    formulated_subs: List[Dict[str, Any]],
-    rewired: List[Dict[str, Any]],
-    n_neighbors: int,
-) -> None:
-    """Lightweight telemetry when one sub holds many neighbors and another holds one."""
-    if n_neighbors < 6:
-        return
-    alias_to_sub = {
-        s.get("sub_id_alias"): s for s in formulated_subs if s.get("sub_id_alias")
-    }
-    loads: Dict[str, int] = defaultdict(int)
-    for edge in rewired:
-        alias = (edge.get("connect_to_sub_alias") or "").strip()
-        if alias in alias_to_sub and not is_overflow_rewire_alias(alias):
-            loads[alias] += 1
-    if not loads:
-        return
-    max_load = max(loads.values())
-    min_load = min(loads.values())
-    if max_load >= 4 and min_load <= 1:
-        heavy = [a for a, c in loads.items() if c >= 4]
-        light = [a for a, c in loads.items() if c <= 1]
-        print(
-            f"[Reorg] Unbalanced partition: heavy subs {heavy} (≥4 neighbors), "
-            f"light subs {light} (≤1 neighbor) among {n_neighbors} neighbors."
-        )
 
 
 from app.tools.search_tools import search_tools
@@ -389,15 +325,12 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         project_id: str,
         emitted_events: List[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        """Unified partition: sub-concepts + neighbor re-wiring in one LLM step."""
+        """Unified partition: sub-concepts + overflow_neighbors + sub-only rewired_edges."""
         n_neighbors = len(target_neighbors_to_rewire)
-        if n_neighbors <= 1:
-            min_allowed_subs = 1
-            max_allowed_subs = 1
-        else:
-            min_allowed_subs = 2
-            max_allowed_subs = max(2, n_neighbors // 2)
+        if not n_neighbors:
+            return None
 
+        max_allowed_subs = max_allowed_sub_concepts(n_neighbors)
         is_genesis_hub = bool(
             target_node.metadata.get("is_genesis")
             or target_node.title.strip().lower() == "everything"
@@ -405,14 +338,18 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         split_strategy_block, overflow_alias = _reorg_split_strategy_block(
             is_genesis_hub
         )
+        overflow_target_label = (
+            "Everything (Genesis)" if is_genesis_hub else "the tree ancestor"
+        )
         system_partition = load_prompt(
             "graph_reorg_partition",
             department_name=self.department_name,
             node_id=target_node.id,
             mode=mode,
             split_strategy_block=split_strategy_block,
-            overflow_alias=overflow_alias,
-            min_allowed_sub_concepts=min_allowed_subs,
+            overflow_target_label=overflow_target_label,
+            min_sub_concepts=1,
+            min_sub_neighbors=2,
             max_allowed_sub_concepts=max_allowed_subs,
             neighbor_count=n_neighbors,
         )
@@ -436,55 +373,106 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             ]
         )
 
-        try:
-            payload = llm_gateway.generate_structured_completion(
-                [
-                    {"role": "system", "content": system_partition},
-                    {"role": "user", "content": user_partition},
-                ],
-                response_model=ReorgPartitionPayload,
-                temperature=0.2,
-                max_tokens=settings.REORG_PARTITION_MAX_TOKENS,
-                max_retries=2,
-                enable_reasoning=False,
-                caller=f"GraphNavigator[{self.department_name}].reorg_partition_{mode}",
-            )
-            formulated_subs = [s.model_dump() for s in payload.sub_concepts]
-            rewired_raw = [r.model_dump() for r in payload.rewired_edges]
-            if len(formulated_subs) > max_allowed_subs:
-                print(
-                    f"[{self.department_name}] Capping formulated sub-concepts from "
-                    f"{len(formulated_subs)} to {max_allowed_subs} (n // 2 compression bound for {n_neighbors} neighbors)."
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": system_partition},
+            {"role": "user", "content": user_partition},
+        ]
+        partition_attempts = 3
+        payload: Optional[ReorgPartitionPayload] = None
+        validation_errors: List[str] = []
+
+        for attempt in range(1, partition_attempts + 1):
+            try:
+                payload = llm_gateway.generate_structured_completion(
+                    messages,
+                    response_model=ReorgPartitionPayload,
+                    temperature=0.2,
+                    max_tokens=settings.REORG_PARTITION_MAX_TOKENS,
+                    max_retries=2,
+                    enable_reasoning=False,
+                    caller=f"GraphNavigator[{self.department_name}].reorg_partition_{mode}",
                 )
-            formulated_subs, rewired_raw = _cap_sub_concepts_and_remap_rewires(
+            except Exception as e:
+                print(
+                    f"[{self.department_name}] Unified partition LLM error for "
+                    f"{target_node.id} (mode={mode}, attempt={attempt}): {e}"
+                )
+                if attempt >= partition_attempts:
+                    raise RuntimeError(
+                        f"[{self.department_name}] Unified partition failed for "
+                        f"{target_node.id} (mode={mode}): {e}"
+                    ) from e
+                continue
+
+            formulated_subs = [s.model_dump() for s in payload.sub_concepts]
+            overflow_raw = [o.model_dump() for o in payload.overflow_neighbors]
+            sub_rewired_raw = [r.model_dump() for r in payload.rewired_edges]
+            ok, validation_errors = validate_reorg_partition(
                 formulated_subs,
-                rewired_raw,
-                max_allowed_subs,
-                overflow_alias,
+                overflow_raw,
+                sub_rewired_raw,
+                neighbor_count=n_neighbors,
             )
-        except Exception as e:
+            if ok:
+                break
             print(
-                f"[{self.department_name}] Unified partition error for {target_node.id} (mode={mode}): {e}"
+                f"[{self.department_name}] Partition validation failed for "
+                f"{target_node.id} (attempt {attempt}/{partition_attempts}): "
+                f"{'; '.join(validation_errors)}"
             )
-            raise RuntimeError(
-                f"[{self.department_name}] Unified partition failed for {target_node.id} (mode={mode}): {e}"
-            ) from e
-
-        if not formulated_subs:
-            return None
-
-        rewired = []
-        for r in rewired_raw:
-            real_nb_id = rewire_concept_mapper.to_id(r.get("neighbor_index"))
-            if real_nb_id:
-                rewired.append(
+            if attempt >= partition_attempts:
+                emitted_events.append(
                     {
-                        "neighbor_id": real_nb_id,
-                        "connect_to_sub_alias": r.get("connect_to_sub_alias"),
-                        "relation_type": r.get("relation_type"),
-                        "description": r.get("description", ""),
+                        "event": "reorg_partition_failed",
+                        "persona_id": self.department_id,
+                        "department_name": self.department_name,
+                        "node_id": target_node.id,
+                        "node_title": target_node.title,
+                        "validation_errors": validation_errors,
+                        "message": (
+                            f"[{self.department_name}] Partition validation failed for "
+                            f"'{target_node.title}' after {partition_attempts} attempt(s)."
+                        ),
+                        "timestamp": time.time(),
                     }
                 )
+                return None
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Your partition JSON failed validation. Fix and return a complete response.\n"
+                        "Errors:\n- " + "\n- ".join(validation_errors)
+                    ),
+                }
+            )
+
+        if payload is None:
+            return None
+
+        formulated_subs = [s.model_dump() for s in payload.sub_concepts]
+        overflow_raw = [o.model_dump() for o in payload.overflow_neighbors]
+        sub_rewired_raw = [r.model_dump() for r in payload.rewired_edges]
+        merged_raw = merge_partition_to_engine_rewires(
+            sub_rewired_raw, overflow_raw, overflow_alias
+        )
+
+        rewired = []
+        overflow_neighbor_ids: List[str] = []
+        for r in merged_raw:
+            real_nb_id = rewire_concept_mapper.to_id(r.get("neighbor_index"))
+            if not real_nb_id:
+                continue
+            if (r.get("connect_to_sub_alias") or "").upper() == overflow_alias:
+                overflow_neighbor_ids.append(real_nb_id)
+            rewired.append(
+                {
+                    "neighbor_id": real_nb_id,
+                    "connect_to_sub_alias": r.get("connect_to_sub_alias"),
+                    "relation_type": r.get("relation_type"),
+                    "description": r.get("description", ""),
+                }
+            )
 
         partition_ids = [nb["id"] for nb in target_neighbors_to_rewire if nb.get("id")]
         rewired = finalize_rewire_edges(
@@ -494,7 +482,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             is_genesis_split=is_genesis_hub,
             explicit_neighbor_ids=partition_ids,
         )
-        _log_unbalanced_partition(formulated_subs, rewired, n_neighbors)
 
         partition_event = {
             "event": "reorg_partition_completed",
@@ -503,13 +490,17 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             "node_id": target_node.id,
             "node_title": target_node.title,
             "reorg_mode": mode,
+            "validation_passed": True,
             "sub_concepts_count": len(formulated_subs),
             "sub_concepts": formulated_subs,
+            "overflow_neighbors_count": len(overflow_raw),
+            "overflow_neighbor_ids": overflow_neighbor_ids,
             "rewired_edges_count": len(rewired),
             "rewired_edges": rewired,
             "message": (
                 f"[{self.department_name}] Partition ({mode}) completed for '{target_node.title}': "
-                f"{len(formulated_subs)} sub-concept(s), {len(rewired)} re-wired edge(s)."
+                f"{len(formulated_subs)} sub-concept(s), {len(overflow_raw)} overflow neighbor(s), "
+                f"{len(rewired)} total re-wire(s)."
             ),
             "timestamp": time.time(),
         }
@@ -520,6 +511,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             "parent_description": payload.parent_description,
             "sub_concepts": formulated_subs,
             "rewired_edges": rewired,
+            "overflow_neighbor_ids": overflow_neighbor_ids,
         }
 
     @staticmethod
@@ -597,6 +589,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             "sub_concepts": res["sub_concepts"],
             "rewired_edges": res["rewired_edges"],
             "partition_neighbor_ids": [nb["id"] for nb in neighbors],
+            "overflow_neighbor_ids": res.get("overflow_neighbor_ids", []),
         }
 
     def _process_reorg_queue(

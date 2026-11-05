@@ -16,6 +16,56 @@ from app.services.graph_analytics import MutableTreeIndex
 pytestmark = pytest.mark.xdist_group(name="worker1")
 
 
+def _partition_payload_json(
+    n_neighbors: int,
+    num_subs: int = 2,
+    parent_title: str = "Umbrella",
+    parent_description: str = "Desc",
+) -> dict:
+    """Valid three-list partition: ≥2 edges per sub, overflow for remainder."""
+    num_subs = min(num_subs, max(2, n_neighbors // 2))
+    subs = [
+        {
+            "sub_id_alias": f"sub_{i + 1}",
+            "title": f"Sub {i + 1}",
+            "description": "Synthesized.",
+        }
+        for i in range(num_subs)
+    ]
+    edges = []
+    overflow = []
+    idx = 1
+    for s in range(num_subs):
+        alias = f"sub_{s + 1}"
+        for _ in range(2):
+            if idx > n_neighbors:
+                break
+            edges.append(
+                {
+                    "neighbor_index": idx,
+                    "connect_to_sub_alias": alias,
+                    "relation_type": "RELEVANT_TO",
+                    "description": "Re-wired.",
+                }
+            )
+            idx += 1
+    while idx <= n_neighbors:
+        overflow.append(
+            {
+                "neighbor_index": idx,
+                "rationale": "Does not fit a ≥2-neighbor sub group.",
+            }
+        )
+        idx += 1
+    return {
+        "parent_title": parent_title,
+        "parent_description": parent_description,
+        "sub_concepts": subs,
+        "overflow_neighbors": overflow,
+        "rewired_edges": edges,
+    }
+
+
 def test_graph_navigator_shared_exploration():
     """Verify GraphNavigator.traverse_mutable_tree_from_genesis performs tree traversal up to max_depth."""
     hub_node = GraphNode(
@@ -284,31 +334,12 @@ def test_reorganize_overclustered_nodes_selects_qualifying_mutable_candidate(
             return '{"candidates": [{"candidate_index": 1, "rationale": "Over-clustered hub combining distinct themes."}]}'
         if "unified partition" in sys_content.lower():
             return json.dumps(
-                {
-                    "parent_title": "Everything",
-                    "parent_description": "Universal domain hub updated to accommodate all sub-concepts.",
-                    "sub_concepts": [
-                        {
-                            "sub_id_alias": "sub_1",
-                            "title": "Sub 1",
-                            "description": "Synthesized description of Sub 1.",
-                        },
-                        {
-                            "sub_id_alias": "sub_2",
-                            "title": "Sub 2",
-                            "description": "Synthesized description of Sub 2.",
-                        },
-                    ],
-                    "rewired_edges": [
-                        {
-                            "neighbor_index": i,
-                            "connect_to_sub_alias": "sub_1" if i % 2 else "sub_2",
-                            "relation_type": "RELEVANT_TO",
-                            "description": "Re-wired.",
-                        }
-                        for i in range(1, 6)
-                    ],
-                }
+                _partition_payload_json(
+                    5,
+                    num_subs=2,
+                    parent_title="Everything",
+                    parent_description="Universal domain hub updated.",
+                )
             )
         return "{}"
 
@@ -398,31 +429,12 @@ def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_s
             if "max_coverage" in messages[1]["content"]:
                 captured_modes.append("max_coverage")
             return json.dumps(
-                {
-                    "parent_title": "AI Foundations & Generative Models",
-                    "parent_description": "Overarching domain accommodating Sub A and Sub B.",
-                    "sub_concepts": [
-                        {
-                            "sub_id_alias": "sub_a",
-                            "title": "Sub A",
-                            "description": "Desc A",
-                        },
-                        {
-                            "sub_id_alias": "sub_b",
-                            "title": "Sub B",
-                            "description": "Desc B",
-                        },
-                    ],
-                    "rewired_edges": [
-                        {
-                            "neighbor_index": i,
-                            "connect_to_sub_alias": "sub_a" if i <= 3 else "sub_b",
-                            "relation_type": "RELEVANT_TO",
-                            "description": "Re-wired.",
-                        }
-                        for i in range(1, 7)
-                    ],
-                }
+                _partition_payload_json(
+                    6,
+                    num_subs=2,
+                    parent_title="AI Foundations & Generative Models",
+                    parent_description="Overarching domain accommodating sub groups.",
+                )
             )
         return "{}"
 
@@ -609,8 +621,8 @@ def test_reorganize_overclustered_nodes_updates_parent_hub_title_and_description
     )
 
 
-def test_reorganize_overclustered_nodes_caps_subconcepts_to_half_degree(monkeypatch):
-    """Verify that formulated sub-concepts are strictly capped to max(2, n // 2) for compression."""
+def test_reorganize_overclustered_nodes_validates_sub_count_via_llm_retry(monkeypatch):
+    """Invalid partition (too many subs) triggers retry; valid payload commits."""
     import json
 
     project_id = "proj_cap_half_degree_test"
@@ -644,37 +656,29 @@ def test_reorganize_overclustered_nodes_caps_subconcepts_to_half_degree(monkeypa
         )
 
     agent = GraphNavigator("global")
+    partition_calls = 0
 
     def mock_chat_completion(messages, **kwargs):
+        nonlocal partition_calls
         sys_content = messages[0]["content"]
         if "reorganize_discover" in sys_content or "candidates" in sys_content:
             return (
                 '{"candidates": [{"candidate_index": 1, "rationale": "Degree >= 5"}]}'
             )
         if "unified partition" in sys_content.lower():
-            return json.dumps(
-                {
-                    "parent_title": "Generalized Umbrella Hub",
-                    "parent_description": "Accommodating all sub-concepts.",
-                    "sub_concepts": [
-                        {
-                            "sub_id_alias": f"sub_{i}",
-                            "title": f"Sub {i}",
-                            "description": f"Desc {i}",
-                        }
-                        for i in range(4)
-                    ],
-                    "rewired_edges": [
-                        {
-                            "neighbor_index": i + 1,
-                            "connect_to_sub_alias": f"sub_{i}",
-                            "relation_type": "RELEVANT_TO",
-                            "description": "Re-wired.",
-                        }
-                        for i in range(5)
-                    ],
-                }
-            )
+            partition_calls += 1
+            if partition_calls == 1:
+                bad = _partition_payload_json(5, num_subs=2)
+                bad["sub_concepts"] = [
+                    {
+                        "sub_id_alias": f"sub_{i}",
+                        "title": f"Sub {i}",
+                        "description": "d",
+                    }
+                    for i in range(4)
+                ]
+                return json.dumps(bad)
+            return json.dumps(_partition_payload_json(5, num_subs=2))
         return "{}"
 
     from app.services.llm_gateway import llm_gateway
@@ -687,33 +691,9 @@ def test_reorganize_overclustered_nodes_caps_subconcepts_to_half_degree(monkeypa
         degree_threshold=5,
     )
 
+    assert partition_calls >= 2
     assert len(res["commands"]) == 1
-    cmd = res["commands"][0]
-    assert cmd["action"] == "SPLIT_CONCEPT"
-    # For n = 5 neighbors, max allowed sub-concepts is 5 // 2 = 2
-    assert len(cmd["sub_concepts"]) == 2
-
-
-def test_cap_sub_concepts_and_remap_rewires():
-    from app.agents.graph_navigator import _cap_sub_concepts_and_remap_rewires
-
-    subs = [{"sub_id_alias": f"sub_{i}"} for i in range(4)]
-    rewires = [
-        {
-            "neighbor_index": i + 1,
-            "connect_to_sub_alias": f"sub_{i}",
-            "relation_type": "RELEVANT_TO",
-        }
-        for i in range(4)
-    ]
-    capped_subs, capped_rewires = _cap_sub_concepts_and_remap_rewires(
-        subs, rewires, max_allowed_subs=2, overflow_alias="ANCESTOR"
-    )
-    assert len(capped_subs) == 2
-    assert capped_subs[0]["sub_id_alias"] == "sub_0"
-    assert capped_subs[1]["sub_id_alias"] == "sub_1"
-    for edge in capped_rewires:
-        assert edge["connect_to_sub_alias"] in ("sub_0", "sub_1", "ANCESTOR")
+    assert len(res["commands"][0]["sub_concepts"]) == 2
 
 
 def test_reorg_partition_prompt_injects_strategy_without_jinja():
@@ -727,27 +707,30 @@ def test_reorg_partition_prompt_injects_strategy_without_jinja():
         node_id="concept_genesis",
         mode="max_coverage",
         split_strategy_block=block,
-        overflow_alias=overflow,
-        min_allowed_sub_concepts=2,
+        overflow_target_label="Everything (Genesis)",
+        min_sub_concepts=1,
+        min_sub_neighbors=2,
         max_allowed_sub_concepts=3,
         neighbor_count=7,
     )
     assert "{%" not in prompt
     assert "WRAPPER SPLIT" in prompt
-    assert "EVERYTHING" in prompt
+    assert "overflow_neighbors" in prompt
+    assert "MIN-2 PER SUB" in prompt
 
-    block_r, overflow_r = _reorg_split_strategy_block(is_genesis=False)
+    block_r, _overflow_r = _reorg_split_strategy_block(is_genesis=False)
     prompt_r = load_prompt(
         "graph_reorg_partition",
         department_name="Graph Navigator",
         node_id="hub_x",
         mode="max_coverage",
         split_strategy_block=block_r,
-        overflow_alias=overflow_r,
-        min_allowed_sub_concepts=2,
+        overflow_target_label="the tree ancestor",
+        min_sub_concepts=1,
+        min_sub_neighbors=2,
         max_allowed_sub_concepts=3,
         neighbor_count=7,
     )
     assert "REPLACEMENT SPLIT" in prompt_r
     assert "sub_1" in prompt_r
-    assert "ANCESTOR" in prompt_r
+    assert "overflow_neighbors" in prompt_r

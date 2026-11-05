@@ -324,6 +324,11 @@ class ReorgRewirePayload(BaseModel):
     rewired_edges: List[RewireEdgeItem]
 
 
+class OverflowNeighborItem(BaseModel):
+    neighbor_index: int
+    rationale: str = ""
+
+
 class ReorgPartitionPayload(BaseModel):
     parent_title: str = Field(
         ...,
@@ -333,8 +338,15 @@ class ReorgPartitionPayload(BaseModel):
         ...,
         description="Updated comprehensive description for the split target synthesizing its broader scope.",
     )
-    sub_concepts: List[SubConceptItem]
-    rewired_edges: List[RewireEdgeItem]
+    sub_concepts: List[SubConceptItem] = Field(
+        ...,
+        description="At least one sub-concept; each must receive ≥2 neighbors via rewired_edges.",
+    )
+    overflow_neighbors: List[OverflowNeighborItem] = Field(default_factory=list)
+    rewired_edges: List[RewireEdgeItem] = Field(
+        ...,
+        description="Sub-concept assignments only (sub_* aliases). Overflow neighbors go in overflow_neighbors.",
+    )
 
 
 class NodeGeneralizationItem(BaseModel):

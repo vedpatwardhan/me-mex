@@ -141,11 +141,17 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 3. If tree parent is hot **and** discover **siblings** under that parent are drained → **prepend parent hub ID** (FILO); split built on that hub’s pop.
 4. Repeat until queue empty; cascade prepends capped by **`MAX_UPWARD_REORG_ITERATIONS`** per Phase 4 pass. `plan_only` runs the pop/build loop without execute or cascade enqueue.
 
-**Partition (per hub):** One LLM call — **`graph_reorg_partition`** (`ReorgPartitionPayload`: sub-concepts + `rewired_edges` together; `REORG_PARTITION_MAX_TOKENS` default 6144). Genesis vs replacement rules are injected in Python (no Jinja conditionals). Post-parse: **⌊n/2⌋** sub cap with rewire alias remap, then **`finalize_rewire_edges`**.
+**Partition (per hub):** One LLM call — **`graph_reorg_partition`** (`ReorgPartitionPayload`, `REORG_PARTITION_MAX_TOKENS` default 6144). Three lists:
 
-**Commit:** wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`). Each committed neighbor edge emits **`reorg_neighbor_rewired`** (`target_kind`: `sub_concept` | `genesis_everything` | `ancestor`) before the summary **`reorg_completed`** event.
+1. **`sub_concepts`** — at least one sub; each sub must have **≥ 2** neighbors in `rewired_edges` (LLM contract).
+2. **`overflow_neighbors`** — neighbors promoted to **Everything** (Genesis) or **ancestor** (replacement); not listed in `rewired_edges`.
+3. **`rewired_edges`** — **sub assignments only** (`sub_*` aliases).
 
-Cardinality: sub-concept count bounded by **⌊n/2⌋**. **`graph_health_metrics`** emitted once after the queue drains.
+Upstream **`effective_degree ≥ τ`** gates neighbor count before partition. Post-parse: **`validate_reorg_partition`** (retry on failure, no programmatic demotion) → **`merge_partition_to_engine_rewires`** → **`finalize_rewire_edges`**.
+
+**Commit:** wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`). Each committed neighbor edge emits **`reorg_neighbor_rewired`** before **`reorg_completed`**.
+
+Cardinality: **1 ≤** sub count **≤ ⌊n/2⌋**. **`graph_health_metrics`** emitted once after the queue drains.
 
 **Out of v0.2 scope:** `COLLAPSE_CONCEPT` (UI delete uses existing delete-node API); optional PPR/shortcut edges deferred.
 

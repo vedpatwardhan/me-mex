@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.db import db_engine
 from app.models import GraphEdge
@@ -77,6 +78,136 @@ def hub_neighbor_relations(
             continue
         relations[nb_id] = e.description or "RELEVANT_TO"
     return relations
+
+
+def max_allowed_sub_concepts(neighbor_count: int) -> int:
+    """Upper bound on sub-concepts for partition (⌊n/2⌋ compression invariant)."""
+    return max(2, neighbor_count // 2)
+
+
+def validate_reorg_partition(
+    sub_concepts: List[Dict[str, Any]],
+    overflow_neighbors: List[Dict[str, Any]],
+    sub_rewired_edges: List[Dict[str, Any]],
+    *,
+    neighbor_count: int,
+    min_sub_neighbors: int = 2,
+) -> Tuple[bool, List[str]]:
+    """
+    Validate three-list partition output (LLM contract). Does not mutate payload.
+    """
+    errors: List[str] = []
+    if neighbor_count < 1:
+        errors.append("neighbor_count must be positive.")
+        return False, errors
+
+    expected = set(range(1, neighbor_count + 1))
+
+    if len(sub_concepts) < 1:
+        errors.append("At least one sub_concept is required.")
+
+    max_subs = max_allowed_sub_concepts(neighbor_count)
+    if len(sub_concepts) > max_subs:
+        errors.append(
+            f"Too many sub_concepts ({len(sub_concepts)}); maximum is {max_subs} for n={neighbor_count}."
+        )
+
+    sub_aliases = {
+        (s.get("sub_id_alias") or "").strip()
+        for s in sub_concepts
+        if s.get("sub_id_alias")
+    }
+
+    sub_indices: Set[int] = set()
+    alias_loads: Dict[str, int] = defaultdict(int)
+
+    for edge in sub_rewired_edges:
+        alias = (edge.get("connect_to_sub_alias") or "").strip()
+        idx = edge.get("neighbor_index")
+        if is_overflow_rewire_alias(alias):
+            errors.append(
+                f"rewired_edges must not use overflow alias '{alias}' "
+                "(use overflow_neighbors instead)."
+            )
+            continue
+        if idx is None:
+            errors.append("rewired_edges entry missing neighbor_index.")
+            continue
+        if idx in sub_indices:
+            errors.append(f"Duplicate neighbor_index {idx} in rewired_edges.")
+        sub_indices.add(idx)
+        if alias not in sub_aliases:
+            errors.append(
+                f"rewired_edges references unknown sub alias '{alias}' (neighbor_index={idx})."
+            )
+        else:
+            alias_loads[alias] = alias_loads.get(alias, 0) + 1
+
+    overflow_indices: Set[int] = set()
+    for item in overflow_neighbors:
+        idx = item.get("neighbor_index")
+        if idx is None:
+            errors.append("overflow_neighbors entry missing neighbor_index.")
+            continue
+        if idx in overflow_indices:
+            errors.append(f"Duplicate neighbor_index {idx} in overflow_neighbors.")
+        overflow_indices.add(idx)
+
+    overlap = sub_indices & overflow_indices
+    if overlap:
+        errors.append(
+            f"neighbor_index overlap between rewired_edges and overflow_neighbors: {sorted(overlap)}."
+        )
+
+    covered = sub_indices | overflow_indices
+    missing = expected - covered
+    extra = covered - expected
+    if missing:
+        errors.append(
+            f"Missing neighbor indices (1..{neighbor_count}): {sorted(missing)}."
+        )
+    if extra:
+        errors.append(
+            f"Unknown neighbor indices outside partition batch: {sorted(extra)}."
+        )
+
+    for alias in sub_aliases:
+        load = alias_loads.get(alias, 0)
+        if load < min_sub_neighbors:
+            errors.append(
+                f"Sub '{alias}' has {load} neighbor(s) in rewired_edges; "
+                f"minimum is {min_sub_neighbors} (move singletons to overflow_neighbors)."
+            )
+
+    for alias, load in alias_loads.items():
+        if alias not in sub_aliases:
+            errors.append(f"rewired_edges uses undeclared sub alias '{alias}'.")
+
+    return len(errors) == 0, errors
+
+
+def merge_partition_to_engine_rewires(
+    sub_rewired_edges: List[Dict[str, Any]],
+    overflow_neighbors: List[Dict[str, Any]],
+    overflow_alias: str,
+) -> List[Dict[str, Any]]:
+    """Combine sub-only rewired_edges with overflow_neighbors for engine commit."""
+    merged: List[Dict[str, Any]] = []
+    for edge in sub_rewired_edges:
+        merged.append(dict(edge))
+    for item in overflow_neighbors:
+        idx = item.get("neighbor_index")
+        if idx is None:
+            continue
+        merged.append(
+            {
+                "neighbor_index": idx,
+                "connect_to_sub_alias": overflow_alias,
+                "relation_type": "RELEVANT_TO",
+                "description": item.get("rationale") or "Overflow neighbor promotion.",
+            }
+        )
+    return merged
 
 
 def finalize_rewire_edges(
