@@ -143,7 +143,7 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 
 **Partition (per hub):** One LLM call — **`graph_reorg_partition`** (`ReorgPartitionPayload`: sub-concepts + `rewired_edges` together; `REORG_PARTITION_MAX_TOKENS` default 6144). Genesis vs replacement rules are injected in Python (no Jinja conditionals). Post-parse: **⌊n/2⌋** sub cap with rewire alias remap, then **`finalize_rewire_edges`**.
 
-**Commit:** wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`).
+**Commit:** wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`). Each committed neighbor edge emits **`reorg_neighbor_rewired`** (`target_kind`: `sub_concept` | `genesis_everything` | `ancestor`) before the summary **`reorg_completed`** event.
 
 Cardinality: sub-concept count bounded by **⌊n/2⌋**. **`graph_health_metrics`** emitted once after the queue drains.
 

@@ -660,6 +660,13 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             cmd["navigator_name"] = self.navigator_name
             evt = engine.execute_single_command(cmd, doc_title, projects)
             if evt:
+                rewire_detail = evt.pop("rewire_events", None) or []
+                for detail in rewire_detail:
+                    detail.setdefault("persona_id", self.department_id)
+                    detail.setdefault("department_name", self.department_name)
+                    emitted_events.append(detail)
+                evt["persona_id"] = self.department_id
+                evt["department_name"] = self.department_name
                 emitted_events.append(evt)
             splits_executed += 1
             graph_analytics.refresh_tree_metadata(project_id)

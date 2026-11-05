@@ -57,10 +57,15 @@ def test_wrapper_split_mints_departments_under_genesis():
             for i in range(7)
         ],
     }
-    graph_ingestion_engine.execute_single_command(cmd, "sim", proj)
+    evt = graph_ingestion_engine.execute_single_command(cmd, "sim", proj)
     tree = MutableTreeIndex(project_id=proj[0])
     depts = tree.mutable_children(genesis.id)
     assert len(depts) >= 2
+    rewire_events = evt.get("rewire_events") or []
+    assert len(rewire_events) == 7
+    assert all(e["event"] == "reorg_neighbor_rewired" for e in rewire_events)
+    kinds = {e["target_kind"] for e in rewire_events}
+    assert kinds == {"sub_concept"}
 
 
 def _genesis_wrapper_children(project_id: str, genesis_id: str) -> list:
@@ -327,6 +332,11 @@ def test_replacement_split_ancestor_leftover_no_link_class():
     }
     evt = graph_ingestion_engine.execute_single_command(cmd, "sim", proj)
     assert evt.get("ungrouped_to_ancestor_count") == 1
+    rewire_events = evt.get("rewire_events") or []
+    by_source = {e["source_id"]: e for e in rewire_events}
+    assert by_source["imm_l"]["target_kind"] == "ancestor"
+    assert by_source["imm_l"]["target_id"] == "p_anc"
+    assert by_source["imm_g"]["target_kind"] == "sub_concept"
     edges = db_engine.get_edges(proj[0])
     leftover_targets = [
         e.target_id

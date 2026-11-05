@@ -289,6 +289,20 @@ class RichLogger:
                 f"{proj_badge}   │   • [cyan]Node Touched[/cyan]: '{node}'{detail_str}"
             )
 
+        elif event_type == "reorg_neighbor_rewired":
+            msg = event_data.get("message") or (
+                f"{event_data.get('source_title', '?')} → "
+                f"{event_data.get('target_title', '?')} "
+                f"({event_data.get('target_kind', 'sub_concept')})"
+            )
+            console.print(f"{proj_badge}   │   • [yellow]Reorg rewire[/yellow]: {msg}")
+
+        elif event_type == "reorg_completed":
+            msg = event_data.get("message", "Reorganization commit completed.")
+            console.print(
+                f"{proj_badge}   ├─ [bold blue]Reorg completed[/bold blue]: {msg}"
+            )
+
         elif event_type == "ingestion_completed":
             msg = event_data.get(
                 "message",

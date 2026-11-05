@@ -320,6 +320,14 @@ export const useMemexStore = create<MemexState>((set, get) => ({
               logMsg = eventData.message || `Persona [${eventData.department_name}]: Reorganization discovery complete.`;
             } else if (evtType === 'reorg_candidate_skipped') {
               logMsg = eventData.message || `Persona [${eventData.department_name}]: Skipped candidate node (${eventData.reason}).`;
+            } else if (evtType === 'reorg_partition_completed') {
+              logMsg =
+                eventData.message ||
+                `Reorg partition: ${eventData.sub_concepts_count ?? ''} sub-concept(s), ${eventData.rewired_edges_count ?? ''} planned re-wires.`;
+            } else if (evtType === 'reorg_neighbor_rewired') {
+              logMsg = eventData.message || `Re-wired "${eventData.source_title || eventData.source_id}".`;
+            } else if (evtType === 'reorg_completed') {
+              logMsg = eventData.message || `Reorganization completed for "${eventData.node_title || eventData.node_id}".`;
             } else if (evtType === 'ingestion_completed') {
               logMsg = eventData.message || `Document ingestion completed.`;
             }

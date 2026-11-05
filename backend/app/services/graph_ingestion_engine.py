@@ -29,6 +29,33 @@ def _ancestor_aliases(sub_alias: str) -> bool:
     return is_overflow_rewire_alias(sub_alias)
 
 
+def _rewire_target_kind(
+    raw_alias: str,
+    *,
+    is_genesis_split: bool,
+    used_overflow_fallback: bool,
+) -> str:
+    """Classify where a neighbor landed after reorg commit."""
+    alias_upper = (raw_alias or "").upper()
+    if alias_upper == "EVERYTHING" or (is_genesis_split and used_overflow_fallback):
+        return "genesis_everything"
+    if alias_upper in ("ANCESTOR", "UNCLUSTERED", "MISC", "PARENT") or (
+        not is_genesis_split and used_overflow_fallback
+    ):
+        return "ancestor"
+    return "sub_concept"
+
+
+def _rewire_target_label(kind: str, target_node: Optional[GraphNode]) -> str:
+    if kind == "genesis_everything":
+        return "Everything (Genesis)"
+    if kind == "ancestor":
+        title = target_node.title if target_node else "ancestor"
+        return f"ancestor '{title}'"
+    title = target_node.title if target_node else "sub-concept"
+    return f"sub-concept '{title}'"
+
+
 class GraphIngestionEngine:
     """Zero-consensus command execution with engine-dispatch reorganization commits."""
 
@@ -239,8 +266,9 @@ class GraphIngestionEngine:
             )
 
         current_edges = self.db.get_edges(project_scope)
-        deleted_neighbors, ungrouped = self._rewire_neighbors(
+        deleted_neighbors, ungrouped, rewire_events = self._rewire_neighbors(
             split_target_id=concept_id,
+            split_hub_title=target_node.title,
             fallback_target_id=concept_id,
             rewired_edges=rewired_edges,
             sub_alias_map=sub_alias_map,
@@ -263,6 +291,7 @@ class GraphIngestionEngine:
                 f"Genesis wrapper split: {len(sub_alias_map)} intermediate concept(s) minted, "
                 f"{len(deleted_neighbors)} neighbors rewired, {ungrouped} left on Everything."
             ),
+            "rewire_events": rewire_events,
             "timestamp": time.time(),
         }
 
@@ -344,8 +373,9 @@ class GraphIngestionEngine:
             )
         )
 
-        deleted, ungrouped = self._rewire_neighbors(
+        deleted, ungrouped, rewire_events = self._rewire_neighbors(
             split_target_id=target_node.id,
+            split_hub_title=target_node.title,
             fallback_target_id=parent_id,
             rewired_edges=rewired_edges,
             sub_alias_map=sub_alias_map,
@@ -364,6 +394,7 @@ class GraphIngestionEngine:
                 f"{len(sub_concepts)} sibling concept(s), {len(deleted)} rewired, "
                 f"{ungrouped} promoted to ancestor."
             ),
+            "rewire_events": rewire_events,
             "timestamp": time.time(),
         }
         return evt, ungrouped
@@ -371,15 +402,18 @@ class GraphIngestionEngine:
     def _rewire_neighbors(
         self,
         split_target_id: str,
+        split_hub_title: str,
         fallback_target_id: str,
         rewired_edges: List[Dict],
         sub_alias_map: Dict[str, str],
         current_edges: List[GraphEdge],
         proj_list: List[str],
         is_genesis_split: bool,
-    ) -> tuple[Set[str], int]:
+    ) -> tuple[Set[str], int, List[Dict[str, Any]]]:
         deleted_neighbors: Set[str] = set()
         ungrouped_count = 0
+        rewire_events: List[Dict[str, Any]] = []
+        ts = time.time()
         for rewired in rewired_edges:
             neighbor_id = rewired.get("neighbor_id")
             raw_alias = rewired.get("connect_to_sub_alias") or ""
@@ -397,14 +431,17 @@ class GraphIngestionEngine:
                         self.db.delete_edge(old_edge.id)
                 deleted_neighbors.add(neighbor_id)
 
+            used_overflow_fallback = False
             if _ancestor_aliases(raw_alias):
                 target_id = fallback_target_id
                 ungrouped_count += 1
+                used_overflow_fallback = True
             else:
                 target_id = sub_alias_map.get(raw_alias)
             if not target_id:
                 target_id = fallback_target_id
                 ungrouped_count += 1
+                used_overflow_fallback = True
 
             relation = resolve_rewire_relation_type(
                 neighbor_id,
@@ -421,7 +458,36 @@ class GraphIngestionEngine:
                     project_ids=proj_list,
                 )
             )
-        return deleted_neighbors, ungrouped_count
+
+            neighbor_node = self.db.get_node(neighbor_id)
+            target_node = self.db.get_node(target_id)
+            target_kind = _rewire_target_kind(
+                raw_alias,
+                is_genesis_split=is_genesis_split,
+                used_overflow_fallback=used_overflow_fallback,
+            )
+            target_label = _rewire_target_label(target_kind, target_node)
+            neighbor_title = neighbor_node.title if neighbor_node else neighbor_id
+            rewire_events.append(
+                {
+                    "event": "reorg_neighbor_rewired",
+                    "split_hub_id": split_target_id,
+                    "split_hub_title": split_hub_title,
+                    "source_id": neighbor_id,
+                    "source_title": neighbor_title,
+                    "target_id": target_id,
+                    "target_title": target_node.title if target_node else target_id,
+                    "target_kind": target_kind,
+                    "connect_to_sub_alias": raw_alias,
+                    "relation_type": relation,
+                    "description": rewired.get("description") or "",
+                    "message": (
+                        f"Re-wired '{neighbor_title}' → {target_label} ({relation})."
+                    ),
+                    "timestamp": ts,
+                }
+            )
+        return deleted_neighbors, ungrouped_count, rewire_events
 
 
 def _is_subset_edge(edge: GraphEdge) -> bool:
