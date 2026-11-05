@@ -118,7 +118,7 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 ### 4.1 Tree traversal
 
 1. Start at `get_genesis_node(project_id)`; inject Genesis **description** as scope.
-2. Each hop: LLM selects mutable **tree children** (`SUBSET_OF` backbone); immutables shown but not expandable.
+2. Each hop: LLM selects mutable **tree children** (metadata-backed backbone); immutables shown but not expandable.
 3. Depth capped by `MAX_TRAVERSAL_DEPTH` (default 3–4); depth penalty in prompt.
 4. Returns `explored_nodes`, `traversed_node_ids`, and `node_touched` entries in `emitted_events` (orchestrator persists to the event queue when streaming).
 
@@ -149,7 +149,7 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 
 Upstream **`effective_degree ≥ τ`** gates neighbor count before partition. Post-parse: **`validate_reorg_partition`** (retry on failure, no programmatic demotion) → **`merge_partition_to_engine_rewires`** → **`finalize_rewire_edges`**.
 
-**Commit:** wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`). Each committed neighbor edge emits **`reorg_neighbor_rewired`** before **`reorg_completed`**.
+**Commit:** wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`). Replacement splits **sever** the split target’s link to its tree parent, then attach each sub via uniform edges and `mutable_parent_id` metadata. Graph edges are **unweighted and undifferentiated** (optional NL `description` only). Partition neighbor batches **exclude** mutable tree children when splitting a parent hub. Each committed neighbor edge emits **`reorg_neighbor_rewired`** before **`reorg_completed`**.
 
 Cardinality: **1 ≤** sub count **≤ ⌊n/2⌋**. **`graph_health_metrics`** emitted once after the queue drains.
 

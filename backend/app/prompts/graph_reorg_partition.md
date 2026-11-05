@@ -30,7 +30,7 @@ Overflow neighbors are promoted to **{{ overflow_target_label }}** at commit tim
 |------|---------|
 | `sub_concepts` | Sub-hubs to mint / replacement siblings (`sub_1`, `sub_2`, …). Count: **{{ min_sub_concepts }}** to **{{ max_allowed_sub_concepts }}** (≤ n // 2). |
 | `overflow_neighbors` | `{ neighbor_index, rationale }` for orphans → {{ overflow_target_label }}. |
-| `rewired_edges` | **Sub assignments only** — `{ neighbor_index, connect_to_sub_alias: "sub_*", relation_type, description }`. **No** EVERYTHING/ANCESTOR here. |
+| `rewired_edges` | **Sub assignments only** — `{ neighbor_index, connect_to_sub_alias: "sub_*", description }`. **No** EVERYTHING/ANCESTOR here. |
 
 **Coverage:** Every neighbor index **1..{{ neighbor_count }}** appears **exactly once** — either in `rewired_edges` or in `overflow_neighbors`.
 
@@ -64,8 +64,7 @@ Return JSON format strictly:
     {
       "neighbor_index": 1,
       "connect_to_sub_alias": "sub_1",
-      "relation_type": "RELEVANT_TO",
-      "description": "Re-wired connection."
+      "description": "Optional natural-language note for the new link."
     }
   ]
 }

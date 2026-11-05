@@ -20,7 +20,7 @@ CRITICAL INGESTION & TOPOLOGY INVARIANTS:
 
 Command action (only):
 - "CREATE_EDGE": Connect an immutable intra-document concept (source_index) to an explored mutable target (target_index).
-- edge: {"source_index": 1, "target_index": 2, "relation_type": "SUBSET_OF" | "SUPERSET_OF" | "RELEVANT_TO" | "BUILDS_UPON" | "SUPERSEDES" | "PARALLEL_TO" | "CONTRASTS_WITH", "description": "..."}
+- edge: {"source_index": 1, "target_index": 2, "description": "Optional natural-language rationale for the link."}
 
 Return JSON format strictly:
 {
@@ -30,7 +30,6 @@ Return JSON format strictly:
       "edge": {
         "source_index": 1,
         "target_index": 2,
-        "relation_type": "RELEVANT_TO",
         "description": "Specific rationale connecting concept to target node."
       }
     }

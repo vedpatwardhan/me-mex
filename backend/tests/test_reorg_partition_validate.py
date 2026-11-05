@@ -18,14 +18,12 @@ def test_validate_accepts_sub_and_overflow_split():
         {
             "neighbor_index": i,
             "connect_to_sub_alias": "sub_1",
-            "relation_type": "RELEVANT_TO",
         }
         for i in (1, 2)
     ] + [
         {
             "neighbor_index": i,
             "connect_to_sub_alias": "sub_2",
-            "relation_type": "RELEVANT_TO",
         }
         for i in (3, 4)
     ]
@@ -46,7 +44,6 @@ def test_validate_rejects_singleton_sub():
         {
             "neighbor_index": 1,
             "connect_to_sub_alias": "sub_1",
-            "relation_type": "RELEVANT_TO",
         },
     ]
     ok, errs = validate_reorg_partition(subs, overflow, edges, neighbor_count=2)
@@ -60,17 +57,14 @@ def test_validate_rejects_overflow_alias_in_rewired_edges():
         {
             "neighbor_index": 1,
             "connect_to_sub_alias": "sub_1",
-            "relation_type": "RELEVANT_TO",
         },
         {
             "neighbor_index": 2,
             "connect_to_sub_alias": "sub_1",
-            "relation_type": "RELEVANT_TO",
         },
         {
             "neighbor_index": 3,
             "connect_to_sub_alias": "ANCESTOR",
-            "relation_type": "RELEVANT_TO",
         },
     ]
     ok, errs = validate_reorg_partition(subs, [], edges, neighbor_count=3)
@@ -90,7 +84,6 @@ def test_validate_rejects_too_many_subs():
                 {
                     "neighbor_index": idx,
                     "connect_to_sub_alias": f"sub_{s}",
-                    "relation_type": "RELEVANT_TO",
                 }
             )
             idx += 1
@@ -104,12 +97,10 @@ def test_merge_adds_overflow_with_engine_alias():
         {
             "neighbor_index": 1,
             "connect_to_sub_alias": "sub_1",
-            "relation_type": "RELEVANT_TO",
         },
         {
             "neighbor_index": 2,
             "connect_to_sub_alias": "sub_1",
-            "relation_type": "RELEVANT_TO",
         },
     ]
     overflow = [{"neighbor_index": 3, "rationale": "orphan"}]

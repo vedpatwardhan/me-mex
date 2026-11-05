@@ -1,4 +1,4 @@
-"""Tests for scratchpad-aligned reorg v0.2.2 (closure, SUBSET_OF, queue, partition scope)."""
+"""Tests for scratchpad-aligned reorg v0.2.2 (closure, queue, partition scope)."""
 
 import pytest
 
@@ -6,10 +6,8 @@ from app.services.reorg_queue import cascade_parent_id
 from app.db import db_engine
 from app.models import GraphEdge, GraphNode
 from app.services.graph_ingestion_engine import graph_ingestion_engine
-from app.services.reorg_rewire_utils import (
-    finalize_rewire_edges,
-    resolve_rewire_relation_type,
-)
+from app.services.reorg_rewire_utils import finalize_rewire_edges
+from app.services.graph_link_utils import MUTABLE_PARENT_META_KEY
 
 
 @pytest.fixture
@@ -68,7 +66,6 @@ def test_finalize_rewire_edges_closes_missing_neighbors(project_id):
         {
             "neighbor_id": "imm_a",
             "connect_to_sub_alias": "sub_1",
-            "relation_type": "RELEVANT_TO",
         }
     ]
     closed = finalize_rewire_edges(
@@ -118,12 +115,15 @@ def test_split_engine_closure_removes_stale_hub_edge(project_id):
     )
     for node in (parent, hub, n1, n2):
         db_engine.upsert_node(node)
+    hub.metadata[MUTABLE_PARENT_META_KEY] = "parent_p"
+    db_engine.upsert_node(parent)
+    db_engine.upsert_node(hub)
     db_engine.upsert_edge(
         GraphEdge(
             _id="sub",
             source_id="hub_stale",
             target_id="parent_p",
-            description="SUBSET_OF",
+            description="",
             project_ids=[project_id],
         )
     )
@@ -141,8 +141,6 @@ def test_split_engine_closure_removes_stale_hub_edge(project_id):
     split_cmd = {
         "action": "SPLIT_CONCEPT",
         "concept_id": "hub_stale",
-        "parent_title": "Hub Refined",
-        "parent_description": "Desc",
         "sub_concepts": [
             {
                 "sub_id_alias": "sub_1",
@@ -154,7 +152,6 @@ def test_split_engine_closure_removes_stale_hub_edge(project_id):
             {
                 "neighbor_id": "n1",
                 "connect_to_sub_alias": "sub_1",
-                "relation_type": "RELEVANT_TO",
             }
         ],
         "partition_neighbor_ids": ["n1", "n2"],
@@ -170,45 +167,6 @@ def test_split_engine_closure_removes_stale_hub_edge(project_id):
     assert len(n2_edges) == 1
     n1_edges = [e for e in edges if e.source_id == "n1" and e.target_id == "hub_stale"]
     assert len(n1_edges) == 1
-
-
-def test_resolve_rewire_preserves_subset_for_mutable_child(project_id):
-    parent = GraphNode(
-        _id="par",
-        node_type="CONCEPT",
-        title="P",
-        description="",
-        project_ids=[project_id],
-        metadata={"immutable": False},
-    )
-    hub = GraphNode(
-        _id="hub_m",
-        node_type="CONCEPT",
-        title="H",
-        description="",
-        project_ids=[project_id],
-        metadata={"immutable": False},
-    )
-    child = GraphNode(
-        _id="child_m",
-        node_type="CONCEPT",
-        title="Child",
-        description="",
-        project_ids=[project_id],
-        metadata={"immutable": False},
-    )
-    for n in (parent, hub, child):
-        db_engine.upsert_node(n)
-    old = GraphEdge(
-        _id="tree_e",
-        source_id="child_m",
-        target_id="hub_m",
-        description="SUBSET_OF",
-        project_ids=[project_id],
-    )
-    db_engine.upsert_edge(old)
-    rel = resolve_rewire_relation_type("child_m", "hub_m", [old], "RELEVANT_TO")
-    assert rel == "SUBSET_OF"
 
 
 def test_reorg_cascade_parent_id_genesis_and_child():
@@ -229,7 +187,7 @@ def test_reorg_cascade_parent_id_genesis_and_child():
         title="Child",
         description="",
         project_ids=[project_id],
-        metadata={"immutable": False},
+        metadata={"immutable": False, MUTABLE_PARENT_META_KEY: "concept_genesis"},
     )
     db_engine.upsert_node(genesis)
     db_engine.upsert_node(child)
@@ -238,7 +196,7 @@ def test_reorg_cascade_parent_id_genesis_and_child():
             _id="c_g",
             source_id="child_hub",
             target_id="concept_genesis",
-            description="SUBSET_OF",
+            description="",
             project_ids=[project_id],
         )
     )

@@ -11,10 +11,14 @@ from app.db import db_engine
 from app.models import GraphNode, GraphEdge
 from app.services.event_queue import event_queue
 from app.services.graph_analytics import MutableTreeIndex, graph_analytics
+from app.services.graph_link_utils import (
+    delete_edges_between,
+    link_nodes,
+    set_mutable_parent,
+)
 from app.services.reorg_rewire_utils import (
     finalize_rewire_edges,
     is_overflow_rewire_alias,
-    resolve_rewire_relation_type,
     sub_aliases_with_assigned_neighbors,
 )
 
@@ -54,6 +58,11 @@ def _rewire_target_label(kind: str, target_node: Optional[GraphNode]) -> str:
         return f"ancestor '{title}'"
     title = target_node.title if target_node else "sub-concept"
     return f"sub-concept '{title}'"
+
+
+def _rewire_note_from_payload(rewired: Dict[str, Any]) -> str:
+    """Optional natural-language note from partition LLM (stored on graph edge)."""
+    return (rewired.get("description") or "").strip()
 
 
 class GraphIngestionEngine:
@@ -102,15 +111,13 @@ class GraphIngestionEngine:
             ):
                 return None
 
-        edge_id = f"edge_{uuid.uuid4().hex[:8]}"
-        edge_obj = GraphEdge(
-            _id=edge_id,
-            source_id=src_id,
-            target_id=tgt_id,
-            description=edge_data.get("description", "RELEVANT_TO"),
-            project_ids=proj_list,
+        link_nodes(
+            src_id,
+            tgt_id,
+            proj_list,
+            description=(edge_data.get("description") or "").strip(),
+            project_scope=project_scope,
         )
-        self.db.upsert_edge(edge_obj)
         tgt_node = self.db.get_node(tgt_id)
         src_node = self.db.get_node(src_id)
         return {
@@ -139,15 +146,21 @@ class GraphIngestionEngine:
             metadata={"immutable": False, "status": "PRIMARY_ACTIVE"},
         )
         self.db.upsert_node(new_node)
+        project_scope = proj_list[0] if proj_list else None
         for edge_info in item.get("edges", []):
-            edge_obj = GraphEdge(
-                _id=f"edge_{uuid.uuid4().hex[:8]}",
-                source_id=edge_info.get("source_id", c_id),
-                target_id=edge_info.get("target_id", c_id),
-                description=edge_info.get("description", "SUBSET_OF"),
-                project_ids=proj_list,
+            src = edge_info.get("source_id", c_id)
+            tgt = edge_info.get("target_id", c_id)
+            link_nodes(
+                src,
+                tgt,
+                proj_list,
+                description=(edge_info.get("description") or "").strip(),
+                project_scope=project_scope,
             )
-            self.db.upsert_edge(edge_obj)
+            if src == c_id and tgt != c_id:
+                parent = self.db.get_node(tgt)
+                if parent and not parent.is_immutable:
+                    set_mutable_parent(c_id, tgt, proj_list, project_scope)
         return {
             "event": "node_touched",
             "persona_id": persona_id,
@@ -255,15 +268,7 @@ class GraphIngestionEngine:
                 metadata={"immutable": False, "split_under_genesis": concept_id},
             )
             self.db.upsert_node(sub_node)
-            self.db.upsert_edge(
-                GraphEdge(
-                    _id=f"edge_{uuid.uuid4().hex[:8]}",
-                    source_id=new_sub_id,
-                    target_id=concept_id,
-                    description="SUBSET_OF",
-                    project_ids=proj_list,
-                )
-            )
+            set_mutable_parent(new_sub_id, concept_id, proj_list, project_scope)
 
         current_edges = self.db.get_edges(project_scope)
         deleted_neighbors, ungrouped, rewire_events = self._rewire_neighbors(
@@ -274,6 +279,7 @@ class GraphIngestionEngine:
             sub_alias_map=sub_alias_map,
             current_edges=current_edges,
             proj_list=proj_list,
+            project_scope=project_scope,
             is_genesis_split=True,
         )
 
@@ -316,18 +322,8 @@ class GraphIngestionEngine:
         if sub_concepts:
             first = sub_concepts[0]
             sub_alias_map[first.get("sub_id_alias", "sub_1")] = target_node.id
-            parent_title = item.get("parent_title") or item.get("hub_title")
-            parent_desc = item.get("parent_description") or item.get("hub_description")
-            if parent_title and not _is_genesis(target_node):
-                target_node.title = parent_title.strip()
-            else:
-                target_node.title = first.get("title", target_node.title)
-            if parent_desc:
-                target_node.description = parent_desc.strip()
-            else:
-                target_node.description = first.get(
-                    "description", target_node.description
-                )
+            target_node.title = first.get("title", target_node.title)
+            target_node.description = first.get("description", target_node.description)
             target_node.updated_at = time.time()
             self.db.upsert_node(target_node)
 
@@ -345,33 +341,10 @@ class GraphIngestionEngine:
                 metadata={"immutable": False, "lateral_split_of": target_node.id},
             )
             self.db.upsert_node(sibling)
-            self.db.upsert_edge(
-                GraphEdge(
-                    _id=f"edge_{uuid.uuid4().hex[:8]}",
-                    source_id=new_id,
-                    target_id=parent_id,
-                    description="SUBSET_OF",
-                    project_ids=proj_list,
-                )
-            )
 
-        current_edges = self.db.get_edges(project_scope)
-        for e in list(current_edges):
-            if (
-                e.source_id == target_node.id
-                and e.target_id == parent_id
-                and _is_subset_edge(e)
-            ):
-                self.db.delete_edge(e.id)
-        self.db.upsert_edge(
-            GraphEdge(
-                _id=f"edge_{uuid.uuid4().hex[:8]}",
-                source_id=target_node.id,
-                target_id=parent_id,
-                description="SUBSET_OF",
-                project_ids=proj_list,
-            )
-        )
+        delete_edges_between(target_node.id, parent_id, project_scope)
+        for sub_id in sub_alias_map.values():
+            set_mutable_parent(sub_id, parent_id, proj_list, project_scope)
 
         deleted, ungrouped, rewire_events = self._rewire_neighbors(
             split_target_id=target_node.id,
@@ -381,6 +354,7 @@ class GraphIngestionEngine:
             sub_alias_map=sub_alias_map,
             current_edges=self.db.get_edges(project_scope),
             proj_list=proj_list,
+            project_scope=project_scope,
             is_genesis_split=False,
         )
 
@@ -408,6 +382,7 @@ class GraphIngestionEngine:
         sub_alias_map: Dict[str, str],
         current_edges: List[GraphEdge],
         proj_list: List[str],
+        project_scope: Optional[str],
         is_genesis_split: bool,
     ) -> tuple[Set[str], int, List[Dict[str, Any]]]:
         deleted_neighbors: Set[str] = set()
@@ -443,20 +418,13 @@ class GraphIngestionEngine:
                 ungrouped_count += 1
                 used_overflow_fallback = True
 
-            relation = resolve_rewire_relation_type(
+            rewire_note = _rewire_note_from_payload(rewired)
+            link_nodes(
                 neighbor_id,
-                split_target_id,
-                current_edges,
-                rewired.get("relation_type"),
-            )
-            self.db.upsert_edge(
-                GraphEdge(
-                    _id=f"edge_{uuid.uuid4().hex[:8]}",
-                    source_id=neighbor_id,
-                    target_id=target_id,
-                    description=relation,
-                    project_ids=proj_list,
-                )
+                target_id,
+                proj_list,
+                description=rewire_note,
+                project_scope=project_scope,
             )
 
             neighbor_node = self.db.get_node(neighbor_id)
@@ -479,20 +447,12 @@ class GraphIngestionEngine:
                     "target_title": target_node.title if target_node else target_id,
                     "target_kind": target_kind,
                     "connect_to_sub_alias": raw_alias,
-                    "relation_type": relation,
-                    "description": rewired.get("description") or "",
-                    "message": (
-                        f"Re-wired '{neighbor_title}' → {target_label} ({relation})."
-                    ),
+                    "description": rewire_note,
+                    "message": (f"Re-wired '{neighbor_title}' → {target_label}."),
                     "timestamp": ts,
                 }
             )
         return deleted_neighbors, ungrouped_count, rewire_events
-
-
-def _is_subset_edge(edge: GraphEdge) -> bool:
-    desc = (edge.description or "").upper()
-    return "SUBSET_OF" in desc
 
 
 graph_ingestion_engine = GraphIngestionEngine()

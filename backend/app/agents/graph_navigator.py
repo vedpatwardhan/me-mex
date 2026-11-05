@@ -118,7 +118,6 @@ class GraphNavigator:
                             "id": neighbor_node.id,
                             "title": neighbor_node.title,
                             "body": neighbor_node.description,
-                            "relation_desc": e.description,
                             "node_type": neighbor_node.node_type,
                             "immutable": neighbor_node.is_immutable,
                         }
@@ -142,7 +141,6 @@ class GraphNavigator:
                     "title": child.title,
                     "body": child.description,
                     "description": child.description,
-                    "relation_desc": "SUBSET_OF",
                     "node_type": child.node_type,
                     "immutable": False,
                 }
@@ -154,7 +152,6 @@ class GraphNavigator:
                     "title": imm.title,
                     "body": imm.description,
                     "description": imm.description,
-                    "relation_desc": "RELEVANT_TO",
                     "node_type": imm.node_type,
                     "immutable": True,
                 }
@@ -469,7 +466,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 {
                     "neighbor_id": real_nb_id,
                     "connect_to_sub_alias": r.get("connect_to_sub_alias"),
-                    "relation_type": r.get("relation_type"),
                     "description": r.get("description", ""),
                 }
             )
@@ -518,7 +514,10 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
     def _neighbor_entries_for_hub(
         hub_id: str, project_id: str, tree: MutableTreeIndex
     ) -> List[Dict[str, Any]]:
-        """All direct neighbors of hub_id with metadata for partition prompts."""
+        """Direct neighbors eligible for partition (excludes mutable tree backbone)."""
+        from app.services.reorg_rewire_utils import hub_neighbor_ids
+
+        allowed = hub_neighbor_ids(hub_id, project_id)
         entries: List[Dict[str, Any]] = []
         seen: set[str] = set()
         for e in db_engine.get_edges(project_id):
@@ -532,13 +531,8 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 direction = "incoming"
             else:
                 continue
-            if not nb_id or nb_id in seen:
+            if not nb_id or nb_id in seen or nb_id not in allowed:
                 continue
-            parent_id = tree.parent_of(hub_id)
-            if parent_id and nb_id == parent_id:
-                desc = (e.description or "").upper()
-                if "SUBSET" in desc:
-                    continue
             seen.add(nb_id)
             nb_node = db_engine.get_node(nb_id)
             if not nb_node or nb_node.is_root_node:
@@ -550,7 +544,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     "description": nb_node.description,
                     "is_immutable": nb_node.is_immutable,
                     "node_type": nb_node.node_type,
-                    "relation_to_target": e.description or "RELEVANT_TO",
                     "direction": direction,
                     "subtree_mut_height": tree.subtree_mut_height.get(nb_id, 0),
                 }
@@ -783,7 +776,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     "connected_neighbor_context": [
                         {
                             "neighbor_title": nb["title"],
-                            "relation": nb.get("relation_to_target", "RELEVANT_TO"),
                             "direction": nb.get("direction", "incoming"),
                             "is_immutable": nb.get("is_immutable", False),
                         }

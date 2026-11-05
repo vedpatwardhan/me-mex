@@ -121,6 +121,26 @@ def test_mutable_concept_node_splitting():
         metadata={"immutable": False},  # MUTABLE
     )
     db_engine.upsert_node(mutable_hub)
+    for i, nid in enumerate(("imm_split_a", "imm_split_b"), start=1):
+        db_engine.upsert_node(
+            GraphNode(
+                _id=nid,
+                node_type="CONCEPT",
+                title=f"Neighbor {i}",
+                description="",
+                project_ids=["global"],
+                metadata={"immutable": True},
+            )
+        )
+        db_engine.upsert_edge(
+            GraphEdge(
+                _id=f"edge_split_{i}",
+                source_id=nid,
+                target_id=mutable_hub_id,
+                description="",
+                project_ids=["global"],
+            )
+        )
 
     split_cmd_item = {
         "department_name": "Reorg Persona",
@@ -128,16 +148,23 @@ def test_mutable_concept_node_splitting():
         "concept_id": mutable_hub_id,
         "sub_concepts": [
             {
+                "sub_id_alias": "sub_1",
                 "title": "Sub-Concept Alpha",
                 "description": "Focused sub-concept Alpha.",
                 "passage_ids": ["pass_chunk_101"],
             },
             {
+                "sub_id_alias": "sub_2",
                 "title": "Sub-Concept Beta",
                 "description": "Focused sub-concept Beta.",
                 "passage_ids": ["pass_chunk_102"],
             },
         ],
+        "rewired_edges": [
+            {"neighbor_id": "imm_split_a", "connect_to_sub_alias": "sub_1"},
+            {"neighbor_id": "imm_split_b", "connect_to_sub_alias": "sub_2"},
+        ],
+        "partition_neighbor_ids": ["imm_split_a", "imm_split_b"],
     }
 
     evt = graph_ingestion_engine.execute_single_command(
@@ -217,7 +244,6 @@ def test_split_concept_rewiring_deletes_old_hub_edge():
             {
                 "neighbor_id": "neighbor_concept",
                 "connect_to_sub_alias": "sub_1",
-                "relation_type": "SUBSET_OF",
             }
         ],
     }
@@ -246,7 +272,7 @@ def test_split_concept_rewiring_deletes_old_hub_edge():
         if e.source_id == "neighbor_concept" and e.target_id != "hub_original"
     ]
     assert len(sub_rewired_edges) == 1
-    assert sub_rewired_edges[0].description == "SUBSET_OF"
+    assert sub_rewired_edges[0].description == ""
 
 
 def test_split_concept_rewire_multi_subconcept_connections():
@@ -313,12 +339,12 @@ def test_split_concept_rewire_multi_subconcept_connections():
             {
                 "neighbor_id": "neighbor_shared_eval",
                 "connect_to_sub_alias": "sub_1",
-                "relation_type": "EVALUATES",
+                "description": "EVALUATES",
             },
             {
                 "neighbor_id": "neighbor_shared_eval",
                 "connect_to_sub_alias": "sub_2",
-                "relation_type": "BENCHMARKS",
+                "description": "BENCHMARKS",
             },
         ],
     }
@@ -415,7 +441,6 @@ def test_split_concept_defensive_guard_prevents_idle_subconcepts():
             {
                 "neighbor_id": "neighbor_context_node",
                 "connect_to_sub_alias": "sub_1",
-                "relation_type": "RELEVANT_TO",
             }
         ],
     }
@@ -426,12 +451,16 @@ def test_split_concept_defensive_guard_prevents_idle_subconcepts():
 
     all_edges = db_engine.get_edges(project_id)
     # v0.2.1: engine commits only explicit rewires; idle sub-concepts may exist without neighbors.
-    subset_edges = [e for e in all_edges if "SUBSET" in (e.description or "").upper()]
-    assert len(subset_edges) == 2
+    tree_children = [
+        n
+        for n in db_engine.get_nodes(project_id)
+        if n.metadata.get("mutable_parent_id") == "hub_idle_test"
+    ]
+    assert len(tree_children) == 1
     sub_rewired_edges = [
         e
         for e in all_edges
         if e.source_id == "neighbor_context_node" and e.target_id != "hub_idle_test"
     ]
     assert len(sub_rewired_edges) == 1
-    assert sub_rewired_edges[0].description == "RELEVANT_TO"
+    assert sub_rewired_edges[0].description == ""

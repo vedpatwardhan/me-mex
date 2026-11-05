@@ -6,7 +6,6 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.db import db_engine
-from app.models import GraphEdge
 from app.services.graph_analytics import MutableTreeIndex
 
 OVERFLOW_REWIRE_ALIASES = frozenset(
@@ -40,27 +39,30 @@ def sub_aliases_with_assigned_neighbors(
     return used
 
 
-def _is_subset_edge(edge: GraphEdge) -> bool:
-    desc = (edge.description or "").upper()
-    return "SUBSET_OF" in desc or "SUBSET" in desc
-
-
-def _skip_tree_parent_backbone(
-    split_target_id: str, nb_id: str, edge: GraphEdge, project_scope: Optional[str]
+def _skip_partition_neighbor(
+    hub_id: str,
+    nb_id: str,
+    tree: MutableTreeIndex,
+    nb_node: Optional[Any],
 ) -> bool:
-    """SUBSET_OF link to tree parent is structural, not a partition neighbor."""
+    """Tree backbone neighbors are not partition batch members."""
+    parent_id = tree.parent_of(hub_id)
+    if parent_id and nb_id == parent_id:
+        return True
+    if (
+        nb_node
+        and not nb_node.is_immutable
+        and not nb_node.is_root_node
+        and tree.parent_of(nb_id) == hub_id
+    ):
+        return True
+    return False
+
+
+def hub_neighbor_ids(split_target_id: str, project_scope: Optional[str]) -> Set[str]:
+    """Neighbor node ids eligible for partition / rewire closure on split_target."""
     tree = MutableTreeIndex(project_id=project_scope)
-    parent_id = tree.parent_of(split_target_id)
-    if not parent_id or nb_id != parent_id:
-        return False
-    return _is_subset_edge(edge)
-
-
-def hub_neighbor_relations(
-    split_target_id: str, project_scope: Optional[str]
-) -> Dict[str, str]:
-    """Map neighbor_id -> relation description for non-ROOT nodes adjacent to split_target."""
-    relations: Dict[str, str] = {}
+    neighbor_ids: Set[str] = set()
     for e in db_engine.get_edges(project_scope):
         nb_id: Optional[str] = None
         if e.source_id == split_target_id:
@@ -69,15 +71,15 @@ def hub_neighbor_relations(
             nb_id = e.source_id
         else:
             continue
-        if not nb_id or nb_id in relations:
-            continue
-        if _skip_tree_parent_backbone(split_target_id, nb_id, e, project_scope):
+        if not nb_id or nb_id in neighbor_ids:
             continue
         nb = db_engine.get_node(nb_id)
         if not nb or nb.is_root_node:
             continue
-        relations[nb_id] = e.description or "RELEVANT_TO"
-    return relations
+        if _skip_partition_neighbor(split_target_id, nb_id, tree, nb):
+            continue
+        neighbor_ids.add(nb_id)
+    return neighbor_ids
 
 
 def max_allowed_sub_concepts(neighbor_count: int) -> int:
@@ -203,7 +205,6 @@ def merge_partition_to_engine_rewires(
             {
                 "neighbor_index": idx,
                 "connect_to_sub_alias": overflow_alias,
-                "relation_type": "RELEVANT_TO",
                 "description": item.get("rationale") or "Overflow neighbor promotion.",
             }
         )
@@ -226,13 +227,12 @@ def finalize_rewire_edges(
     if explicit_neighbor_ids is not None:
         expected = set(explicit_neighbor_ids)
     else:
-        expected = set(hub_neighbor_relations(split_target_id, project_scope).keys())
+        expected = hub_neighbor_ids(split_target_id, project_scope)
 
     result: List[Dict[str, Any]] = list(rewired_edges)
     covered = {r.get("neighbor_id") for r in result if r.get("neighbor_id")}
 
     orphan_alias = "EVERYTHING" if is_genesis_split else "ANCESTOR"
-    relations = hub_neighbor_relations(split_target_id, project_scope)
     for nid in expected:
         if nid in covered:
             continue
@@ -240,30 +240,9 @@ def finalize_rewire_edges(
             {
                 "neighbor_id": nid,
                 "connect_to_sub_alias": orphan_alias,
-                "relation_type": relations.get(nid, "RELEVANT_TO"),
                 "description": "Closure default orphan promotion.",
             }
         )
         covered.add(nid)
 
     return result
-
-
-def resolve_rewire_relation_type(
-    neighbor_id: str,
-    split_target_id: str,
-    current_edges: List[GraphEdge],
-    llm_relation: Optional[str],
-) -> str:
-    """Preserve SUBSET_OF for mutable tree children when reparenting under a split."""
-    nb = db_engine.get_node(neighbor_id)
-    for old in current_edges:
-        if old.source_id == neighbor_id and old.target_id == split_target_id:
-            if _is_subset_edge(old) and nb and not nb.is_immutable:
-                return "SUBSET_OF"
-            return (llm_relation or old.description or "RELEVANT_TO").strip()
-        if old.source_id == split_target_id and old.target_id == neighbor_id:
-            if _is_subset_edge(old) and nb and not nb.is_immutable:
-                return "SUBSET_OF"
-            return (llm_relation or old.description or "RELEVANT_TO").strip()
-    return (llm_relation or "RELEVANT_TO").strip()

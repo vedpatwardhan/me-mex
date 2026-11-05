@@ -61,11 +61,10 @@ class GraphNode(BaseModel):
 
 class GraphEdge(BaseModel):
     """
-    Qualitative Typed Relation Edge Entity.
+    Unweighted graph edge between two nodes.
 
-    Represents unweighted qualitative relationships (`SUBSET_OF`, `SUPERSET_OF`, `RELEVANT_TO`,
-    `BUILDS_UPON`, `SUPERSEDES`, `PARALLEL_TO`, `CONTRASTS_WITH`) contextualized with descriptions.
-    Temporal progression is tracked directly via `created_at` timestamps without artificial numerical weight decay.
+    Optional `description` is natural-language provenance only (not a relation type enum).
+    Temporal progression is tracked via `created_at` without numerical weight decay.
     """
 
     id: str = Field(alias="_id")
@@ -273,7 +272,6 @@ class ConsolidatedConceptsPayload(BaseModel):
 class EdgeCommandPayload(BaseModel):
     source_index: int
     target_index: int
-    relation_type: str = "RELEVANT_TO"
     description: str = ""
 
 
@@ -316,7 +314,6 @@ class ReorgSplitPayload(BaseModel):
 class RewireEdgeItem(BaseModel):
     neighbor_index: int
     connect_to_sub_alias: str
-    relation_type: str = "SUBSET_OF"
     description: str = ""
 
 

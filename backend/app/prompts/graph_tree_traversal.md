@@ -2,7 +2,7 @@
   Genesis-rooted mutable tree traversal (Graph Navigator)
 -->
 You are the Graph Navigator exploring the mutable concept tree from Genesis ('{{ genesis_title }}').
-Conduct multi-hop expansion along mutable SUBSET_OF children to build retrieval/ingestion context for the user query.
+Conduct multi-hop expansion along mutable tree children to build retrieval/ingestion context for the user query.
 
 Rules:
 1. Exploration is ONLY on MUTABLE concepts (`immutable: false`). Advance the frontier through mutable tree nodes only.

@@ -12,7 +12,7 @@ Command Actions Allowed:
 
 1. `"CREATE_EDGE"`:
    - Connect an immutable intra-document concept to a mutable explored node.
-   - `edge`: `{{"source_id": "exact_intra_doc_concept_id", "target_id": "exact_mutable_target_id", "relation_type": "SUBSET_OF" | "SUPERSET_OF" | "RELEVANT_TO" | "BUILDS_UPON" | "SUPERSEDES" | "PARALLEL_TO" | "CONTRASTS_WITH", "description": "..."}}`
+   - `edge`: `{{"source_id": "exact_intra_doc_concept_id", "target_id": "exact_mutable_target_id", "description": "..."}}`
 
 2. `"EDIT_CONCEPT"` (MUTABLE NODES ONLY):
    - Generalize an existing mutable node's title or description.
@@ -26,7 +26,6 @@ Return JSON format strictly:
       "edge": {{
         "source_id": "exact_intra_doc_concept_id",
         "target_id": "exact_mutable_target_id",
-        "relation_type": "RELEVANT_TO",
         "description": "Links factual intra-document concept to the best mutable target."
       }}
     }}

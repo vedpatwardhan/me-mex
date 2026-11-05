@@ -109,7 +109,7 @@ export const GraphCanvas: React.FC = () => {
     if (typeof fg.d3Force === 'function') {
       const linkForce = fg.d3Force('link');
       if (linkForce && typeof linkForce.distance === 'function') {
-        linkForce.distance((l: any) => (l.type === 'SUBSET_OF' ? 95 : 150));
+        linkForce.distance(120);
       }
       const chargeForce = fg.d3Force('charge');
       if (chargeForce && typeof chargeForce.strength === 'function') {
@@ -197,12 +197,8 @@ export const GraphCanvas: React.FC = () => {
           ctx.arc(node.x, node.y, 14, 0, 2 * Math.PI, false);
           ctx.fill();
         }}
-        linkColor={(link: any) => {
-          if (link.description?.includes('SUPERSEDES') || link.is_directional) return '#f59e0b';
-          if (link.description?.includes('CONTRASTS')) return '#ef4444';
-          return '#334155';
-        }}
-        linkLineDash={(link: any) => (link.description?.includes('CONTRASTS') ? [3, 2] : null)}
+        linkColor={() => '#334155'}
+        linkLineDash={null}
         linkDirectionalArrowLength={4}
         linkDirectionalArrowRelPos={0.95}
         onNodeDrag={(node: any) => {

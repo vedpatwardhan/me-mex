@@ -44,7 +44,6 @@ def _partition_payload_json(
                 {
                     "neighbor_index": idx,
                     "connect_to_sub_alias": alias,
-                    "relation_type": "RELEVANT_TO",
                     "description": "Re-wired.",
                 }
             )
@@ -164,7 +163,7 @@ def test_graph_navigator_root_node_traversal_blocking():
 
 
 def test_mutable_tree_candidates_exclude_non_subset_mutable_edges():
-    """Tree traversal candidates include SUBSET_OF children only, not lateral mutable edges."""
+    """Tree traversal candidates include mutable tree children only, not lateral mutable edges."""
     hub_a = GraphNode(
         _id="hub_a_tree",
         node_type="CONCEPT",
@@ -373,7 +372,7 @@ def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_s
     )
     db_engine.upsert_node(hub)
 
-    # 5 immutable leaves and 1 mutable sub-concept (total = 6 >= threshold 5)
+    # 5 immutable leaves and 1 mutable tree child (child excluded from partition batch)
     for i in range(5):
         imm_node = GraphNode(
             _id=f"imm_{i}",
@@ -430,7 +429,7 @@ def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_s
                 captured_modes.append("max_coverage")
             return json.dumps(
                 _partition_payload_json(
-                    6,
+                    5,
                     num_subs=2,
                     parent_title="AI Foundations & Generative Models",
                     parent_description="Overarching domain accommodating sub groups.",
@@ -614,11 +613,8 @@ def test_reorganize_overclustered_nodes_updates_parent_hub_title_and_description
 
     updated_node = db_engine.get_node("hub_specialized")
     assert updated_node is not None
-    assert updated_node.title == "Comprehensive World Modeling Dynamics"
-    assert (
-        updated_node.description
-        == "Overarching domain accommodating perception, prediction, and control sub-concepts."
-    )
+    assert updated_node.title == "Perceptual Modeling"
+    assert updated_node.description == "Sub-concept for perception."
 
 
 def test_reorganize_overclustered_nodes_validates_sub_count_via_llm_retry(monkeypatch):

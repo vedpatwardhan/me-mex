@@ -834,7 +834,7 @@ class ExecutiveOrchestrator:
                 _id=f"edge_{uuid.uuid4().hex[:8]}",
                 source_id=root_node_id,
                 target_id=c_id,
-                description="RELEVANT_TO",
+                description="",
                 project_ids=proj_list,
             )
             self.db.upsert_edge(rel_edge)
@@ -962,8 +962,7 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
                             "edge": {
                                 "source_id": src_id,
                                 "target_id": tgt_id,
-                                "relation_type": c.edge.relation_type,
-                                "description": c.edge.description,
+                                "description": c.edge.description or "",
                             },
                         }
                     )
@@ -989,7 +988,6 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
                         "edge": {
                             "source_id": intra.id,
                             "target_id": genesis_node.id,
-                            "relation_type": "RELEVANT_TO",
                             "description": "Fallback foundational connection ensuring complete graph connectivity.",
                         },
                     }
@@ -1082,7 +1080,6 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
                         {
                             "title": nb_node.title,
                             "description": nb_node.description,
-                            "relation": edge.description or "CONNECTED_TO",
                             "is_immutable": nb_node.is_immutable,
                         }
                     )

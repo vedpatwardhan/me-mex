@@ -43,6 +43,8 @@ export const LeftRail: React.FC = () => {
   const messages = chatHistory[activeProjectId] || [];
 
   useEffect(() => {
+    const ta = textareaRef.current;
+    if (ta && document.activeElement === ta) return;
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, thinkingState]);
 
@@ -71,6 +73,16 @@ export const LeftRail: React.FC = () => {
     }
   };
 
+  /** First click on padding/chrome should focus the textarea immediately (not require a second click). */
+  const handleInputAreaMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button')) return;
+    if (target.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+    }
+    textareaRef.current?.focus();
+  };
+
   const handleVoiceRecord = async () => {
     if (isVoiceListening) {
       setVoiceListening(false);
@@ -91,7 +103,7 @@ export const LeftRail: React.FC = () => {
   };
 
   return (
-    <aside className="w-[440px] glass-panel border-r border-white/10 flex flex-col h-[calc(100vh-4rem)] text-xs select-none z-20 shadow-2xl shrink-0">
+    <aside className="w-[440px] glass-panel border-r border-white/10 flex flex-col h-[calc(100vh-4rem)] text-xs z-20 shadow-2xl shrink-0">
       {/* Scope Header */}
       <div className="p-4 border-b border-white/10 bg-[#090d16]/80 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
@@ -314,9 +326,13 @@ export const LeftRail: React.FC = () => {
       </div>
 
       {/* Spacious Unified Input Bar (Bottom) */}
-      <div className="p-4 bg-[#090d16]/95 border-t border-white/10">
+      <div className="p-4 bg-[#090d16]/95 border-t border-white/10 select-text">
         <form onSubmit={handleSend} className="space-y-2">
-          <div className="relative flex flex-col bg-[#121824] rounded-2xl border border-slate-700/80 focus-within:border-cyan-400/80 focus-within:ring-1 focus-within:ring-cyan-400/80 shadow-2xl transition-all p-3">
+          <div
+            role="presentation"
+            onMouseDown={handleInputAreaMouseDown}
+            className="relative flex flex-col bg-[#121824] rounded-2xl border border-slate-700/80 focus-within:border-cyan-400/80 focus-within:ring-1 focus-within:ring-cyan-400/80 shadow-2xl transition-all p-3 cursor-text"
+          >
             {/* Multi-line Taller Textarea Input */}
             <textarea
               ref={textareaRef}
@@ -326,7 +342,7 @@ export const LeftRail: React.FC = () => {
               onChange={(e) => setInputVal(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isLoading}
-              className="w-full min-h-[96px] max-h-[220px] bg-transparent text-slate-200 px-2 py-1 text-xs focus:outline-none placeholder-slate-500 font-medium leading-relaxed resize-y font-sans"
+              className="w-full min-h-[96px] max-h-[220px] bg-transparent text-slate-200 px-2 py-1 text-xs focus:outline-none placeholder-slate-500 font-medium leading-relaxed resize-y font-sans select-text"
             />
 
             {/* Action Buttons Row */}

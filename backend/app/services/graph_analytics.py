@@ -8,19 +8,19 @@ import rustworkx as rx
 
 from app.db import db_engine
 from app.models import GraphEdge, GraphNode
-
-
-def _is_subset_edge(edge: GraphEdge) -> bool:
-    desc = (edge.description or "").upper()
-    return "SUBSET_OF" in desc or "SUBSET" in desc
+from app.services.graph_link_utils import (
+    MUTABLE_PARENT_META_KEY,
+    legacy_infer_mutable_parent_id,
+    migrate_legacy_mutable_parent_metadata,
+)
 
 
 class MutableTreeIndex:
     """
     Mutable concept backbone rooted at Genesis.
 
-    Parent/child convention: child --SUBSET_OF--> parent (source=child, target=parent).
-    Immutable leaves attach via RELEVANT_TO (or similar) with target=mutable parent.
+    Parent/child links are stored in node metadata (`mutable_parent_id`); graph edges
+    are unweighted and undifferentiated for adjacency.
     """
 
     def __init__(
@@ -55,14 +55,20 @@ class MutableTreeIndex:
             self._direct_neighbors.setdefault(e.source_id, []).append(e.target_id)
             self._direct_neighbors.setdefault(e.target_id, []).append(e.source_id)
 
-        for e in self.edges:
-            if not _is_subset_edge(e):
+        for n in self.nodes:
+            if n.is_immutable or n.is_root_node:
                 continue
-            child_id, parent_id = e.source_id, e.target_id
-            child = self.node_map.get(child_id)
+            parent_id = n.metadata.get(MUTABLE_PARENT_META_KEY)
+            if not parent_id:
+                parent_id = legacy_infer_mutable_parent_id(
+                    n.id, self.edges, self.node_map
+                )
+            if not parent_id:
+                continue
             parent = self.node_map.get(parent_id)
-            if not child or not parent or child.is_immutable or parent.is_immutable:
+            if not parent or parent.is_immutable:
                 continue
+            child_id = n.id
             if child_id in self._parent and self._parent[child_id] != parent_id:
                 continue
             self._parent[child_id] = parent_id
@@ -301,6 +307,7 @@ class GraphAnalyticsWorker:
 
     @staticmethod
     def refresh_tree_metadata(project_id: Optional[str] = None) -> Dict[str, Any]:
+        migrate_legacy_mutable_parent_metadata(project_id)
         idx = MutableTreeIndex(project_id=project_id)
         idx.recompute_and_persist_metadata()
         return idx.health_metrics()

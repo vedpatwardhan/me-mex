@@ -51,7 +51,7 @@ export const prewarmForceSimulation = (
         d3
           .forceLink(linksCopy)
           .id((d: any) => d.id)
-          .distance((l: any) => (l.type === 'SUBSET_OF' ? 95 : 150))
+          .distance(120)
           .strength(0.6)
       )
       .force(
