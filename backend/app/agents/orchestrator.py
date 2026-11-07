@@ -1032,6 +1032,7 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
             doc_title=title,
             proj_list=proj_list,
             plan_only=False,
+            link_affected_ids=set(affected_target_ids),
         )
         for reorg_evt in reorg_res.get("emitted_events", []):
             yield reorg_evt

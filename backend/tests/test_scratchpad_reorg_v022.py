@@ -204,7 +204,7 @@ def test_reorg_cascade_parent_id_genesis_and_child():
     pid = cascade_parent_id(tree, "child_hub", child)
     assert pid == "concept_genesis"
     pid_gen = cascade_parent_id(tree, "concept_genesis", genesis)
-    assert pid_gen == "concept_genesis"
+    assert pid_gen is None
 
 
 def test_reorg_queue_filo_prepends_cascade_before_next_discover():

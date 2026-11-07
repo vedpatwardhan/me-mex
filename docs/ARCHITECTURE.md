@@ -137,9 +137,10 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 **Work queue** (`app/services/reorg_queue.py`):
 
 1. After LLM discover, enqueue **hub IDs only** at **tail** (FIFO).
-2. Pop front → **`build_split_command_for_hub(hub_id)`** (same for discover and cascade) → **`execute_single_command`** → refresh metadata.
-3. If tree parent is hot **and** discover **siblings** under that parent are drained → **prepend parent hub ID** (FILO); split built on that hub’s pop.
-4. Repeat until queue empty; cascade prepends capped by **`MAX_UPWARD_REORG_ITERATIONS`** per Phase 4 pass. `plan_only` runs the pop/build loop without execute or cascade enqueue.
+2. Pop front → **`build_split_command_for_hub(hub_id)`** (same for discover and cascade) → **`execute_single_command`** → refresh metadata; record hub in **`split_hubs_this_pass`** (at most one successful split per hub per Phase 4 pass).
+3. **Cascade (one step per successful child split):** enqueue **tree parent** `parent_of(hub)` only when parent is hot, not already split this pass, and **sibling deferral** allows it (no pending **discover** siblings under that parent). **Genesis:** after a successful Everything split, **do not** enqueue Genesis again for that cascade chain (other queue items / chains continue). **No Genesis self-requeue.** Cascade to Genesis only when Genesis was **link-affected** this ingest or the trigger child sits directly under Genesis.
+4. If tree parent is hot **and** discover **siblings** under that parent are drained → **prepend parent hub ID** (FILO); split built on that hub’s pop.
+5. Repeat until queue empty; optional safety cap **`MAX_UPWARD_REORG_ITERATIONS`** on cascade prepends per pass. **Sibling deferral** today covers direct discover siblings only (full subtree deferral deferred). `plan_only` runs the pop/build loop without execute or cascade enqueue.
 
 **Partition (per hub):** One LLM call — **`graph_reorg_partition`** (`ReorgPartitionPayload`, `REORG_PARTITION_MAX_TOKENS` default 6144). Three lists:
 

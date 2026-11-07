@@ -297,6 +297,37 @@ class RichLogger:
             )
             console.print(f"{proj_badge}   │   • [yellow]Reorg rewire[/yellow]: {msg}")
 
+        elif event_type == "reorg_singleton_sub_demoted":
+            msg = event_data.get("message", "Singleton sub demoted to overflow.")
+            console.print(
+                f"{proj_badge}   │   • [yellow]Reorg demotion[/yellow]: {msg}"
+            )
+
+        elif event_type == "reorg_partition_validation_retry":
+            attempt = event_data.get("attempt", "?")
+            title = event_data.get("node_title", event_data.get("node_id", ""))
+            console.print(
+                f"{proj_badge}   │   • [yellow]Partition retry[/yellow]: "
+                f"'{title}' attempt {attempt}"
+            )
+
+        elif event_type == "reorg_partition_failed":
+            msg = event_data.get("message", "Partition validation exhausted retries.")
+            console.print(
+                f"{proj_badge}   ├─ [bold red]Partition failed[/bold red]: {msg}"
+            )
+
+        elif event_type == "reorg_candidate_skipped":
+            msg = event_data.get("message", "Reorg candidate skipped.")
+            console.print(f"{proj_badge}   │   • [dim]Reorg skip[/dim]: {msg}")
+
+        elif event_type == "reorg_cascade_iteration":
+            msg = event_data.get("message") or (
+                f"ancestor={event_data.get('ancestor_id')} "
+                f"trigger={event_data.get('trigger_child_id')}"
+            )
+            console.print(f"{proj_badge}   │   • [cyan]Reorg cascade[/cyan]: {msg}")
+
         elif event_type == "reorg_completed":
             msg = event_data.get("message", "Reorganization commit completed.")
             console.print(

@@ -7,7 +7,7 @@ Genesis-rooted mutable tree traversal, intra-document linking, and selective reo
 import json
 import time
 from collections import defaultdict
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from app.db import db_engine
 from app.config import settings
 from app.models import (
@@ -21,9 +21,11 @@ from app.models import (
 from app.services.graph_analytics import MutableTreeIndex, graph_analytics
 from app.services.graph_ingestion_engine import (
     GraphIngestionEngine,
+    _is_genesis,
     graph_ingestion_engine,
 )
-from app.services.reorg_queue import ReorgQueue, ReorgWorkItem, cascade_parent_id
+from app.services.reorg_queue import ReorgQueue, ReorgWorkItem
+from app.services.logger import logger
 from app.services.reorg_rewire_utils import (
     finalize_rewire_edges,
     max_allowed_sub_concepts,
@@ -34,6 +36,29 @@ from app.services.reorg_rewire_utils import (
 from app.services.llm_gateway import llm_gateway
 from app.services.prompt_mapper import PromptIdMapper
 from app.prompts import load_prompt
+
+
+def _append_reorg_event(
+    emitted_events: List[Dict[str, Any]],
+    project_id: str,
+    payload: Dict[str, Any],
+) -> None:
+    """Append telemetry and mirror to Rich console in execution order."""
+    emitted_events.append(payload)
+    event_type = payload.get("event") or "reorg"
+    logger.log_event(project_id, event_type, payload)
+
+
+def _genesis_cascade_allowed(
+    tree: MutableTreeIndex,
+    *,
+    hub_id: str,
+    genesis_id: str,
+    link_affected_ids: Set[str],
+) -> bool:
+    if genesis_id in link_affected_ids:
+        return True
+    return tree.parent_of(hub_id) == genesis_id
 
 
 def _reorg_split_strategy_block(is_genesis: bool) -> tuple[str, str]:
@@ -391,10 +416,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     caller=f"GraphNavigator[{self.department_name}].reorg_partition_{mode}",
                 )
             except Exception as e:
-                print(
-                    f"[{self.department_name}] Unified partition LLM error for "
-                    f"{target_node.id} (mode={mode}, attempt={attempt}): {e}"
-                )
                 if attempt >= partition_attempts:
                     raise RuntimeError(
                         f"[{self.department_name}] Unified partition failed for "
@@ -424,8 +445,9 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     f"alias={dem.get('sub_id_alias')} neighbor_index={dem.get('neighbor_index')} "
                     f"neighbor_id={nb_id} — skipping thin sub, neighbor promoted via overflow."
                 )
-                print(msg)
-                emitted_events.append(
+                _append_reorg_event(
+                    emitted_events,
+                    project_id,
                     {
                         "event": "reorg_singleton_sub_demoted",
                         "persona_id": self.department_id,
@@ -438,7 +460,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                         "rationale": dem.get("rationale"),
                         "message": msg,
                         "timestamp": time.time(),
-                    }
+                    },
                 )
 
             ok, validation_errors = validate_reorg_partition(
@@ -449,13 +471,31 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             )
             if ok:
                 break
-            print(
+            retry_msg = (
                 f"[{self.department_name}] Partition validation failed for "
-                f"{target_node.id} (attempt {attempt}/{partition_attempts}): "
+                f"'{target_node.title}' (attempt {attempt}/{partition_attempts}): "
                 f"{'; '.join(validation_errors)}"
             )
+            _append_reorg_event(
+                emitted_events,
+                project_id,
+                {
+                    "event": "reorg_partition_validation_retry",
+                    "persona_id": self.department_id,
+                    "department_name": self.department_name,
+                    "node_id": target_node.id,
+                    "node_title": target_node.title,
+                    "attempt": attempt,
+                    "partition_attempts": partition_attempts,
+                    "validation_errors": validation_errors,
+                    "message": retry_msg,
+                    "timestamp": time.time(),
+                },
+            )
             if attempt >= partition_attempts:
-                emitted_events.append(
+                _append_reorg_event(
+                    emitted_events,
+                    project_id,
                     {
                         "event": "reorg_partition_failed",
                         "persona_id": self.department_id,
@@ -468,7 +508,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                             f"'{target_node.title}' after {partition_attempts} attempt(s)."
                         ),
                         "timestamp": time.time(),
-                    }
+                    },
                 )
                 return None
             messages.append(
@@ -634,6 +674,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         emitted_events: List[Dict[str, Any]],
         plan_only: bool,
         node_map: Dict[str, GraphNode],
+        link_affected_ids: Optional[Set[str]] = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """
         Single Phase 4 loop: pop hub → build_split_command_for_hub → execute or collect.
@@ -644,6 +685,8 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         collected_commands: List[Dict[str, Any]] = []
         projects = proj_list or [project_id]
         engine = ingestion_engine or graph_ingestion_engine
+        split_hubs_this_pass: Set[str] = set()
+        link_affected = link_affected_ids or set()
 
         while queue:
             item = queue.pop_front()
@@ -658,7 +701,9 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     item.hub_id
                 )
                 title = target_node.title if target_node else item.hub_id
-                emitted_events.append(
+                _append_reorg_event(
+                    emitted_events,
+                    project_id,
                     {
                         "event": "reorg_candidate_skipped",
                         "persona_id": self.department_id,
@@ -671,7 +716,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                             "partition produced no split."
                         ),
                         "timestamp": time.time(),
-                    }
+                    },
                 )
                 continue
 
@@ -692,39 +737,64 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 evt["department_name"] = self.department_name
                 emitted_events.append(evt)
             splits_executed += 1
+            split_hubs_this_pass.add(item.hub_id)
             graph_analytics.refresh_tree_metadata(project_id)
 
             hub_id = item.hub_id
             hub_node = db_engine.get_node(hub_id)
-            tree = MutableTreeIndex(project_id=project_id)
-            parent_check = cascade_parent_id(tree, hub_id, hub_node)
-            if not parent_check:
-                continue
-            if queue.should_defer_parent_cascade(parent_check):
+            if hub_node and _is_genesis(hub_node):
                 continue
 
             tree = MutableTreeIndex(project_id=project_id)
-            if tree.effective_degree(parent_check) < degree_threshold:
+            ancestor_id = tree.parent_of(hub_id)
+            if not ancestor_id:
                 continue
+            if ancestor_id in split_hubs_this_pass:
+                continue
+            if queue.should_defer_parent_cascade(ancestor_id):
+                continue
+            if tree.effective_degree(ancestor_id) < degree_threshold:
+                continue
+
+            ancestor_node = db_engine.get_node(ancestor_id)
+            if ancestor_node and _is_genesis(ancestor_node):
+                if not _genesis_cascade_allowed(
+                    tree,
+                    hub_id=hub_id,
+                    genesis_id=ancestor_id,
+                    link_affected_ids=link_affected,
+                ):
+                    continue
+
             if cascade_enqueues >= settings.MAX_UPWARD_REORG_ITERATIONS:
                 continue
 
             cascade_enqueues += 1
-            emitted_events.append(
+            _append_reorg_event(
+                emitted_events,
+                project_id,
                 {
                     "event": "reorg_cascade_iteration",
-                    "ancestor_id": parent_check,
+                    "persona_id": self.department_id,
+                    "department_name": self.department_name,
+                    "ancestor_id": ancestor_id,
+                    "trigger_child_id": hub_id,
                     "queued_front": True,
                     "cascade_index": cascade_enqueues,
+                    "message": (
+                        f"[{self.department_name}] Cascade enqueue: parent "
+                        f"'{ancestor_node.title if ancestor_node else ancestor_id}' "
+                        f"after split of '{hub_node.title if hub_node else hub_id}'."
+                    ),
                     "timestamp": time.time(),
-                }
+                },
             )
             tree = MutableTreeIndex(project_id=project_id)
             queue.prepend_cascade_filo(
                 ReorgWorkItem(
-                    hub_id=parent_check,
+                    hub_id=ancestor_id,
                     kind="cascade",
-                    tree_parent_id=tree.parent_of(parent_check),
+                    tree_parent_id=tree.parent_of(ancestor_id),
                 )
             )
 
@@ -741,6 +811,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         ingestion_engine: Optional[GraphIngestionEngine] = None,
         plan_only: bool = True,
         explored_nodes: list[GraphNode] | None = None,
+        link_affected_ids: Optional[Set[str]] = None,
     ) -> Dict[str, Any]:
         """
         Phase 4 reorganization: LLM discover once, then one queue (hub IDs only).
@@ -903,6 +974,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             emitted_events=emitted_events,
             plan_only=plan_only,
             node_map=node_map,
+            link_affected_ids=link_affected_ids,
         )
 
         tree = MutableTreeIndex(project_id=project_id)

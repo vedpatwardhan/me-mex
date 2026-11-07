@@ -22,18 +22,15 @@ class ReorgWorkItem:
 
 
 def cascade_parent_id(
-    tree: MutableTreeIndex, hub_id: str, hub_node: Optional[GraphNode]
+    tree: MutableTreeIndex, hub_id: str, hub_node: Optional[GraphNode] = None
 ) -> Optional[str]:
-    """Tree parent to check for overload after orphans land (Genesis may check itself)."""
-    parent_id = tree.parent_of(hub_id)
-    if parent_id:
-        return parent_id
-    if hub_node and (
-        hub_node.metadata.get("is_genesis")
-        or hub_node.title.strip().lower() == "everything"
-    ):
-        return hub_id
-    return None
+    """Tree parent to enqueue after a successful split (never Genesis self-requeue).
+
+    Legacy helper retained for tests; Phase 4 cascade uses explicit ``parent_of`` rules
+    in ``GraphNavigator._process_reorg_queue``.
+    """
+    _ = hub_node
+    return tree.parent_of(hub_id)
 
 
 class ReorgQueue:
