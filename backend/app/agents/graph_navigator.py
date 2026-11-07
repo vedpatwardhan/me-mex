@@ -28,6 +28,7 @@ from app.services.reorg_rewire_utils import (
     finalize_rewire_edges,
     max_allowed_sub_concepts,
     merge_partition_to_engine_rewires,
+    normalize_partition_singleton_subs,
     validate_reorg_partition,
 )
 from app.services.llm_gateway import llm_gateway
@@ -404,6 +405,42 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             formulated_subs = [s.model_dump() for s in payload.sub_concepts]
             overflow_raw = [o.model_dump() for o in payload.overflow_neighbors]
             sub_rewired_raw = [r.model_dump() for r in payload.rewired_edges]
+
+            (
+                formulated_subs,
+                overflow_raw,
+                sub_rewired_raw,
+                singleton_demotions,
+            ) = normalize_partition_singleton_subs(
+                formulated_subs,
+                overflow_raw,
+                sub_rewired_raw,
+            )
+            for dem in singleton_demotions:
+                nb_id = rewire_concept_mapper.to_id(dem.get("neighbor_index"))
+                msg = (
+                    f"[{self.department_name}] Singleton sub-concept demotion "
+                    f"(hub '{target_node.title}' / {target_node.id}): "
+                    f"alias={dem.get('sub_id_alias')} neighbor_index={dem.get('neighbor_index')} "
+                    f"neighbor_id={nb_id} — skipping thin sub, neighbor promoted via overflow."
+                )
+                print(msg)
+                emitted_events.append(
+                    {
+                        "event": "reorg_singleton_sub_demoted",
+                        "persona_id": self.department_id,
+                        "department_name": self.department_name,
+                        "node_id": target_node.id,
+                        "node_title": target_node.title,
+                        "sub_id_alias": dem.get("sub_id_alias"),
+                        "neighbor_index": dem.get("neighbor_index"),
+                        "neighbor_id": nb_id,
+                        "rationale": dem.get("rationale"),
+                        "message": msg,
+                        "timestamp": time.time(),
+                    }
+                )
+
             ok, validation_errors = validate_reorg_partition(
                 formulated_subs,
                 overflow_raw,

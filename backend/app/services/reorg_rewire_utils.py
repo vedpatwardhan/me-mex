@@ -87,6 +87,98 @@ def max_allowed_sub_concepts(neighbor_count: int) -> int:
     return max(2, neighbor_count // 2)
 
 
+def normalize_partition_singleton_subs(
+    sub_concepts: List[Dict[str, Any]],
+    overflow_neighbors: List[Dict[str, Any]],
+    sub_rewired_edges: List[Dict[str, Any]],
+) -> Tuple[
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+]:
+    """
+    Demote sub-concepts that only have one neighbor in rewired_edges: move that neighbor to
+    overflow_neighbors and drop the sub from sub_concepts. Does not mint thin subs.
+
+    Returns (sub_concepts, overflow_neighbors, sub_rewired_edges, demotions) where demotions
+    is a list of dicts: sub_id_alias, neighbor_index, rationale (for logging/events).
+    """
+    subs = [dict(s) for s in sub_concepts]
+    overflow = [dict(o) for o in overflow_neighbors]
+    edges = [dict(e) for e in sub_rewired_edges]
+
+    alias_loads: Dict[str, int] = defaultdict(int)
+    for edge in edges:
+        alias = (edge.get("connect_to_sub_alias") or "").strip()
+        idx = edge.get("neighbor_index")
+        if is_overflow_rewire_alias(alias):
+            continue
+        if idx is None:
+            continue
+        alias_loads[alias] = alias_loads.get(alias, 0) + 1
+
+    sub_aliases = {
+        (s.get("sub_id_alias") or "").strip() for s in subs if s.get("sub_id_alias")
+    }
+
+    demotions: List[Dict[str, Any]] = []
+    singleton_aliases = {
+        a
+        for a in sub_aliases
+        if alias_loads.get(a, 0) == 1 and not is_overflow_rewire_alias(a)
+    }
+
+    overflow_indices = {
+        o.get("neighbor_index") for o in overflow if o.get("neighbor_index") is not None
+    }
+
+    for alias in sorted(singleton_aliases):
+        # Find the single rewired_edges row for this alias
+        row_idx = None
+        nidx = None
+        for i, edge in enumerate(edges):
+            a = (edge.get("connect_to_sub_alias") or "").strip()
+            if a != alias or is_overflow_rewire_alias(a):
+                continue
+            row_idx = i
+            nidx = edge.get("neighbor_index")
+            break
+        if row_idx is None or nidx is None:
+            continue
+
+        rationale = (
+            "Server-side demotion: sub-concept had only one neighbor in rewired_edges; "
+            "skipping mint and treating as overflow (orphan to ancestor/Everything at commit)."
+        )
+
+        del edges[row_idx]
+        subs = [s for s in subs if (s.get("sub_id_alias") or "").strip() != alias]
+
+        if nidx in overflow_indices:
+            demotions.append(
+                {
+                    "sub_id_alias": alias,
+                    "neighbor_index": nidx,
+                    "rationale": rationale
+                    + " (neighbor_index already in overflow; edge removed only.)",
+                }
+            )
+            continue
+
+        overflow.append({"neighbor_index": nidx, "rationale": rationale})
+        overflow_indices.add(nidx)
+        demotions.append(
+            {
+                "sub_id_alias": alias,
+                "neighbor_index": nidx,
+                "rationale": rationale,
+            }
+        )
+
+    return subs, overflow, edges, demotions
+
+
 def validate_reorg_partition(
     sub_concepts: List[Dict[str, Any]],
     overflow_neighbors: List[Dict[str, Any]],
