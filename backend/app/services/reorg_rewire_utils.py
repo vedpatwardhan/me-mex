@@ -108,11 +108,13 @@ def normalize_partition_singleton_subs(
 
     alias_loads: Dict[str, int] = defaultdict(int)
     for edge in edges:
+        if edge.get("connect_to_existing_neighbor_index") is not None:
+            continue
         alias = (edge.get("connect_to_sub_alias") or "").strip()
         idx = edge.get("neighbor_index")
         if is_overflow_rewire_alias(alias):
             continue
-        if idx is None:
+        if idx is None or not alias:
             continue
         alias_loads[alias] = alias_loads.get(alias, 0) + 1
 
@@ -184,6 +186,7 @@ def validate_reorg_partition(
     *,
     neighbor_count: int,
     min_sub_neighbors: int = 2,
+    mutable_neighbor_indices: Optional[Set[int]] = None,
 ) -> Tuple[bool, List[str]]:
     """
     Validate three-list partition output (LLM contract). Does not mutate payload.
@@ -195,8 +198,22 @@ def validate_reorg_partition(
 
     expected = set(range(1, neighbor_count + 1))
 
-    if len(sub_concepts) < 1:
-        errors.append("At least one sub_concept is required.")
+    uses_new_sub = any(
+        (e.get("connect_to_sub_alias") or "").strip() for e in sub_rewired_edges
+    )
+    uses_existing = any(
+        e.get("connect_to_existing_neighbor_index") is not None
+        for e in sub_rewired_edges
+    )
+    if uses_new_sub and len(sub_concepts) < 1:
+        errors.append(
+            "At least one sub_concept is required when using connect_to_sub_alias."
+        )
+    if not uses_new_sub and not uses_existing and not overflow_neighbors:
+        errors.append(
+            "rewired_edges must assign neighbors via connect_to_sub_alias "
+            "or connect_to_existing_neighbor_index."
+        )
 
     max_subs = max_allowed_sub_concepts(neighbor_count)
     if len(sub_concepts) > max_subs:
@@ -212,22 +229,61 @@ def validate_reorg_partition(
 
     sub_indices: Set[int] = set()
     alias_loads: Dict[str, int] = defaultdict(int)
+    existing_target_indices: Set[int] = set()
+    mutable_allow = (
+        mutable_neighbor_indices if mutable_neighbor_indices is not None else set()
+    )
 
     for edge in sub_rewired_edges:
-        alias = (edge.get("connect_to_sub_alias") or "").strip()
         idx = edge.get("neighbor_index")
-        if is_overflow_rewire_alias(alias):
-            errors.append(
-                f"rewired_edges must not use overflow alias '{alias}' "
-                "(use overflow_neighbors instead)."
-            )
-            continue
+        alias = (edge.get("connect_to_sub_alias") or "").strip()
+        existing_idx = edge.get("connect_to_existing_neighbor_index")
+
         if idx is None:
             errors.append("rewired_edges entry missing neighbor_index.")
             continue
         if idx in sub_indices:
             errors.append(f"Duplicate neighbor_index {idx} in rewired_edges.")
         sub_indices.add(idx)
+
+        has_sub = bool(alias)
+        has_existing = existing_idx is not None
+        if has_sub == has_existing:
+            errors.append(
+                f"neighbor_index {idx}: set exactly one of connect_to_sub_alias "
+                "or connect_to_existing_neighbor_index."
+            )
+            continue
+
+        if has_existing:
+            if existing_idx == idx:
+                errors.append(
+                    f"neighbor_index {idx} cannot target itself via "
+                    "connect_to_existing_neighbor_index."
+                )
+            elif existing_idx not in expected:
+                errors.append(
+                    f"connect_to_existing_neighbor_index {existing_idx} outside "
+                    f"partition batch (1..{neighbor_count})."
+                )
+            elif (
+                mutable_neighbor_indices is not None
+                and existing_idx not in mutable_allow
+            ):
+                errors.append(
+                    f"connect_to_existing_neighbor_index {existing_idx} must "
+                    "reference a mutable neighbor in the batch."
+                )
+            else:
+                existing_target_indices.add(existing_idx)
+            continue
+
+        if is_overflow_rewire_alias(alias):
+            errors.append(
+                f"rewired_edges must not use overflow alias '{alias}' "
+                "(use overflow_neighbors instead)."
+            )
+            continue
         if alias not in sub_aliases:
             errors.append(
                 f"rewired_edges references unknown sub alias '{alias}' (neighbor_index={idx})."
@@ -251,8 +307,9 @@ def validate_reorg_partition(
             f"neighbor_index overlap between rewired_edges and overflow_neighbors: {sorted(overlap)}."
         )
 
+    anchor_only = existing_target_indices - sub_indices - overflow_indices
     covered = sub_indices | overflow_indices
-    missing = expected - covered
+    missing = expected - covered - anchor_only
     extra = covered - expected
     if missing:
         errors.append(
@@ -276,6 +333,55 @@ def validate_reorg_partition(
             errors.append(f"rewired_edges uses undeclared sub alias '{alias}'.")
 
     return len(errors) == 0, errors
+
+
+CLOSURE_ORPHAN_DESCRIPTION = "Closure default orphan promotion."
+
+
+def partition_rewire_assignment_kind(
+    edge: Dict[str, Any], *, overflow_alias: str
+) -> str:
+    """Classify a resolved partition rewire row for telemetry."""
+    if edge.get("connect_to_target_id"):
+        return "reuse_existing"
+    alias = (edge.get("connect_to_sub_alias") or "").strip()
+    if edge.get("description") == CLOSURE_ORPHAN_DESCRIPTION:
+        return "overflow_closure"
+    if alias and is_overflow_rewire_alias(alias):
+        return "overflow"
+    if alias.upper() == (overflow_alias or "").strip().upper() and alias:
+        return "overflow"
+    if alias:
+        return "mint"
+    return "unknown"
+
+
+def summarize_partition_rewire_plan(
+    rewired_edges: List[Dict[str, Any]],
+    *,
+    overflow_alias: str,
+    new_sub_concepts: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Aggregate mint vs reuse vs overflow counts for partition_completed events."""
+    mint_sub_aliases: Set[str] = set()
+    for edge in rewired_edges:
+        kind = edge.get("assignment_kind") or partition_rewire_assignment_kind(
+            edge, overflow_alias=overflow_alias
+        )
+        edge["assignment_kind"] = kind
+        if kind == "mint":
+            alias = (edge.get("connect_to_sub_alias") or "").strip()
+            if alias:
+                mint_sub_aliases.add(alias)
+    kinds = [e.get("assignment_kind", "unknown") for e in rewired_edges]
+    return {
+        "new_sub_concepts_planned": len(new_sub_concepts),
+        "mint_sub_aliases": sorted(mint_sub_aliases),
+        "mint_assignment_count": kinds.count("mint"),
+        "reuse_existing_assignment_count": kinds.count("reuse_existing"),
+        "overflow_assignment_count": kinds.count("overflow"),
+        "overflow_closure_assignment_count": kinds.count("overflow_closure"),
+    }
 
 
 def merge_partition_to_engine_rewires(
@@ -330,7 +436,8 @@ def finalize_rewire_edges(
             {
                 "neighbor_id": nid,
                 "connect_to_sub_alias": orphan_alias,
-                "description": "Closure default orphan promotion.",
+                "description": CLOSURE_ORPHAN_DESCRIPTION,
+                "assignment_kind": "overflow_closure",
             }
         )
         covered.add(nid)

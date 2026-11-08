@@ -633,7 +633,8 @@ def test_reorg_partition_prompt_injects_strategy_without_jinja():
     assert "{%" not in prompt
     assert "WRAPPER SPLIT" in prompt
     assert "overflow_neighbors" in prompt
-    assert "MIN-2 PER SUB" in prompt
+    assert "connect_to_existing_neighbor_index" in prompt
+    assert "MIN-2 PER NEW SUB" in prompt
 
     block_r, _overflow_r = _reorg_split_strategy_block(is_genesis=False)
     prompt_r = load_prompt(

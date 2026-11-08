@@ -220,6 +220,104 @@ def test_reorg_queue_filo_prepends_cascade_before_next_discover():
     assert order == ["P_cascade", "A", "B"]
 
 
+def test_genesis_wrapper_reuses_existing_mutable_child(project_id):
+    """Immutables rewire to existing mutable child; no duplicate hub minted."""
+    genesis = GraphNode(
+        _id="genesis_reuse",
+        node_type="CONCEPT",
+        title="Everything",
+        description="Root",
+        project_ids=[project_id],
+        metadata={"is_genesis": True, "immutable": False},
+    )
+    existing_child = GraphNode(
+        _id="mut_existing_hub",
+        node_type="CONCEPT",
+        title="Existing Department Hub",
+        description="Already under Genesis",
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
+    imm_a = GraphNode(
+        _id="imm_reuse_a",
+        node_type="CONCEPT",
+        title="Evidence A",
+        project_ids=[project_id],
+        metadata={"immutable": True},
+    )
+    imm_b = GraphNode(
+        _id="imm_reuse_b",
+        node_type="CONCEPT",
+        title="Evidence B",
+        project_ids=[project_id],
+        metadata={"immutable": True},
+    )
+    for n in (genesis, existing_child, imm_a, imm_b):
+        db_engine.upsert_node(n)
+    from app.services.graph_link_utils import set_mutable_parent
+
+    set_mutable_parent(
+        existing_child.id, genesis.id, [project_id], project_scope=project_id
+    )
+    for imm_id in ("imm_reuse_a", "imm_reuse_b"):
+        db_engine.upsert_edge(
+            GraphEdge(
+                _id=f"e_{imm_id}_g",
+                source_id=imm_id,
+                target_id=genesis.id,
+                description="linked",
+                project_ids=[project_id],
+            )
+        )
+
+    nodes_before = len(db_engine.get_nodes(project_id))
+    split_cmd = {
+        "action": "SPLIT_CONCEPT",
+        "concept_id": genesis.id,
+        "parent_title": "Everything",
+        "parent_description": "Root",
+        "sub_concepts": [],
+        "rewired_edges": [
+            {
+                "neighbor_id": "imm_reuse_a",
+                "connect_to_sub_alias": "",
+                "connect_to_target_id": "mut_existing_hub",
+            },
+            {
+                "neighbor_id": "imm_reuse_b",
+                "connect_to_sub_alias": "",
+                "connect_to_target_id": "mut_existing_hub",
+            },
+        ],
+        "partition_neighbor_ids": [
+            "mut_existing_hub",
+            "imm_reuse_a",
+            "imm_reuse_b",
+        ],
+    }
+    graph_ingestion_engine.execute_single_command(
+        split_cmd, doc_title="Doc", proj_list=[project_id]
+    )
+    nodes_after = len(db_engine.get_nodes(project_id))
+    assert nodes_after == nodes_before
+
+    child = db_engine.get_node("mut_existing_hub")
+    assert child.metadata.get(MUTABLE_PARENT_META_KEY) == genesis.id
+    for imm_id in ("imm_reuse_a", "imm_reuse_b"):
+        edges = [
+            e
+            for e in db_engine.get_edges(project_id)
+            if e.source_id == imm_id and e.target_id == "mut_existing_hub"
+        ]
+        assert len(edges) == 1
+    to_genesis = [
+        e
+        for e in db_engine.get_edges(project_id)
+        if e.source_id in ("imm_reuse_a", "imm_reuse_b") and e.target_id == genesis.id
+    ]
+    assert to_genesis == []
+
+
 def test_genesis_wrapper_reparents_mutable_neighbors(project_id):
     """Mutable direct neighbors in partition batch move under new wrapper with parent metadata."""
     from app.services.graph_analytics import MutableTreeIndex

@@ -11,7 +11,7 @@ Aligned with docs/ARCHITECTURE.md Section 3:
 
 import time
 from typing import Dict, List, Literal, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Canonical Node Types
 ROOT_NODE_TYPES = {"paper", "blog", "video", "post", "ROOT"}
@@ -315,8 +315,28 @@ class ReorgSplitPayload(BaseModel):
 
 class RewireEdgeItem(BaseModel):
     neighbor_index: int
-    connect_to_sub_alias: str
+    connect_to_sub_alias: Optional[str] = None
+    connect_to_existing_neighbor_index: Optional[int] = None
     description: str = ""
+
+    @model_validator(mode="after")
+    def exactly_one_rewire_target(self) -> "RewireEdgeItem":
+        alias = (self.connect_to_sub_alias or "").strip()
+        has_sub = bool(alias)
+        has_existing = self.connect_to_existing_neighbor_index is not None
+        if has_sub == has_existing:
+            raise ValueError(
+                "Each rewired_edges row must set exactly one of "
+                "connect_to_sub_alias or connect_to_existing_neighbor_index."
+            )
+        if (
+            has_existing
+            and self.neighbor_index == self.connect_to_existing_neighbor_index
+        ):
+            raise ValueError(
+                "connect_to_existing_neighbor_index must differ from neighbor_index."
+            )
+        return self
 
 
 class ReorgRewirePayload(BaseModel):
@@ -344,7 +364,11 @@ class ReorgPartitionPayload(BaseModel):
     overflow_neighbors: List[OverflowNeighborItem] = Field(default_factory=list)
     rewired_edges: List[RewireEdgeItem] = Field(
         ...,
-        description="Sub-concept assignments only (sub_* aliases). Overflow neighbors go in overflow_neighbors.",
+        description=(
+            "Neighbor assignments: connect_to_sub_alias (new sub_*) or "
+            "connect_to_existing_neighbor_index (mutable batch neighbor). "
+            "Overflow via overflow_neighbors."
+        ),
     )
 
 

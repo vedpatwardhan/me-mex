@@ -8,40 +8,49 @@ Your task is a **unified partition** of over-clustered mutable concept '{{ node_
 
 OPERATIONAL MODE: {{ mode }}
 
-## AT LEAST ONE SUB-CONCEPT (structure)
+## AT LEAST ONE NEW OR REUSED HUB
 
-Reorganization exists to **subdivide** the hub. You must propose **at least {{ min_sub_concepts }}** entry in `sub_concepts` with valid groupings below.
+Subdivide by **minting new sub-concepts** (`sub_*` in `sub_concepts`) and/or **reusing existing mutable neighbors** as grouping hubs (see below). When you use `connect_to_sub_alias`, list matching entries in `sub_concepts`.
 
-## MIN-2 PER SUB (absolute — no exceptions)
+## REUSE EXISTING MUTABLE NEIGHBORS (critical)
 
-Every entry in `sub_concepts` must receive **≥ {{ min_sub_neighbors }}** distinct neighbors via `rewired_edges`. **Never** output a sub with 0 or 1 neighbor.
+If a **mutable** neighbor in the batch already acts as a department hub under the split target, attach additional neighbors to it instead of minting a duplicate:
 
-If a thematic hint has only one neighbor, list that neighbor in **`overflow_neighbors`**, not as a thin sub-concept.
+- Use **`connect_to_existing_neighbor_index`** (batch index of that mutable neighbor).
+- **Do not** list that neighbor again in `sub_concepts`.
+- **Do not** assign that hub's own index to a new `sub_*` alias (it stays on the split target).
+- Immutable-only stragglers may attach to an existing mutable hub with this field.
+
+## MIN-2 PER NEW SUB (absolute)
+
+Every **new** entry in `sub_concepts` must receive **≥ {{ min_sub_neighbors }}** distinct neighbors via `rewired_edges` using `connect_to_sub_alias`. **Never** output a thin new sub with 0 or 1 neighbor.
+
+If a would-be new sub has only one neighbor, use **`overflow_neighbors`** or **`connect_to_existing_neighbor_index`** to an existing mutable hub instead.
 
 ## OVERFLOW NEIGHBORS (first-class)
 
-Neighbors that **cannot** join any **≥{{ min_sub_neighbors }}-neighbor** sub group belong in **`overflow_neighbors`** (with a brief `rationale`).
+Neighbors that **cannot** join any **≥{{ min_sub_neighbors }}-neighbor** new sub group belong in **`overflow_neighbors`** (with a brief `rationale`).
 
 Overflow neighbors are promoted to **{{ overflow_target_label }}** at commit time (not listed in `rewired_edges`).
 
 ## DEGREE GOAL (single step)
 
-Prefer **one** partition that moves this hub **toward** degree **below τ** by minting **coherent multi-neighbor subs** (each **≥{{ min_sub_neighbors }}**). Group related neighbors aggressively when thematically defensible. Use **overflow** for stragglers so the parent/orphan load trends down in one commit.
+Prefer **one** partition that moves this hub **toward** degree **below τ** by minting coherent multi-neighbor subs and/or strengthening existing mutable children. Use **overflow** for stragglers so the parent/orphan load trends down in one commit.
 
 ## THREE LIST OUTPUT
 
 | List | Purpose |
 |------|---------|
-| `sub_concepts` | Sub-hubs to mint / replacement siblings (`sub_1`, `sub_2`, …). Count: **{{ min_sub_concepts }}** to **{{ max_allowed_sub_concepts }}** (≤ n // 2). |
+| `sub_concepts` | **New** sub-hubs to mint (`sub_1`, `sub_2`, …). Count: **0** to **{{ max_allowed_sub_concepts }}** (≤ n // 2) when reusing existing hubs; at least **{{ min_sub_concepts }}** when any row uses `connect_to_sub_alias`. |
 | `overflow_neighbors` | `{ neighbor_index, rationale }` for orphans → {{ overflow_target_label }}. |
-| `rewired_edges` | **Sub assignments only** — `{ neighbor_index, connect_to_sub_alias: "sub_*", description }`. **No** EVERYTHING/ANCESTOR here. |
+| `rewired_edges` | Per neighbor: **exactly one** of `connect_to_sub_alias` (new `sub_*`) **or** `connect_to_existing_neighbor_index` (mutable batch index). **No** EVERYTHING/ANCESTOR here. |
 
-**Coverage:** Every neighbor index **1..{{ neighbor_count }}** appears **exactly once** — either in `rewired_edges` or in `overflow_neighbors`.
+**Coverage:** Every neighbor index **1..{{ neighbor_count }}** appears **exactly once** in `rewired_edges` or `overflow_neighbors`, **except** mutable hubs used only as `connect_to_existing_neighbor_index` targets (anchors) need not be listed as assignees.
 
 PARTITION GOAL (max coverage among subs):
 1. Consider **all** neighbors listed (immutable and mutable together).
 2. Group into coherent sub-concepts of ~2–3 neighbors when n allows.
-3. Do **not** copy neighbor titles verbatim for new sub-concepts — synthesize umbrella titles.
+3. Do **not** copy neighbor titles into **new** `sub_concepts` — synthesize umbrella titles. **Reuse** is correct when the hub already exists in the batch.
 
 Parent update (compulsory):
 - Provide `parent_title` and `parent_description` for the split target.
@@ -66,7 +75,17 @@ Return JSON format strictly:
   ],
   "rewired_edges": [
     {
-      "neighbor_index": 1,
+      "neighbor_index": 2,
+      "connect_to_existing_neighbor_index": 1,
+      "description": "Attach evidence to existing mutable hub at batch index 1."
+    },
+    {
+      "neighbor_index": 3,
+      "connect_to_sub_alias": "sub_1",
+      "description": "Optional natural-language note for the new link."
+    },
+    {
+      "neighbor_index": 4,
       "connect_to_sub_alias": "sub_1",
       "description": "Optional natural-language note for the new link."
     }

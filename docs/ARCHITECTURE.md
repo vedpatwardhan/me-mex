@@ -155,7 +155,7 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 
 1. **`sub_concepts`** — at least one sub; each sub must have **≥ 2** neighbors in `rewired_edges` (LLM contract).
 2. **`overflow_neighbors`** — neighbors promoted to **Everything** (Genesis) or **ancestor** (replacement); not listed in `rewired_edges`.
-3. **`rewired_edges`** — **sub assignments only** (`sub_*` aliases).
+3. **`rewired_edges`** — per neighbor, **exactly one** of `connect_to_sub_alias` (`sub_*` mint) or `connect_to_existing_neighbor_index` (reuse a **mutable** batch neighbor as hub). Mutable anchors used only as targets may be omitted from assignee rows.
 
 Upstream **`partition_neighbor_count ≥ τ`** gates the partition batch size (same count as `hub_neighbor_ids`, excluding tree parent). Post-parse: **`normalize_partition_singleton_subs`** (demote thin subs) → **`validate_reorg_partition`** (retry on failure) → commit uses the **normalized** lists → **`merge_partition_to_engine_rewires`** → **`finalize_rewire_edges`**.
 

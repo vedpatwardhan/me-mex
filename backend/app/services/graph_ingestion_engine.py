@@ -51,6 +51,9 @@ def _rewire_target_kind(
 
 
 def _rewire_target_label(kind: str, target_node: Optional[GraphNode]) -> str:
+    if kind == "existing_mutable_hub":
+        title = target_node.title if target_node else "existing hub"
+        return f"existing mutable hub '{title}'"
     if kind == "genesis_everything":
         return "Everything (Genesis)"
     if kind == "ancestor":
@@ -207,7 +210,7 @@ class GraphIngestionEngine:
             return None
         sub_concepts = item.get("sub_concepts", [])
         rewired_edges = list(item.get("rewired_edges", []))
-        if not sub_concepts:
+        if not sub_concepts and not rewired_edges:
             return None
 
         project_scope = proj_list[0] if proj_list else None
@@ -395,7 +398,10 @@ class GraphIngestionEngine:
         for rewired in rewired_edges:
             neighbor_id = rewired.get("neighbor_id")
             raw_alias = rewired.get("connect_to_sub_alias") or ""
+            preset_target = rewired.get("connect_to_target_id")
             if not neighbor_id:
+                continue
+            if preset_target and neighbor_id == preset_target:
                 continue
             if neighbor_id not in deleted_neighbors:
                 for old_edge in list(current_edges):
@@ -410,7 +416,9 @@ class GraphIngestionEngine:
                 deleted_neighbors.add(neighbor_id)
 
             used_overflow_fallback = False
-            if _ancestor_aliases(raw_alias):
+            if preset_target:
+                target_id = preset_target
+            elif _ancestor_aliases(raw_alias):
                 target_id = fallback_target_id
                 ungrouped_count += 1
                 used_overflow_fallback = True
@@ -441,29 +449,41 @@ class GraphIngestionEngine:
                 and not target_node.is_immutable
             ):
                 set_mutable_parent(neighbor_id, target_id, proj_list, project_scope)
-            target_kind = _rewire_target_kind(
-                raw_alias,
-                is_genesis_split=is_genesis_split,
-                used_overflow_fallback=used_overflow_fallback,
-            )
+            if preset_target:
+                target_kind = "existing_mutable_hub"
+            else:
+                target_kind = _rewire_target_kind(
+                    raw_alias,
+                    is_genesis_split=is_genesis_split,
+                    used_overflow_fallback=used_overflow_fallback,
+                )
             target_label = _rewire_target_label(target_kind, target_node)
             neighbor_title = neighbor_node.title if neighbor_node else neighbor_id
-            rewire_events.append(
-                {
-                    "event": "reorg_neighbor_rewired",
-                    "split_hub_id": split_target_id,
-                    "split_hub_title": split_hub_title,
-                    "source_id": neighbor_id,
-                    "source_title": neighbor_title,
-                    "target_id": target_id,
-                    "target_title": target_node.title if target_node else target_id,
-                    "target_kind": target_kind,
-                    "connect_to_sub_alias": raw_alias,
-                    "description": rewire_note,
-                    "message": (f"Re-wired '{neighbor_title}' → {target_label}."),
-                    "timestamp": ts,
-                }
-            )
+            rewire_evt: Dict[str, Any] = {
+                "event": "reorg_neighbor_rewired",
+                "split_hub_id": split_target_id,
+                "split_hub_title": split_hub_title,
+                "source_id": neighbor_id,
+                "source_title": neighbor_title,
+                "target_id": target_id,
+                "target_title": target_node.title if target_node else target_id,
+                "target_kind": target_kind,
+                "connect_to_sub_alias": raw_alias,
+                "description": rewire_note,
+                "message": (f"Re-wired '{neighbor_title}' → {target_label}."),
+                "timestamp": ts,
+            }
+            if rewired.get("assignment_kind"):
+                rewire_evt["assignment_kind"] = rewired.get("assignment_kind")
+            if rewired.get("neighbor_index") is not None:
+                rewire_evt["neighbor_index"] = rewired.get("neighbor_index")
+            if rewired.get("connect_to_existing_neighbor_index") is not None:
+                rewire_evt["connect_to_existing_neighbor_index"] = rewired.get(
+                    "connect_to_existing_neighbor_index"
+                )
+            if preset_target:
+                rewire_evt["connect_to_target_id"] = preset_target
+            rewire_events.append(rewire_evt)
         return deleted_neighbors, ungrouped_count, rewire_events
 
 

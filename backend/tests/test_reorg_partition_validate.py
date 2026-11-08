@@ -10,6 +10,7 @@ from app.models import GraphEdge, GraphNode
 from app.services.reorg_rewire_utils import (
     merge_partition_to_engine_rewires,
     normalize_partition_singleton_subs,
+    summarize_partition_rewire_plan,
     validate_reorg_partition,
 )
 
@@ -40,7 +41,103 @@ def test_validate_accepts_sub_and_overflow_split():
 def test_validate_rejects_zero_subs():
     ok, errs = validate_reorg_partition([], [], [], neighbor_count=5)
     assert not ok
-    assert any("At least one sub_concept" in e for e in errs)
+    assert any("connect_to_sub_alias" in e or "connect_to_existing" in e for e in errs)
+
+
+def test_summarize_partition_rewire_plan_mint_vs_reuse():
+    edges = [
+        {
+            "connect_to_sub_alias": "sub_1",
+            "neighbor_index": 3,
+        },
+        {
+            "connect_to_sub_alias": "sub_1",
+            "neighbor_index": 4,
+            "assignment_kind": "mint",
+        },
+        {
+            "connect_to_existing_neighbor_index": 1,
+            "connect_to_target_id": "hub_existing",
+            "neighbor_index": 2,
+        },
+        {
+            "connect_to_sub_alias": "EVERYTHING",
+            "neighbor_index": 5,
+        },
+    ]
+    summary = summarize_partition_rewire_plan(
+        edges, overflow_alias="EVERYTHING", new_sub_concepts=[{"sub_id_alias": "sub_1"}]
+    )
+    assert summary["new_sub_concepts_planned"] == 1
+    assert summary["mint_assignment_count"] == 2
+    assert summary["reuse_existing_assignment_count"] == 1
+    assert summary["overflow_assignment_count"] == 1
+
+
+def test_validate_accepts_existing_mutable_reuse():
+    """Immutable neighbors attach to existing mutable hub; anchor index exempt from coverage."""
+    subs = [{"sub_id_alias": "sub_1", "title": "New Group", "description": "d"}]
+    edges = [
+        {"neighbor_index": 2, "connect_to_existing_neighbor_index": 1},
+        {"neighbor_index": 3, "connect_to_existing_neighbor_index": 1},
+        {"neighbor_index": 4, "connect_to_sub_alias": "sub_1"},
+        {"neighbor_index": 5, "connect_to_sub_alias": "sub_1"},
+    ]
+    ok, errs = validate_reorg_partition(
+        subs,
+        [],
+        edges,
+        neighbor_count=5,
+        mutable_neighbor_indices={1},
+    )
+    assert ok, errs
+
+
+def test_validate_rejects_self_existing_target():
+    edges = [
+        {"neighbor_index": 1, "connect_to_existing_neighbor_index": 1},
+    ]
+    ok, errs = validate_reorg_partition(
+        [],
+        [],
+        edges,
+        neighbor_count=2,
+        mutable_neighbor_indices={1},
+    )
+    assert not ok
+    assert any("cannot target itself" in e for e in errs)
+
+
+def test_validate_rejects_both_targets():
+    edges = [
+        {
+            "neighbor_index": 1,
+            "connect_to_sub_alias": "sub_1",
+            "connect_to_existing_neighbor_index": 2,
+        },
+    ]
+    ok, errs = validate_reorg_partition(
+        [{"sub_id_alias": "sub_1", "title": "A", "description": "d"}],
+        [],
+        edges,
+        neighbor_count=2,
+        mutable_neighbor_indices={1, 2},
+    )
+    assert not ok
+    assert any("exactly one" in e for e in errs)
+
+
+def test_validate_rejects_immutable_existing_target():
+    edges = [{"neighbor_index": 2, "connect_to_existing_neighbor_index": 1}]
+    ok, errs = validate_reorg_partition(
+        [],
+        [],
+        edges,
+        neighbor_count=2,
+        mutable_neighbor_indices=set(),
+    )
+    assert not ok
+    assert any("mutable neighbor" in e for e in errs)
 
 
 def test_validate_rejects_singleton_sub():

@@ -33,6 +33,8 @@ from app.services.reorg_rewire_utils import (
     merge_partition_to_engine_rewires,
     normalize_partition_singleton_subs,
     partition_neighbor_count,
+    partition_rewire_assignment_kind,
+    summarize_partition_rewire_plan,
     validate_reorg_partition,
 )
 from app.services.llm_gateway import llm_gateway
@@ -497,11 +499,17 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     },
                 )
 
+            mutable_neighbor_indices = {
+                entry["neighbor_index"]
+                for entry in indexed_neighbors_to_rewire
+                if not entry.get("is_immutable")
+            }
             ok, validation_errors = validate_reorg_partition(
                 formulated_subs,
                 overflow_raw,
                 sub_rewired_raw,
                 neighbor_count=n_neighbors,
+                mutable_neighbor_indices=mutable_neighbor_indices,
             )
             if ok:
                 break
@@ -565,19 +573,32 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
 
         rewired = []
         overflow_neighbor_ids: List[str] = []
+        reuse_target_indices: Set[int] = set()
         for r in merged_raw:
-            real_nb_id = rewire_concept_mapper.to_id(r.get("neighbor_index"))
+            neighbor_idx = r.get("neighbor_index")
+            real_nb_id = rewire_concept_mapper.to_id(neighbor_idx)
             if not real_nb_id:
                 continue
-            if (r.get("connect_to_sub_alias") or "").upper() == overflow_alias:
+            alias = (r.get("connect_to_sub_alias") or "").strip()
+            existing_idx = r.get("connect_to_existing_neighbor_index")
+            connect_to_target_id: Optional[str] = None
+            if existing_idx is not None:
+                connect_to_target_id = rewire_concept_mapper.to_id(existing_idx)
+                reuse_target_indices.add(existing_idx)
+            if alias.upper() == overflow_alias:
                 overflow_neighbor_ids.append(real_nb_id)
-            rewired.append(
-                {
-                    "neighbor_id": real_nb_id,
-                    "connect_to_sub_alias": r.get("connect_to_sub_alias"),
-                    "description": r.get("description", ""),
-                }
+            row: Dict[str, Any] = {
+                "neighbor_index": neighbor_idx,
+                "neighbor_id": real_nb_id,
+                "connect_to_sub_alias": alias,
+                "connect_to_existing_neighbor_index": existing_idx,
+                "connect_to_target_id": connect_to_target_id,
+                "description": r.get("description", ""),
+            }
+            row["assignment_kind"] = partition_rewire_assignment_kind(
+                row, overflow_alias=overflow_alias
             )
+            rewired.append(row)
 
         partition_ids = [nb["id"] for nb in target_neighbors_to_rewire if nb.get("id")]
         rewired = finalize_rewire_edges(
@@ -587,6 +608,30 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             is_genesis_split=is_genesis_hub,
             explicit_neighbor_ids=partition_ids,
         )
+        for row in rewired:
+            if not row.get("assignment_kind"):
+                row["assignment_kind"] = partition_rewire_assignment_kind(
+                    row, overflow_alias=overflow_alias
+                )
+
+        reuse_plan_summary = summarize_partition_rewire_plan(
+            rewired,
+            overflow_alias=overflow_alias,
+            new_sub_concepts=formulated_subs,
+        )
+        existing_hub_reuse_targets: List[Dict[str, Any]] = []
+        for idx in sorted(reuse_target_indices):
+            hub_id = rewire_concept_mapper.to_id(idx)
+            if not hub_id:
+                continue
+            hub_node = db_engine.get_node(hub_id)
+            existing_hub_reuse_targets.append(
+                {
+                    "neighbor_index": idx,
+                    "node_id": hub_id,
+                    "title": hub_node.title if hub_node else "",
+                }
+            )
 
         partition_event = {
             "event": "reorg_partition_completed",
@@ -602,10 +647,15 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             "overflow_neighbor_ids": overflow_neighbor_ids,
             "rewired_edges_count": len(rewired),
             "rewired_edges": rewired,
+            "existing_hub_reuse_targets": existing_hub_reuse_targets,
+            **reuse_plan_summary,
             "message": (
                 f"[{self.department_name}] Partition ({mode}) completed for '{target_node.title}': "
-                f"{len(formulated_subs)} sub-concept(s), {len(overflow_raw)} overflow neighbor(s), "
-                f"{len(rewired)} total re-wire(s)."
+                f"mint {reuse_plan_summary['new_sub_concepts_planned']} new sub(s), "
+                f"{reuse_plan_summary['mint_assignment_count']} mint assignment(s), "
+                f"{reuse_plan_summary['reuse_existing_assignment_count']} reuse assignment(s), "
+                f"{len(overflow_raw)} overflow in list, "
+                f"{reuse_plan_summary['overflow_assignment_count'] + reuse_plan_summary['overflow_closure_assignment_count']} overflow rewire(s)."
             ),
             "timestamp": time.time(),
         }
