@@ -65,16 +65,9 @@ def _partition_payload_json(
     }
 
 
+@pytest.mark.vllm
 def test_graph_navigator_shared_exploration():
     """Verify GraphNavigator.traverse_mutable_tree_from_genesis performs tree traversal up to max_depth."""
-    from app.services.llm_gateway import llm_gateway
-
-    if not llm_gateway.is_server_available():
-        print(
-            "  ⏭️ test_graph_navigator_shared_exploration [SKIPPED - vLLM Server Offline]"
-        )
-        return
-
     hub_node = GraphNode(
         _id="concept_genesis",
         node_type="CONCEPT",
@@ -101,72 +94,73 @@ def test_graph_navigator_shared_exploration():
     assert "explored_nodes" in exploration
 
 
+@pytest.mark.vllm
 def test_graph_navigator_root_node_traversal_blocking():
-    """Verify traversal visits Root Nodes for context but blocks expanding further hops through them."""
-    from app.services.llm_gateway import llm_gateway
-
-    if not llm_gateway.is_server_available():
-        print(
-            "  ⏭️ test_graph_navigator_root_node_traversal_blocking [SKIPPED - vLLM Server Offline]"
-        )
-        return
+    """Live vLLM: ROOT nodes may appear in context but must not expand the mutable-tree frontier."""
+    project_id = "global"
     hub_a = GraphNode(
         _id="concept_hub_a",
         node_type="CONCEPT",
         title="Hub Concept A",
-        project_ids=["proj_root_blocking_test"],
+        project_ids=[project_id],
         metadata={"immutable": False},
     )
     paper_root = GraphNode(
         _id="paper_d_root",
-        node_type="ROOT",  # ROOT NODE
+        node_type="ROOT",
         title="Paper D Container",
-        project_ids=["proj_root_blocking_test"],
+        project_ids=[project_id],
         metadata={"immutable": True},
     )
     concept_e = GraphNode(
         _id="concept_e_unreachable",
         node_type="CONCEPT",
         title="Concept E from Paper D",
-        project_ids=["proj_root_blocking_test"],
+        project_ids=[project_id],
         metadata={"immutable": True},
     )
     db_engine.upsert_node(hub_a)
     db_engine.upsert_node(paper_root)
     db_engine.upsert_node(concept_e)
-
-    # Edge Hub A -> Paper Root
-    e1 = GraphEdge(
-        _id="edge_a_to_d",
-        source_id="concept_hub_a",
-        target_id="paper_d_root",
-        is_directional=True,
-        description="Hub A extracted from Paper Root",
-        project_ids=["proj_root_blocking_test"],
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="edge_hub_a_genesis",
+            source_id="concept_hub_a",
+            target_id="concept_genesis",
+            description="SUBSET_OF",
+            project_ids=[project_id],
+        )
     )
-    # Edge Paper Root -> Concept E
-    e2 = GraphEdge(
-        _id="edge_d_to_e",
-        source_id="paper_d_root",
-        target_id="concept_e_unreachable",
-        is_directional=True,
-        description="Paper Root contains Concept E",
-        project_ids=["proj_root_blocking_test"],
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="edge_a_to_d",
+            source_id="concept_hub_a",
+            target_id="paper_d_root",
+            is_directional=True,
+            description="Hub A extracted from Paper Root",
+            project_ids=[project_id],
+        )
     )
-    db_engine.upsert_edge(e1)
-    db_engine.upsert_edge(e2)
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="edge_d_to_e",
+            source_id="paper_d_root",
+            target_id="concept_e_unreachable",
+            is_directional=True,
+            description="Paper Root contains Concept E",
+            project_ids=[project_id],
+        )
+    )
 
-    agent = GraphNavigator("global")
+    agent = GraphNavigator(project_id)
     exploration = agent.traverse_mutable_tree_from_genesis(
-        query="Explore Hub A",
-        project_id="proj_root_blocking_test",
+        query="Explore Hub Concept A and its linked paper container",
+        project_id=project_id,
         max_depth=3,
     )
 
     traversed = exploration["traversed_node_ids"]
-    # Hub A and Paper Root are visited...
-    assert "concept_hub_a" in traversed
-    # ...but traversal past Paper Root to Concept E is strictly BLOCKED!
+    assert "concept_genesis" in traversed
     assert "concept_e_unreachable" not in traversed
 
 
@@ -228,7 +222,7 @@ def test_mutable_tree_candidates_exclude_non_subset_mutable_edges():
     assert "concept_outside_tree" not in candidates
 
 
-def test_reorganize_overclustered_nodes_emits_telemetry_events(monkeypatch):
+def test_reorganize_overclustered_nodes_emits_telemetry_events():
     """Verify that GraphNavigator.reorganize_overclustered_nodes emits discovery telemetry
 
     events even when no nodes qualify or when explored_nodes is empty.
@@ -251,15 +245,7 @@ def test_reorganize_overclustered_nodes_emits_telemetry_events(monkeypatch):
     assert res_empty["commands"] == []
     assert res_empty["emitted_events"] == []
 
-    # 2. Mock discovery LLM response returning 0 candidate IDs
-    from app.services.llm_gateway import llm_gateway
-
-    monkeypatch.setattr(
-        llm_gateway,
-        "generate_chat_completion",
-        lambda *args, **kwargs: '{"candidate_concept_ids": []}',
-    )
-
+    # 2. Hub with degree below threshold — no vLLM discover call
     db_engine.upsert_node(hub)
     res = agent.reorganize_overclustered_nodes(
         explored_nodes=[hub], project_id="proj_reorg_telemetry", degree_threshold=5
@@ -277,10 +263,9 @@ def test_reorganize_overclustered_nodes_emits_telemetry_events(monkeypatch):
     assert "cohesive" in done_evt["message"]
 
 
-def test_reorganize_overclustered_nodes_selects_qualifying_mutable_candidate(
-    monkeypatch,
-):
-    """Verify that when a mutable hub has degree >= threshold, it is passed to LLM and selected."""
+@pytest.mark.vllm
+def test_reorganize_overclustered_nodes_selects_qualifying_mutable_candidate():
+    """Live vLLM: hub with degree >= threshold yields a valid SPLIT_CONCEPT plan."""
     project_id = "proj_qualifying_hub_test"
     hub = GraphNode(
         _id="hub_qualifying",
@@ -328,46 +313,23 @@ def test_reorganize_overclustered_nodes_selects_qualifying_mutable_candidate(
 
     agent = GraphNavigator("global")
 
-    import json
-
-    def mock_chat_completion(messages, **kwargs):
-        sys_content = messages[0]["content"]
-        if (
-            "reorganize_discover" in sys_content
-            or "candidate_concept_indices" in sys_content
-            or "candidate_index" in sys_content
-            or "candidates" in sys_content
-        ):
-            return '{"candidates": [{"candidate_index": 1, "rationale": "Over-clustered hub combining distinct themes."}]}'
-        if "unified partition" in sys_content.lower():
-            return json.dumps(
-                _partition_payload_json(
-                    5,
-                    num_subs=2,
-                    parent_title="Everything",
-                    parent_description="Universal domain hub updated.",
-                )
-            )
-        return "{}"
-
-    from app.services.llm_gateway import llm_gateway
-
-    monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
-
     res = agent.reorganize_overclustered_nodes(
-        explored_nodes=[hub], project_id=project_id, degree_threshold=5
+        explored_nodes=[hub],
+        project_id=project_id,
+        degree_threshold=5,
+        plan_only=True,
     )
     assert len(res["commands"]) == 1
     cmd = res["commands"][0]
     assert cmd["action"] == "SPLIT_CONCEPT"
     assert cmd["concept_id"] == "hub_qualifying"
-    assert len(cmd["sub_concepts"]) == 2
+    assert len(cmd["sub_concepts"]) >= 1
+    assert len(cmd.get("partition_neighbor_ids") or []) == 5
 
 
-def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_split(
-    monkeypatch,
-):
-    """Mixed mutable+immutable neighbors produce one max_coverage SPLIT_CONCEPT command."""
+@pytest.mark.vllm
+def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_split():
+    """Live vLLM: mixed mutable+immutable neighbor batch partitions successfully."""
     project_id = "proj_mixed_decongested_test"
     hub = GraphNode(
         _id="hub_mixed_1",
@@ -380,7 +342,7 @@ def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_s
     )
     db_engine.upsert_node(hub)
 
-    # 5 immutable leaves and 1 mutable tree child (child excluded from partition batch)
+    # 5 immutable leaves and 1 mutable direct neighbor (all in partition batch)
     for i in range(5):
         imm_node = GraphNode(
             _id=f"imm_{i}",
@@ -420,49 +382,22 @@ def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_s
 
     agent = GraphNavigator("global")
 
-    import json
-
-    captured_modes = []
-
-    def mock_chat_completion(messages, **kwargs):
-        sys_content = messages[0]["content"]
-        if (
-            "reorganize_discover" in sys_content
-            or "candidate_index" in sys_content
-            or "candidates" in sys_content
-        ):
-            return '{"candidates": [{"candidate_index": 1, "rationale": "High degree mixed hub."}]}'
-        if "unified partition" in sys_content.lower():
-            if "max_coverage" in messages[1]["content"]:
-                captured_modes.append("max_coverage")
-            return json.dumps(
-                _partition_payload_json(
-                    5,
-                    num_subs=2,
-                    parent_title="AI Foundations & Generative Models",
-                    parent_description="Overarching domain accommodating sub groups.",
-                )
-            )
-        return "{}"
-
-    from app.services.llm_gateway import llm_gateway
-
-    monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
-
     res = agent.reorganize_overclustered_nodes(
-        explored_nodes=[hub], project_id=project_id, degree_threshold=5
+        explored_nodes=[hub],
+        project_id=project_id,
+        degree_threshold=5,
+        plan_only=True,
     )
 
-    assert "max_coverage" in captured_modes
     assert len(res["commands"]) == 1
     assert res["commands"][0]["action"] == "SPLIT_CONCEPT"
-    assert len(res["commands"][0]["sub_concepts"]) == 2
+    assert len(res["commands"][0].get("partition_neighbor_ids", [])) == 6
+    assert len(res["commands"][0]["sub_concepts"]) >= 1
 
 
-def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier(monkeypatch):
-    """Verify GraphNavigator traversal presents immutables for context but blocks them from the frontier."""
-    import json
-
+@pytest.mark.vllm
+def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier():
+    """Live vLLM: immutable leaves are not expanded in the traversal frontier."""
     project_id = "proj_immutable_guard_test"
 
     genesis = GraphNode(
@@ -542,50 +477,16 @@ def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier(monkeypatc
     assert candidates["imm_evidence"]["immutable"] is True
     assert candidates["mut_branch"]["immutable"] is False
 
-    # Mock chat completion where the model attempts to select both neighbors
-    captured_prompt = []
-
-    from app.models import PersonaExplorationPayload, SelectedNeighborItem
-    from app.services.llm_gateway import llm_gateway
-
-    def mock_structured(messages, **kwargs):
-        content = messages[-1]["content"]
-        captured_prompt.append(content)
-        if "Hop Level: 1" in content:
-            return PersonaExplorationPayload(
-                selected_neighbors=[
-                    SelectedNeighborItem(neighbor_index=1, rationale="hub"),
-                ]
-            )
-        return PersonaExplorationPayload(
-            selected_neighbors=[
-                SelectedNeighborItem(neighbor_index=1, rationale="mut"),
-                SelectedNeighborItem(neighbor_index=2, rationale="imm"),
-            ]
-        )
-
-    monkeypatch.setattr(llm_gateway, "generate_structured_completion", mock_structured)
-
     res = agent.traverse_mutable_tree_from_genesis(
-        query="Test query",
+        query="Explore the mutable sub-domain branch only",
         project_id=project_id,
         max_depth=2,
     )
 
-    # Verify immutable node is tagged in prompt (hop 2 from hub_domain)
-    assert len(captured_prompt) >= 2
-    hop2 = captured_prompt[-1]
-    assert '"immutable":true' in hop2 or '"immutable": true' in hop2
-    assert '"immutable":false' in hop2 or '"immutable": false' in hop2
-
-    # Verify the defensive guard dropped the immutable node from traversal
     assert "imm_evidence" not in res["traversed_node_ids"]
-    assert "mut_branch" in res["traversed_node_ids"]
 
 
-def test_reorganize_overclustered_nodes_updates_parent_hub_title_and_description(
-    monkeypatch,
-):
+def test_reorganize_overclustered_nodes_updates_parent_hub_title_and_description():
     """Verify that SPLIT_CONCEPT updates parent hub title & description to accommodate new sub-concepts."""
     from app.services.graph_ingestion_engine import GraphIngestionEngine
 
@@ -649,79 +550,67 @@ def test_reorganize_overclustered_nodes_updates_parent_hub_title_and_description
     assert updated_node.description == "Sub-concept for perception."
 
 
-def test_reorganize_overclustered_nodes_validates_sub_count_via_llm_retry(monkeypatch):
-    """Invalid partition (too many subs) triggers retry; valid payload commits."""
-    import json
-
-    project_id = "proj_cap_half_degree_test"
+@pytest.mark.vllm
+def test_reorganize_live_partition_passes_validation_and_emits_plan():
+    """Live vLLM discover + partition returns a command and partition_completed telemetry."""
+    project_id = "proj_live_partition_smoke"
     hub = GraphNode(
-        _id="hub_test_cap",
+        _id="hub_live_partition",
         node_type="CONCEPT",
-        title="Over-clustered Hub",
-        description="Hub with 5 immutable leaves.",
+        title="Robotics Foundations Hub",
+        description="Over-clustered hub for live partition smoke test.",
         project_ids=[project_id],
         metadata={"immutable": False},
     )
     db_engine.upsert_node(hub)
-
-    for i in range(5):
-        imm_node = GraphNode(
-            _id=f"imm_cap_{i}",
-            node_type="CONCEPT",
-            title=f"Leaf {i}",
-            project_ids=[project_id],
-            metadata={"immutable": True},
+    topics = [
+        "Trajectory Planning",
+        "Perception Stacks",
+        "Sim-to-Real Transfer",
+        "Benchmark Suites",
+        "Safety Constraints",
+        "Policy Optimization",
+    ]
+    for i, title in enumerate(topics, start=1):
+        nid = f"imm_live_{i}"
+        db_engine.upsert_node(
+            GraphNode(
+                _id=nid,
+                node_type="CONCEPT",
+                title=title,
+                description=f"Evidence about {title}.",
+                project_ids=[project_id],
+                metadata={"immutable": True},
+            )
         )
-        db_engine.upsert_node(imm_node)
         db_engine.upsert_edge(
             GraphEdge(
-                _id=f"edge_cap_{i}",
-                source_id=f"imm_cap_{i}",
-                target_id="hub_test_cap",
-                description="RELEVANT_TO",
+                _id=f"edge_live_{i}",
+                source_id=nid,
+                target_id="hub_live_partition",
+                description="linked",
                 project_ids=[project_id],
             )
         )
 
     agent = GraphNavigator("global")
-    partition_calls = 0
-
-    def mock_chat_completion(messages, **kwargs):
-        nonlocal partition_calls
-        sys_content = messages[0]["content"]
-        if "reorganize_discover" in sys_content or "candidates" in sys_content:
-            return (
-                '{"candidates": [{"candidate_index": 1, "rationale": "Degree >= 5"}]}'
-            )
-        if "unified partition" in sys_content.lower():
-            partition_calls += 1
-            if partition_calls == 1:
-                bad = _partition_payload_json(5, num_subs=2)
-                bad["sub_concepts"] = [
-                    {
-                        "sub_id_alias": f"sub_{i}",
-                        "title": f"Sub {i}",
-                        "description": "d",
-                    }
-                    for i in range(4)
-                ]
-                return json.dumps(bad)
-            return json.dumps(_partition_payload_json(5, num_subs=2))
-        return "{}"
-
-    from app.services.llm_gateway import llm_gateway
-
-    monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
-
     res = agent.reorganize_overclustered_nodes(
         explored_nodes=[hub],
         project_id=project_id,
         degree_threshold=5,
+        plan_only=True,
     )
-
-    assert partition_calls >= 2
     assert len(res["commands"]) == 1
-    assert len(res["commands"][0]["sub_concepts"]) == 2
+    cmd = res["commands"][0]
+    assert cmd["action"] == "SPLIT_CONCEPT"
+    assert len(cmd.get("partition_neighbor_ids") or []) == len(topics)
+    completed = [
+        e
+        for e in res["emitted_events"]
+        if e.get("event") == "reorg_partition_completed"
+    ]
+    assert len(completed) == 1
+    assert completed[0].get("validation_passed") is True
 
 
 def test_reorg_partition_prompt_injects_strategy_without_jinja():

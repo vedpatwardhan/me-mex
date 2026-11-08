@@ -72,9 +72,6 @@ class Settings:
     HTTPX_MAX_CONNECTIONS: int = int(os.getenv("HTTPX_MAX_CONNECTIONS", "20"))
     HTTPX_MAX_KEEPALIVE: int = int(os.getenv("HTTPX_MAX_KEEPALIVE", "10"))
 
-    REORG_SKIP_GENESIS_PARTITION_MIN_NEIGHBORS: int = int(
-        os.getenv("REORG_SKIP_GENESIS_PARTITION_MIN_NEIGHBORS", "3")
-    )
     REORG_PARTITION_ENABLE_REASONING: bool = _env_bool(
         "REORG_PARTITION_ENABLE_REASONING", "false"
     )

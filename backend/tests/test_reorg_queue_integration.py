@@ -79,7 +79,10 @@ def test_process_reorg_queue_defers_parent_until_siblings_done(monkeypatch):
     monkeypatch.setattr(agent, "build_split_command_for_hub", fake_build)
     from app.services.graph_analytics import MutableTreeIndex
 
-    monkeypatch.setattr(MutableTreeIndex, "effective_degree", lambda self, node_id: 999)
+    monkeypatch.setattr(
+        "app.agents.graph_navigator.partition_neighbor_count",
+        lambda hub_id, project_id: 999,
+    )
 
     q = ReorgQueue()
     q.enqueue_discover_fifo(

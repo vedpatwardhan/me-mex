@@ -62,7 +62,10 @@ def test_genesis_split_does_not_requeue_genesis(monkeypatch):
     from app.services.graph_analytics import MutableTreeIndex
 
     monkeypatch.setattr(agent, "build_split_command_for_hub", fake_build)
-    monkeypatch.setattr(MutableTreeIndex, "effective_degree", lambda self, node_id: 999)
+    monkeypatch.setattr(
+        "app.agents.graph_navigator.partition_neighbor_count",
+        lambda hub_id, project_id: 999,
+    )
 
     q = ReorgQueue()
     q.enqueue_discover_fifo(ReorgWorkItem("child_hub", "discover", "concept_genesis"))
@@ -161,7 +164,10 @@ def test_split_hubs_blocks_second_cascade_to_same_ancestor(monkeypatch):
     from app.services.graph_analytics import MutableTreeIndex
 
     monkeypatch.setattr(agent, "build_split_command_for_hub", fake_build)
-    monkeypatch.setattr(MutableTreeIndex, "effective_degree", lambda self, node_id: 999)
+    monkeypatch.setattr(
+        "app.agents.graph_navigator.partition_neighbor_count",
+        lambda hub_id, project_id: 999,
+    )
 
     q = ReorgQueue()
     q.enqueue_discover_fifo(ReorgWorkItem("child1", "discover", "parent_hub"))

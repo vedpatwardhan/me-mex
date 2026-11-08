@@ -45,22 +45,15 @@ def _skip_partition_neighbor(
     tree: MutableTreeIndex,
     nb_node: Optional[Any],
 ) -> bool:
-    """Tree backbone neighbors are not partition batch members."""
+    """Exclude only the split hub's recorded parent (overflow promotion target)."""
     parent_id = tree.parent_of(hub_id)
     if parent_id and nb_id == parent_id:
-        return True
-    if (
-        nb_node
-        and not nb_node.is_immutable
-        and not nb_node.is_root_node
-        and tree.parent_of(nb_id) == hub_id
-    ):
         return True
     return False
 
 
 def hub_neighbor_ids(split_target_id: str, project_scope: Optional[str]) -> Set[str]:
-    """Neighbor node ids eligible for partition / rewire closure on split_target."""
+    """Direct non-root graph neighbors of split_target (undifferentiated edges)."""
     tree = MutableTreeIndex(project_id=project_scope)
     neighbor_ids: Set[str] = set()
     for e in db_engine.get_edges(project_scope):
@@ -80,6 +73,11 @@ def hub_neighbor_ids(split_target_id: str, project_scope: Optional[str]) -> Set[
             continue
         neighbor_ids.add(nb_id)
     return neighbor_ids
+
+
+def partition_neighbor_count(split_target_id: str, project_scope: Optional[str]) -> int:
+    """Partition batch size: direct neighbors minus tree parent (Genesis has no parent)."""
+    return len(hub_neighbor_ids(split_target_id, project_scope))
 
 
 def max_allowed_sub_concepts(neighbor_count: int) -> int:

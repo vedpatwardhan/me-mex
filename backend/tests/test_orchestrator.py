@@ -8,7 +8,6 @@ Aligned with docs/ARCHITECTURE.md Section 2:
 
 import pytest
 from app.agents.orchestrator import orchestrator
-from app.services.llm_gateway import llm_gateway
 
 pytestmark = pytest.mark.xdist_group(name="worker1")
 
@@ -16,9 +15,6 @@ pytestmark = pytest.mark.xdist_group(name="worker1")
 @pytest.mark.vllm
 def test_classify_intent_conversation():
     """Verify CONVERSATION path classification for greetings and basic prompts."""
-    if not llm_gateway.is_server_available():
-        print("  ⏭️ test_classify_intent_conversation [SKIPPED - vLLM Server Offline]")
-        return
     res = orchestrator.classify_intent("Hello, good morning!", chat_history=[])
     assert res.intent == "CONVERSATION"
     assert res.doc_type is None
@@ -29,9 +25,6 @@ def test_classify_intent_conversation():
 @pytest.mark.vllm
 def test_classify_intent_retrieval():
     """Verify RETRIEVAL path classification for concept research queries."""
-    if not llm_gateway.is_server_available():
-        print("  ⏭️ test_classify_intent_retrieval [SKIPPED - vLLM Server Offline]")
-        return
     res = orchestrator.classify_intent(
         "Explain latent world models vs pixel world models", chat_history=[]
     )
@@ -44,9 +37,6 @@ def test_classify_intent_retrieval():
 @pytest.mark.vllm
 def test_classify_intent_ingestion():
     """Verify INGESTION path classification for paper links and text pastes."""
-    if not llm_gateway.is_server_available():
-        print("  ⏭️ test_classify_intent_ingestion [SKIPPED - vLLM Server Offline]")
-        return
     res = orchestrator.classify_intent(
         "https://arxiv.org/pdf/2605.11550 paper abstract", chat_history=[]
     )
@@ -57,11 +47,6 @@ def test_classify_intent_ingestion():
 @pytest.mark.vllm
 def test_classify_intent_with_chat_history():
     """Verify chat_history context influences follow-up intent classification."""
-    if not llm_gateway.is_server_available():
-        print(
-            "  ⏭️ test_classify_intent_with_chat_history [SKIPPED - vLLM Server Offline]"
-        )
-        return
     history = [
         {"role": "user", "text": "What is model predictive control?"},
         {
@@ -81,9 +66,6 @@ def test_classify_intent_with_chat_history():
 @pytest.mark.vllm
 def test_classify_intent_dual_payload():
     """Verify dual payload extraction when both URL and commentary notes are provided together."""
-    if not llm_gateway.is_server_available():
-        print("  ⏭️ test_classify_intent_dual_payload [SKIPPED - vLLM Server Offline]")
-        return
     res = orchestrator.classify_intent(
         "Include this document https://arxiv.org/pdf/2605.11550 because it proposes a novel skeletal loss formulation.",
         chat_history=[],
@@ -107,11 +89,6 @@ def test_consolidate_extracted_concepts():
 @pytest.mark.vllm
 def test_consolidate_extracted_concepts_with_payload():
     """Verify concept consolidation deduplication and passage ID preservation with non-empty payload."""
-    if not llm_gateway.is_server_available():
-        print(
-            "  ⏭️ test_consolidate_extracted_concepts_with_payload [SKIPPED - vLLM Server Offline]"
-        )
-        return
 
     raw_concepts = [
         {

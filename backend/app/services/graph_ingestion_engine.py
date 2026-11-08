@@ -327,9 +327,12 @@ class GraphIngestionEngine:
             target_node.updated_at = time.time()
             self.db.upsert_node(target_node)
 
+        used_aliases = sub_aliases_with_assigned_neighbors(rewired_edges)
         for sub in sub_concepts[1:]:
-            new_id = f"concept_{uuid.uuid4().hex[:8]}"
             alias = sub.get("sub_id_alias")
+            if alias and alias not in used_aliases:
+                continue
+            new_id = f"concept_{uuid.uuid4().hex[:8]}"
             if alias:
                 sub_alias_map[alias] = new_id
             sibling = GraphNode(
@@ -429,6 +432,15 @@ class GraphIngestionEngine:
 
             neighbor_node = self.db.get_node(neighbor_id)
             target_node = self.db.get_node(target_id)
+            if (
+                neighbor_node
+                and target_node
+                and not neighbor_node.is_root_node
+                and not neighbor_node.is_immutable
+                and not target_node.is_root_node
+                and not target_node.is_immutable
+            ):
+                set_mutable_parent(neighbor_id, target_id, proj_list, project_scope)
             target_kind = _rewire_target_kind(
                 raw_alias,
                 is_genesis_split=is_genesis_split,

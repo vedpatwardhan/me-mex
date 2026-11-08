@@ -214,11 +214,26 @@ def test_client() -> Generator[TestClient, None, None]:
 
 
 def pytest_runtest_setup(item):
-    """Pre-flight check: automatically skip tests requiring vLLM if the remote server is offline."""
-    if "vllm" in item.keywords:
-        force_llm = os.getenv("SKIP_LLM", "0") != "1"
-        if not llm_gateway.is_server_available() and not force_llm:
-            pytest.skip("vLLM server offline or unreachable (SKIP_LLM=1)")
+    """Tests marked ``vllm`` call the live Ministral endpoint from ``backend/.env.test`` (TESTING=1)."""
+    if "vllm" not in item.keywords:
+        return
+    if os.getenv("SKIP_LLM", "0") == "1":
+        pytest.skip("SKIP_LLM=1 — skipping live vLLM tests")
+    if not llm_gateway.is_server_available():
+        pytest.skip(
+            f"vLLM server unreachable at {settings.COLAB_VLLM_URL} "
+            "(start Colab/tunnel; configure COLAB_VLLM_URL in backend/.env.test)"
+        )
+
+
+@pytest.fixture(scope="session")
+def vllm_live():
+    """Session guard: vLLM reachable (for tests that need explicit fixture dependency)."""
+    if os.getenv("SKIP_LLM", "0") == "1":
+        pytest.skip("SKIP_LLM=1")
+    if not llm_gateway.is_server_available():
+        pytest.skip(f"vLLM unreachable at {settings.COLAB_VLLM_URL}")
+    return llm_gateway
 
 
 @pytest.hookimpl(hookwrapper=True)

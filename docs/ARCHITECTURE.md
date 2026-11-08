@@ -141,7 +141,7 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 
 **Entry point:** `GraphNavigator.reorganize_overclustered_nodes` with `plan_only=False` (orchestrator passes `doc_title`, `proj_list`). Tests use `plan_only=True` for command payloads only.
 
-**Discovery (once):** Link-affected mutable targets → `effective_degree ≥ τ` → LLM **`graph_reorg_discover`** → build split commands for selected hubs.
+**Discovery (once):** Link-affected mutable targets → `partition_neighbor_count ≥ τ` (partition batch size; tree parent excluded) → LLM **`graph_reorg_discover`** → build split commands for selected hubs.
 
 **Work queue** (`app/services/reorg_queue.py`):
 
@@ -157,9 +157,9 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 2. **`overflow_neighbors`** — neighbors promoted to **Everything** (Genesis) or **ancestor** (replacement); not listed in `rewired_edges`.
 3. **`rewired_edges`** — **sub assignments only** (`sub_*` aliases).
 
-Upstream **`effective_degree ≥ τ`** gates neighbor count before partition. Post-parse: **`validate_reorg_partition`** (retry on failure, no programmatic demotion) → **`merge_partition_to_engine_rewires`** → **`finalize_rewire_edges`**.
+Upstream **`partition_neighbor_count ≥ τ`** gates the partition batch size (same count as `hub_neighbor_ids`, excluding tree parent). Post-parse: **`normalize_partition_singleton_subs`** (demote thin subs) → **`validate_reorg_partition`** (retry on failure) → commit uses the **normalized** lists → **`merge_partition_to_engine_rewires`** → **`finalize_rewire_edges`**.
 
-**Commit:** wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`). Replacement splits **sever** the split target’s link to its tree parent, then attach each sub via uniform edges and `mutable_parent_id` metadata. Graph edges are **unweighted and undifferentiated** (optional NL `description` only). Partition neighbor batches **exclude** mutable tree children when splitting a parent hub. Each committed neighbor edge emits **`reorg_neighbor_rewired`** before **`reorg_completed`**.
+**Commit:** wrapper at Genesis (lazy mint — only aliases with assigned neighbors), replacement elsewhere (`graph_ingestion_engine.py`). Replacement splits **sever** the split target’s link to its tree parent, then attach each sub via uniform edges and `mutable_parent_id` metadata. Graph edges are **unweighted and undifferentiated** (optional NL `description` only). Partition neighbor batches include **all direct non-root neighbors** of the split hub (mutable and immutable); only the hub’s recorded parent is omitted from the batch. Rewiring a mutable neighbor updates **`mutable_parent_id`** when the target is mutable. Each committed neighbor edge emits **`reorg_neighbor_rewired`** before **`reorg_completed`**.
 
 Cardinality: **1 ≤** sub count **≤ ⌊n/2⌋**. **`graph_health_metrics`** emitted once after the queue drains.
 
@@ -209,7 +209,7 @@ Examples: `intent_classified`, `node_touched`, `graph_traversal_start`, `graph_t
 
 | Setting | Default | Role |
 |---------|---------|------|
-| `DEGREE_THRESHOLD` | 7 | Reorg trigger |
+| `DEGREE_THRESHOLD` | 7 | Reorg trigger on `partition_neighbor_count` (excludes tree parent) |
 | `MIN_CLUSTER_SIZE` | 2–3 | Genesis department minting |
 | `MAX_TRAVERSAL_DEPTH` | 3–4 | Tree walk cap |
 | `REACHABILITY_HOP_K` | K for immutable reachability metric |

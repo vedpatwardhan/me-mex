@@ -153,4 +153,10 @@ python -m pytest tests
 # Run specific test modules or targeted paths:
 python -m pytest tests/test_search_tools.py
 python -m pytest tests/test_e2e_workflows.py -k "test_e2e_ingestion_workflow_real_paper"
+
+# Tests that call the live Ministral vLLM endpoint (COLAB_VLLM_URL in backend/.env.test)
+../.venv/bin/pytest -m vllm
+
+# Offline / CI without a tunnel — skip only vLLM-marked tests:
+SKIP_LLM=1 ../.venv/bin/pytest
 ```

@@ -9,16 +9,12 @@ if backend_dir not in sys.path:
 import pytest
 from app.services.event_queue import event_queue
 from app.agents.orchestrator import orchestrator
-from app.services.llm_gateway import llm_gateway
 
 pytestmark = [pytest.mark.xdist_group(name="worker1"), pytest.mark.vllm]
 
 
 def test_conversation_flow_continuity():
     """Verify that conversation mode maintains engaging, detailed multi-turn conversation."""
-    if not llm_gateway.is_server_available():
-        print("  ⏭️ test_conversation_flow_continuity [SKIPPED - vLLM Server Offline]")
-        return
 
     async def _run():
         events = []
@@ -47,9 +43,6 @@ def test_conversation_flow_continuity():
 
 def test_external_event_understanding():
     """Verify that externally pushed events (max 15 queue) are appended to system prompt and understood by orchestrator."""
-    if not llm_gateway.is_server_available():
-        print("  ⏭️ test_external_event_understanding [SKIPPED - vLLM Server Offline]")
-        return
 
     # Simulate an external system pushing a custom event directly into event_queue
     external_event = {

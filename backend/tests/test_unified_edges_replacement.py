@@ -112,10 +112,10 @@ def test_replacement_split_severs_then_rehangs_subs(project_id):
         e["id"]
         for e in GraphNavigator._neighbor_entries_for_hub("parent_u", project_id, tree)
     }
-    assert "hub_u" not in neighbor_ids
+    assert "hub_u" in neighbor_ids
 
 
-def test_genesis_partition_omits_mutable_tree_child(project_id):
+def test_genesis_partition_includes_mutable_direct_neighbor(project_id):
     genesis = GraphNode(
         _id="gen_c",
         node_type="CONCEPT",
@@ -162,7 +162,7 @@ def test_genesis_partition_omits_mutable_tree_child(project_id):
         e["id"]
         for e in GraphNavigator._neighbor_entries_for_hub("gen_c", project_id, tree)
     }
-    assert "child_c" not in ids
+    assert "child_c" in ids
     assert "imm_c" in ids
 
 

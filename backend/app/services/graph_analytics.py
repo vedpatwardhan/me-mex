@@ -94,7 +94,7 @@ class MutableTreeIndex:
         return len(self._direct_neighbors.get(node_id, []))
 
     def effective_degree(self, node_id: str) -> int:
-        """Neighbor count for reorg triggers (excludes ROOT document nodes)."""
+        """Direct non-root neighbors (includes tree parent)."""
         count = 0
         for nid in self._direct_neighbors.get(node_id, []):
             n = self.node_map.get(nid)
@@ -102,6 +102,12 @@ class MutableTreeIndex:
                 continue
             count += 1
         return count
+
+    def partition_neighbor_count(self, node_id: str) -> int:
+        """Neighbors in a partition batch (excludes tree parent and ROOT)."""
+        from app.services.reorg_rewire_utils import partition_neighbor_count
+
+        return partition_neighbor_count(node_id, self.project_id)
 
     def direct_immutable_neighbors(self, node_id: str) -> List[GraphNode]:
         imm: List[GraphNode] = []

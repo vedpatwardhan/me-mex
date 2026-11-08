@@ -32,6 +32,7 @@ from app.services.reorg_rewire_utils import (
     max_allowed_sub_concepts,
     merge_partition_to_engine_rewires,
     normalize_partition_singleton_subs,
+    partition_neighbor_count,
     validate_reorg_partition,
 )
 from app.services.llm_gateway import llm_gateway
@@ -383,8 +384,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             if degree_threshold is not None
             else settings.DEGREE_THRESHOLD
         )
-        tree = MutableTreeIndex(project_id=project_id)
-        current_degree = tree.effective_degree(target_node.id)
 
         max_allowed_subs = max_allowed_sub_concepts(n_neighbors)
         is_genesis_hub = bool(
@@ -424,9 +423,8 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 f"Target over-clustered mutable concept: '{target_node.title}' (ID: {target_node.id})",
                 f"Current Description: {target_node.description}",
                 f"Reorganization Mode: {mode}",
-                f"Current effective_degree: {current_degree} (threshold τ = {tau})",
+                f"Partition neighbors (excl. parent): n = {n_neighbors} (threshold τ = {tau}; max subs ≤ {max_allowed_subs})",
                 "Target: after split, parent/orphan load should trend toward < τ where possible.",
-                f"Neighbors to assign: n = {n_neighbors} (max subs ≤ {max_allowed_subs})",
                 f"Target Neighbors to Partition ({len(indexed_neighbors_to_rewire)} items):",
                 json_dumps_ingest(indexed_neighbors_to_rewire),
             ]
@@ -560,9 +558,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         if payload is None:
             return None
 
-        formulated_subs = [s.model_dump() for s in payload.sub_concepts]
-        overflow_raw = [o.model_dump() for o in payload.overflow_neighbors]
-        sub_rewired_raw = [r.model_dump() for r in payload.rewired_edges]
+        # Use demotion-normalized lists from the successful validation attempt (do not re-read raw payload).
         merged_raw = merge_partition_to_engine_rewires(
             sub_rewired_raw, overflow_raw, overflow_alias
         )
@@ -627,26 +623,12 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
     def _neighbor_entries_for_hub(
         hub_id: str, project_id: str, tree: MutableTreeIndex
     ) -> List[Dict[str, Any]]:
-        """Direct neighbors eligible for partition (excludes mutable tree backbone)."""
+        """Partition LLM payload rows; ``len(result) == partition_neighbor_count(hub_id, project_id)``."""
         from app.services.reorg_rewire_utils import hub_neighbor_ids
 
         allowed = hub_neighbor_ids(hub_id, project_id)
         entries: List[Dict[str, Any]] = []
-        seen: set[str] = set()
-        for e in db_engine.get_edges(project_id):
-            nb_id = None
-            direction = "incoming"
-            if e.source_id == hub_id:
-                nb_id = e.target_id
-                direction = "outgoing"
-            elif e.target_id == hub_id:
-                nb_id = e.source_id
-                direction = "incoming"
-            else:
-                continue
-            if not nb_id or nb_id in seen or nb_id not in allowed:
-                continue
-            seen.add(nb_id)
+        for nb_id in sorted(allowed):
             nb_node = db_engine.get_node(nb_id)
             if not nb_node or nb_node.is_root_node:
                 continue
@@ -657,7 +639,6 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     "description": nb_node.description,
                     "is_immutable": nb_node.is_immutable,
                     "node_type": nb_node.node_type,
-                    "direction": direction,
                     "subtree_mut_height": tree.subtree_mut_height.get(nb_id, 0),
                 }
             )
@@ -677,35 +658,12 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             return None
         tree = MutableTreeIndex(project_id=project_id)
         neighbors = self._neighbor_entries_for_hub(hub_id, project_id, tree)
-        if not neighbors:
-            return None
         tau = (
             degree_threshold
             if degree_threshold is not None
             else settings.DEGREE_THRESHOLD
         )
-        if (
-            _is_genesis(target_node)
-            and len(neighbors) < settings.REORG_SKIP_GENESIS_PARTITION_MIN_NEIGHBORS
-        ):
-            _append_reorg_event(
-                events,
-                project_id,
-                {
-                    "event": "reorg_candidate_skipped",
-                    "persona_id": self.department_id,
-                    "department_name": self.department_name,
-                    "concept_id": hub_id,
-                    "node_title": target_node.title,
-                    "reason": "genesis_insufficient_neighbors",
-                    "message": (
-                        f"[{self.department_name}] Skipped Genesis partition: "
-                        f"{len(neighbors)} neighbors < "
-                        f"{settings.REORG_SKIP_GENESIS_PARTITION_MIN_NEIGHBORS}."
-                    ),
-                    "timestamp": time.time(),
-                },
-            )
+        if len(neighbors) < tau:
             return None
         res = self._execute_split_and_rewire(
             target_node=target_node,
@@ -822,7 +780,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 continue
             if queue.should_defer_parent_cascade(ancestor_id):
                 continue
-            if tree.effective_degree(ancestor_id) < degree_threshold:
+            if partition_neighbor_count(ancestor_id, project_id) < degree_threshold:
                 continue
 
             ancestor_node = db_engine.get_node(ancestor_id)
@@ -902,7 +860,8 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         qualifying_nodes = [
             n
             for n in seeds
-            if not n.is_immutable and tree.effective_degree(n.id) >= degree_threshold
+            if not n.is_immutable
+            and partition_neighbor_count(n.id, project_id) >= degree_threshold
         ]
 
         evt_disc_start = {
@@ -949,11 +908,10 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     "candidate_index": c_idx,
                     "title": n.title,
                     "description": n.description,
-                    "connection_degree": tree.effective_degree(n.id),
+                    "connection_degree": partition_neighbor_count(n.id, project_id),
                     "connected_neighbor_context": [
                         {
                             "neighbor_title": nb["title"],
-                            "direction": nb.get("direction", "incoming"),
                             "is_immutable": nb.get("is_immutable", False),
                         }
                         for nb in self._neighbor_entries_for_hub(n.id, project_id, tree)

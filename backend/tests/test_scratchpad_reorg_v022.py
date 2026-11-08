@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.agents.graph_navigator import GraphNavigator
 from app.services.reorg_queue import cascade_parent_id
 from app.db import db_engine
 from app.models import GraphEdge, GraphNode
@@ -217,3 +218,101 @@ def test_reorg_queue_filo_prepends_cascade_before_next_discover():
     q.prepend_cascade_filo(ReorgWorkItem("P_cascade", "cascade", None))
     order = [q.pop_front().hub_id for _ in range(3)]
     assert order == ["P_cascade", "A", "B"]
+
+
+def test_genesis_wrapper_reparents_mutable_neighbors(project_id):
+    """Mutable direct neighbors in partition batch move under new wrapper with parent metadata."""
+    from app.services.graph_analytics import MutableTreeIndex
+
+    genesis = GraphNode(
+        _id="genesis_sc",
+        node_type="CONCEPT",
+        title="Everything",
+        description="",
+        project_ids=[project_id],
+        metadata={"immutable": False, "is_genesis": True},
+    )
+    m1 = GraphNode(
+        _id="mut_child_a",
+        node_type="CONCEPT",
+        title="Mutable A",
+        description="",
+        project_ids=[project_id],
+        metadata={"immutable": False, MUTABLE_PARENT_META_KEY: "genesis_sc"},
+    )
+    m2 = GraphNode(
+        _id="mut_child_b",
+        node_type="CONCEPT",
+        title="Mutable B",
+        description="",
+        project_ids=[project_id],
+        metadata={"immutable": False, MUTABLE_PARENT_META_KEY: "genesis_sc"},
+    )
+    imm = GraphNode(
+        _id="imm_orphan",
+        node_type="CONCEPT",
+        title="Evidence",
+        description="",
+        project_ids=[project_id],
+        metadata={"immutable": True},
+    )
+    for node in (genesis, m1, m2, imm):
+        db_engine.upsert_node(node)
+    for src in ("mut_child_a", "mut_child_b", "imm_orphan"):
+        db_engine.upsert_edge(
+            GraphEdge(
+                _id=f"e_{src}_g",
+                source_id=src,
+                target_id="genesis_sc",
+                description="",
+                project_ids=[project_id],
+            )
+        )
+
+    tree = MutableTreeIndex(project_id=project_id)
+    batch_ids = {
+        e["id"]
+        for e in GraphNavigator._neighbor_entries_for_hub(
+            "genesis_sc", project_id, tree
+        )
+    }
+    assert batch_ids == {"mut_child_a", "mut_child_b", "imm_orphan"}
+
+    split_cmd = {
+        "action": "SPLIT_CONCEPT",
+        "concept_id": "genesis_sc",
+        "sub_concepts": [
+            {
+                "sub_id_alias": "sub_1",
+                "title": "Grouped Mutables",
+                "description": "Sub hub",
+            }
+        ],
+        "rewired_edges": [
+            {"neighbor_id": "mut_child_a", "connect_to_sub_alias": "sub_1"},
+            {"neighbor_id": "mut_child_b", "connect_to_sub_alias": "sub_1"},
+            {"neighbor_id": "imm_orphan", "connect_to_sub_alias": "EVERYTHING"},
+        ],
+        "partition_neighbor_ids": ["mut_child_a", "mut_child_b", "imm_orphan"],
+    }
+    graph_ingestion_engine.execute_single_command(
+        split_cmd, doc_title="Doc", proj_list=[project_id]
+    )
+
+    tree = MutableTreeIndex(project_id=project_id)
+    wrapper_children = tree.mutable_children("genesis_sc")
+    assert len(wrapper_children) == 1
+    wrapper_id = wrapper_children[0].id
+    assert tree.parent_of("mut_child_a") == wrapper_id
+    assert tree.parent_of("mut_child_b") == wrapper_id
+    assert (
+        db_engine.get_node("mut_child_a").metadata.get(MUTABLE_PARENT_META_KEY)
+        == wrapper_id
+    )
+
+    imm_edges = [
+        e
+        for e in db_engine.get_edges(project_id)
+        if e.source_id == "imm_orphan" and e.target_id == "genesis_sc"
+    ]
+    assert len(imm_edges) == 1
