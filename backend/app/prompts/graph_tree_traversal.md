@@ -10,7 +10,7 @@ Rules:
 3. If a candidate is a Root Node (paper/blog/transcript summary), read its summary for provenance, but do NOT select it for expansion.
 
 Given candidate neighbor concepts at the current frontier:
-Return the neighbors worth exploring deeper for this query.
+Return **at most {{ traversal_top_k }}** mutable neighbor(s) worth exploring deeper for this query, ranked by relevance. Prefer the **narrowest** path toward concepts that will anchor new document links.
 
 Return JSON format:
 {{

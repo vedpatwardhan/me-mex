@@ -122,13 +122,22 @@ Optional **computed** mutable-node metadata (refreshed after link/reorg): `tree_
 3. Depth capped by `MAX_TRAVERSAL_DEPTH` (default 3–4); depth penalty in prompt.
 4. Returns `explored_nodes`, `traversed_node_ids`, and `node_touched` entries in `emitted_events` (orchestrator persists to the event queue when streaming).
 
-### 4.2 Linking
+### 4.2 Ingestion performance (v0.2.7)
+
+- **Parallel extraction:** `INGEST_EXTRACTION_CONCURRENCY` (orchestrator semaphore).
+- **Rolling summary:** per-project `conversation_summary` on `ProjectWorkspace`; structured ingest uses summary + query (`INGEST_USE_ROLLING_SUMMARY`).
+- **Focused traversal:** `INGEST_TRAVERSAL_TOP_K`, optional `INGEST_TRAVERSAL_MAX_DEPTH`; top-k cap on `selected_neighbors`.
+- **Compact JSON:** `INGEST_JSON_COMPACT` for large orchestrator/navigator payloads.
+- **HTTP client:** `HTTPX_MAX_CONNECTIONS` / `HTTPX_MAX_KEEPALIVE` on `LLMGateway`.
+- **Colab pairing:** see [ingestion vLLM tuning report](reports/2026-11-07-ingestion-vllm-tuning.md).
+
+### 4.3 Linking (Phase 3)
 
 - Phase 3 orchestrator prompt **`collective_ingestion_linking`** (with **`mutable anchor paths`**: Genesis → each traversal frontier).
 - Rule: **highest suitable anchor** — shallowest mutable on a path that is semantically better than any descendant on that path; Genesis fallback only if no path node qualifies.
 - `link_intradoc_concepts` remains available for alternate call sites; ingestion uses collective linking + Phase 3.5 generalization.
 
-### 4.3 Reorganization (v0.2.3 — unified Phase 4 in navigator)
+### 4.4 Reorganization (v0.2.3 — unified Phase 4 in navigator)
 
 **Entry point:** `GraphNavigator.reorganize_overclustered_nodes` with `plan_only=False` (orchestrator passes `doc_title`, `proj_list`). Tests use `plan_only=True` for command payloads only.
 
@@ -156,7 +165,7 @@ Cardinality: **1 ≤** sub count **≤ ⌊n/2⌋**. **`graph_health_metrics`** e
 
 **Out of v0.2 scope:** `COLLAPSE_CONCEPT` (UI delete uses existing delete-node API); optional PPR/shortcut edges deferred.
 
-### 4.4 Integer indexing prompt protocol
+### 4.5 Integer indexing prompt protocol
 
 - Dual `PromptIdMapper` caches: `passage_mapper`, `concept_mapper`.
 - LLM sees integer indices only; orchestrator/navigator map back to MongoDB IDs before persistence.

@@ -68,7 +68,16 @@ class LLMGateway:
             "Bypass-Tunnel-Reminder": "true",
             "User-Agent": "Me-Mex-Client",
         }
-        self.client = httpx.Client(timeout=timeout, headers=headers, trust_env=False)
+        limits = httpx.Limits(
+            max_connections=settings.HTTPX_MAX_CONNECTIONS,
+            max_keepalive_connections=settings.HTTPX_MAX_KEEPALIVE,
+        )
+        self.client = httpx.Client(
+            timeout=timeout,
+            headers=headers,
+            trust_env=False,
+            limits=limits,
+        )
 
     def prepare_reasoning_messages(
         self, messages: List[Dict[str, Any]]

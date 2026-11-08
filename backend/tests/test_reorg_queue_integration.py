@@ -59,7 +59,7 @@ def test_process_reorg_queue_defers_parent_until_siblings_done(monkeypatch):
     build_order: list[str] = []
     execution_order: list[str] = []
 
-    def fake_build(hub_id, project_id=project_id, emitted_events=None):
+    def fake_build(hub_id, project_id=project_id, emitted_events=None, **kwargs):
         build_order.append(hub_id)
         return {
             "action": "SPLIT_CONCEPT",
@@ -115,7 +115,7 @@ def test_build_split_at_pop_not_before_prior_execute(monkeypatch):
     build_order: list[str] = []
     execute_order: list[str] = []
 
-    def fake_build(hub_id, project_id=project_id, emitted_events=None):
+    def fake_build(hub_id, project_id=project_id, emitted_events=None, **kwargs):
         build_order.append(hub_id)
         return {
             "action": "SPLIT_CONCEPT",

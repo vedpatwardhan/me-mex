@@ -16,6 +16,17 @@ else:
     load_dotenv(dotenv_path=BACKEND_DIR / ".env")
 
 
+def _env_bool(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).lower() in ("1", "true", "yes")
+
+
+def _optional_int(name: str) -> int | None:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    return int(raw)
+
+
 class Settings:
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
@@ -33,13 +44,39 @@ class Settings:
 
     DEGREE_THRESHOLD: int = int(os.getenv("DEGREE_THRESHOLD", "7"))
     MIN_CLUSTER_SIZE: int = int(os.getenv("MIN_CLUSTER_SIZE", "2"))
-    MAX_TRAVERSAL_DEPTH: int = int(os.getenv("MAX_TRAVERSAL_DEPTH", "4"))
+    MAX_TRAVERSAL_DEPTH: int = int(os.getenv("MAX_TRAVERSAL_DEPTH", "5"))
     REACHABILITY_HOP_K: int = int(os.getenv("REACHABILITY_HOP_K", "3"))
     MAX_UPWARD_REORG_ITERATIONS: int = int(
         os.getenv("MAX_UPWARD_REORG_ITERATIONS", "5")
     )
     REORG_PARTITION_MAX_TOKENS: int = int(
         os.getenv("REORG_PARTITION_MAX_TOKENS", "6144")
+    )
+
+    INGEST_EXTRACTION_CONCURRENCY: int = int(
+        os.getenv("INGEST_EXTRACTION_CONCURRENCY", "4")
+    )
+    INGEST_JSON_COMPACT: bool = _env_bool("INGEST_JSON_COMPACT", "true")
+    INGEST_USE_ROLLING_SUMMARY: bool = _env_bool("INGEST_USE_ROLLING_SUMMARY", "true")
+    CHAT_SUMMARY_MAX_CHARS: int = int(os.getenv("CHAT_SUMMARY_MAX_CHARS", "4000"))
+    CHAT_SUMMARY_REFRESH_MIN_TURNS: int = int(
+        os.getenv("CHAT_SUMMARY_REFRESH_MIN_TURNS", "4")
+    )
+    INGEST_STRUCTURED_CHAT_HISTORY_TURNS: int = int(
+        os.getenv("INGEST_STRUCTURED_CHAT_HISTORY_TURNS", "2")
+    )
+    INGEST_TRAVERSAL_MAX_DEPTH: int | None = _optional_int("INGEST_TRAVERSAL_MAX_DEPTH")
+    INGEST_TRAVERSAL_TOP_K: int = int(os.getenv("INGEST_TRAVERSAL_TOP_K", "2"))
+    RETRIEVAL_TRAVERSAL_TOP_K: int | None = _optional_int("RETRIEVAL_TRAVERSAL_TOP_K")
+
+    HTTPX_MAX_CONNECTIONS: int = int(os.getenv("HTTPX_MAX_CONNECTIONS", "20"))
+    HTTPX_MAX_KEEPALIVE: int = int(os.getenv("HTTPX_MAX_KEEPALIVE", "10"))
+
+    REORG_SKIP_GENESIS_PARTITION_MIN_NEIGHBORS: int = int(
+        os.getenv("REORG_SKIP_GENESIS_PARTITION_MIN_NEIGHBORS", "3")
+    )
+    REORG_PARTITION_ENABLE_REASONING: bool = _env_bool(
+        "REORG_PARTITION_ENABLE_REASONING", "false"
     )
 
 

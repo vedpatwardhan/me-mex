@@ -138,6 +138,8 @@ class ProjectWorkspace(BaseModel):
     node_ids: List[str] = Field(default_factory=list)
     edge_ids: List[str] = Field(default_factory=list)
     created_at: float = Field(default_factory=time.time)
+    conversation_summary: str = ""
+    conversation_summary_updated_at: float = 0.0
 
 
 class AgentProposal(BaseModel):

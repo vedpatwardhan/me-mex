@@ -26,6 +26,7 @@ from app.services.graph_ingestion_engine import (
 )
 from app.services.reorg_queue import ReorgQueue, ReorgWorkItem
 from app.services.logger import logger
+from app.services.ingest_payload import json_dumps_ingest
 from app.services.reorg_rewire_utils import (
     finalize_rewire_edges,
     max_allowed_sub_concepts,
@@ -190,7 +191,10 @@ class GraphNavigator:
         project_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         return self.traverse_mutable_tree_from_genesis(
-            query=query, chat_history=chat_history, project_id=project_id
+            query=query,
+            chat_history=chat_history,
+            project_id=project_id,
+            traversal_top_k=settings.RETRIEVAL_TRAVERSAL_TOP_K,
         )
 
     def traverse_mutable_tree_from_genesis(
@@ -200,12 +204,17 @@ class GraphNavigator:
         project_id: Optional[str] = None,
         max_depth: Optional[int] = None,
         allow_web_search: bool = False,
+        traversal_top_k: Optional[int] = None,
+        ingest_context_messages: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         """Top-down traversal from Genesis over the mutable tree backbone."""
         pid = project_id or self.project_id
         max_traversal_depth = (
             max_depth if max_depth is not None else settings.MAX_TRAVERSAL_DEPTH
         )
+        hop_top_k = traversal_top_k
+        if hop_top_k is None:
+            hop_top_k = settings.INGEST_TRAVERSAL_TOP_K
         tree = MutableTreeIndex(project_id=pid)
 
         visited_node_ids = set([self.genesis_node.id])
@@ -264,7 +273,7 @@ User Query / Context: "{query}"
 Current Hop Level: {hop} / {max_traversal_depth}
 
 Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items):
-{json.dumps(indexed_candidate_neighbors, indent=2)}"""
+{json_dumps_ingest(indexed_candidate_neighbors)}"""
             messages = [
                 {
                     "role": "system",
@@ -272,10 +281,13 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                         "graph_tree_traversal",
                         genesis_title=self.genesis_node.title,
                         max_depth=max_traversal_depth,
+                        traversal_top_k=hop_top_k,
                     ),
                 }
             ]
-            if chat_history:
+            if ingest_context_messages:
+                messages.extend(ingest_context_messages)
+            elif chat_history:
                 messages.extend(chat_history[-4:])
             messages.append({"role": "user", "content": prompt_payload})
 
@@ -299,6 +311,18 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                             continue
                         neighbor_rationales[real_node_id] = item.rationale
                 next_frontier = list(neighbor_rationales.keys())
+                if hop_top_k is not None and hop_top_k > 0:
+                    truncated = len(next_frontier) > hop_top_k
+                    next_frontier = next_frontier[:hop_top_k]
+                    if truncated:
+                        emitted_events.append(
+                            {
+                                "event": "traversal_neighbors_truncated",
+                                "hop": hop,
+                                "top_k": hop_top_k,
+                                "timestamp": time.time(),
+                            }
+                        )
             except Exception as e:
                 print(f"[{self.department_name}] Subgraph expansion error: {e}")
                 raise RuntimeError(
@@ -347,11 +371,20 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         target_neighbors_to_rewire: List[Dict[str, Any]],
         project_id: str,
         emitted_events: List[Dict[str, Any]],
+        degree_threshold: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Unified partition: sub-concepts + overflow_neighbors + sub-only rewired_edges."""
         n_neighbors = len(target_neighbors_to_rewire)
         if not n_neighbors:
             return None
+
+        tau = (
+            degree_threshold
+            if degree_threshold is not None
+            else settings.DEGREE_THRESHOLD
+        )
+        tree = MutableTreeIndex(project_id=project_id)
+        current_degree = tree.effective_degree(target_node.id)
 
         max_allowed_subs = max_allowed_sub_concepts(n_neighbors)
         is_genesis_hub = bool(
@@ -391,8 +424,11 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 f"Target over-clustered mutable concept: '{target_node.title}' (ID: {target_node.id})",
                 f"Current Description: {target_node.description}",
                 f"Reorganization Mode: {mode}",
+                f"Current effective_degree: {current_degree} (threshold τ = {tau})",
+                "Target: after split, parent/orphan load should trend toward < τ where possible.",
+                f"Neighbors to assign: n = {n_neighbors} (max subs ≤ {max_allowed_subs})",
                 f"Target Neighbors to Partition ({len(indexed_neighbors_to_rewire)} items):",
-                json.dumps(indexed_neighbors_to_rewire, indent=2),
+                json_dumps_ingest(indexed_neighbors_to_rewire),
             ]
         )
 
@@ -412,7 +448,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     temperature=0.2,
                     max_tokens=settings.REORG_PARTITION_MAX_TOKENS,
                     max_retries=2,
-                    enable_reasoning=False,
+                    enable_reasoning=settings.REORG_PARTITION_ENABLE_REASONING,
                     caller=f"GraphNavigator[{self.department_name}].reorg_partition_{mode}",
                 )
             except Exception as e:
@@ -632,6 +668,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         hub_id: str,
         project_id: str = "global",
         emitted_events: Optional[List[Dict[str, Any]]] = None,
+        degree_threshold: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Partition + rewire for one hub (cascade path; no LLM discover)."""
         events = emitted_events if emitted_events is not None else []
@@ -642,11 +679,40 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         neighbors = self._neighbor_entries_for_hub(hub_id, project_id, tree)
         if not neighbors:
             return None
+        tau = (
+            degree_threshold
+            if degree_threshold is not None
+            else settings.DEGREE_THRESHOLD
+        )
+        if (
+            _is_genesis(target_node)
+            and len(neighbors) < settings.REORG_SKIP_GENESIS_PARTITION_MIN_NEIGHBORS
+        ):
+            _append_reorg_event(
+                events,
+                project_id,
+                {
+                    "event": "reorg_candidate_skipped",
+                    "persona_id": self.department_id,
+                    "department_name": self.department_name,
+                    "concept_id": hub_id,
+                    "node_title": target_node.title,
+                    "reason": "genesis_insufficient_neighbors",
+                    "message": (
+                        f"[{self.department_name}] Skipped Genesis partition: "
+                        f"{len(neighbors)} neighbors < "
+                        f"{settings.REORG_SKIP_GENESIS_PARTITION_MIN_NEIGHBORS}."
+                    ),
+                    "timestamp": time.time(),
+                },
+            )
+            return None
         res = self._execute_split_and_rewire(
             target_node=target_node,
             mode="max_coverage",
             target_neighbors_to_rewire=neighbors,
             project_id=project_id,
+            degree_threshold=tau,
             emitted_events=events,
         )
         if not res:
@@ -694,7 +760,10 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 break
 
             cmd = self.build_split_command_for_hub(
-                item.hub_id, project_id=project_id, emitted_events=emitted_events
+                item.hub_id,
+                project_id=project_id,
+                emitted_events=emitted_events,
+                degree_threshold=degree_threshold,
             )
             if not cmd:
                 target_node = node_map.get(item.hub_id) or db_engine.get_node(
@@ -898,7 +967,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
         user_discover = (
             "Candidate mutable concepts eligible for Subdivision "
             f"({len(qualifying_nodes)} candidate(s)):\n"
-            f"{json.dumps(nodes_payload, indent=2)}"
+            f"{json_dumps_ingest(nodes_payload)}"
         )
         candidate_rationales: Dict[str, str] = {}
         try:

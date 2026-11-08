@@ -20,9 +20,13 @@ If a thematic hint has only one neighbor, list that neighbor in **`overflow_neig
 
 ## OVERFLOW NEIGHBORS (first-class)
 
-Neighbors that **cannot** join any **≥{{ min_sub_neighbors }}-neighbor** sub group belong in **`overflow_neighbors`** (with a brief `rationale`). Do **not** force unrelated neighbors into a sub just to avoid overflow.
+Neighbors that **cannot** join any **≥{{ min_sub_neighbors }}-neighbor** sub group belong in **`overflow_neighbors`** (with a brief `rationale`).
 
 Overflow neighbors are promoted to **{{ overflow_target_label }}** at commit time (not listed in `rewired_edges`).
+
+## DEGREE GOAL (single step)
+
+Prefer **one** partition that moves this hub **toward** degree **below τ** by minting **coherent multi-neighbor subs** (each **≥{{ min_sub_neighbors }}**). Group related neighbors aggressively when thematically defensible. Use **overflow** for stragglers so the parent/orphan load trends down in one commit.
 
 ## THREE LIST OUTPUT
 

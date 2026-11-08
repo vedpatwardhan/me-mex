@@ -41,6 +41,11 @@ from app.services.prompt_mapper import PromptIdMapper
 from app.tools.search_tools import search_tools
 from app.prompts import load_prompt
 from app.services.graph_ingestion_engine import graph_ingestion_engine
+from app.services.ingest_payload import ingest_context_message_blocks, json_dumps_ingest
+from app.services.conversation_summary import (
+    get_rolling_summary,
+    schedule_rolling_summary_refresh,
+)
 
 
 class ExecutiveOrchestrator:
@@ -53,6 +58,23 @@ class ExecutiveOrchestrator:
         self.tools = search_tools
         self.event_queue = event_queue
         self.ingestion_engine = graph_ingestion_engine
+
+    def _ingest_context_blocks(
+        self,
+        query: str,
+        chat_history: Optional[List[Dict[str, str]]],
+        project_id: str,
+    ) -> List[Dict[str, str]]:
+        summary = (
+            get_rolling_summary(project_id)
+            if settings.INGEST_USE_ROLLING_SUMMARY
+            else None
+        )
+        return ingest_context_message_blocks(
+            query,
+            rolling_summary=summary,
+            chat_history=chat_history,
+        )
 
     @staticmethod
     def _extract_markdown_title(text: str) -> Optional[str]:
@@ -227,16 +249,16 @@ class ExecutiveOrchestrator:
         doc_title: str,
         query: str,
         chat_history: List[Dict[str, str]],
+        project_id: str = "global",
     ) -> PassageConceptsPayload:
         """Performs LLM pass across a passage chunk to extract atomic concept nodes and qualitative relation edges."""
         system_prompt = load_prompt("passage_concept_extraction", doc_title=doc_title)
         messages = [{"role": "system", "content": system_prompt}]
-        if chat_history:
-            messages.extend(chat_history[-4:])
+        messages.extend(self._ingest_context_blocks(query, chat_history, project_id))
         messages.append(
             {
                 "role": "user",
-                "content": f"User Query Context: {query}\n\nPassage Chunk ({doc_title}):\n{passage_text}",
+                "content": f"Passage Chunk ({doc_title}):\n{passage_text}",
             }
         )
         return self.llm.generate_structured_completion(
@@ -256,6 +278,7 @@ class ExecutiveOrchestrator:
         query: str,
         chat_history: List[Dict[str, str]],
         passage_mapper: Optional[PromptIdMapper] = None,
+        project_id: str = "global",
     ) -> ConsolidatedConceptsPayload:
         """Consolidates raw passage concepts into document-specific canonical concepts in a single lean pass."""
         if not raw_extracted_concepts:
@@ -267,8 +290,7 @@ class ExecutiveOrchestrator:
 
         system_prompt = load_prompt("consolidate_concepts", doc_title=doc_title)
         messages = [{"role": "system", "content": system_prompt}]
-        if chat_history:
-            messages.extend(chat_history[-4:])
+        messages.extend(self._ingest_context_blocks(query, chat_history, project_id))
 
         # Clean/project raw concept payloads with integer passage_indices
         lean_concepts = []
@@ -292,9 +314,8 @@ class ExecutiveOrchestrator:
             )
 
         payload_content = (
-            f"User Query Context: {query}\n\n"
             f"Raw Passage Concept Extractions ({len(lean_concepts)} items):\n"
-            f"{json.dumps(lean_concepts, indent=2)}"
+            f"{json_dumps_ingest(lean_concepts)}"
         )
         messages.append({"role": "user", "content": payload_content})
 
@@ -445,10 +466,19 @@ class ExecutiveOrchestrator:
                         "timestamp": time.time(),
                     }
 
+        last_reply = ""
         async for item in _run_pipeline():
             if isinstance(item, dict) and "event" in item:
+                if item.get("event") == "chat_complete":
+                    last_reply = item.get("final_answer") or last_reply
                 self.event_queue.push(project_id, item)
             yield item
+        await schedule_rolling_summary_refresh(
+            project_id,
+            chat_history or [],
+            latest_user_query=query,
+            latest_assistant_reply=last_reply,
+        )
 
     async def execute_conversation_flow(
         self,
@@ -685,7 +715,9 @@ class ExecutiveOrchestrator:
 
         # Extract Raw Passage Concepts across chunks with bounded concurrency & Consolidate into Intra-Document Concepts
         raw_extracted_concepts: List[Dict[str, Any]] = []
-        extraction_sem = asyncio.Semaphore(2)
+        extraction_sem = asyncio.Semaphore(settings.INGEST_EXTRACTION_CONCURRENCY)
+        phase_timings: Dict[str, float] = {}
+        ingest_t0 = time.time()
 
         async def _extract_chunk(p_id: str, chunk_str: str, chunk_idx: int):
             async with extraction_sem:
@@ -696,6 +728,7 @@ class ExecutiveOrchestrator:
                     title,
                     query,
                     chat_history,
+                    project_id,
                 )
                 chunk_duration = round(time.time() - t0_chunk, 2)
                 c_count = len(extraction.concepts)
@@ -754,8 +787,12 @@ class ExecutiveOrchestrator:
             query,
             chat_history,
             passage_mapper,
+            project_id,
         )
         consol_duration = round(time.time() - t0_consol, 2)
+        phase_timings["extraction_and_consolidation"] = round(
+            time.time() - ingest_t0, 2
+        )
 
         consolidated_concepts = consolidated_result.concepts
         canonical_titles = [c.title for c in consolidated_concepts if c.title]
@@ -857,12 +894,23 @@ class ExecutiveOrchestrator:
             "timestamp": time.time(),
         }
 
+        ingest_ctx = self._ingest_context_blocks(query, chat_history, project_id)
+        trav_depth = (
+            settings.INGEST_TRAVERSAL_MAX_DEPTH
+            if settings.INGEST_TRAVERSAL_MAX_DEPTH is not None
+            else settings.MAX_TRAVERSAL_DEPTH
+        )
+        t0_trav = time.time()
         traversal_finding = await asyncio.to_thread(
             navigator.traverse_mutable_tree_from_genesis,
             query=query,
             chat_history=chat_history,
             project_id=project_id,
+            max_depth=trav_depth,
+            traversal_top_k=settings.INGEST_TRAVERSAL_TOP_K,
+            ingest_context_messages=ingest_ctx,
         )
+        phase_timings["traversal"] = round(time.time() - t0_trav, 2)
         for touch_evt in traversal_finding.get("emitted_events", []):
             yield touch_evt
 
@@ -927,23 +975,25 @@ class ExecutiveOrchestrator:
 
         system_collective = load_prompt("collective_ingestion_linking")
         user_collective = f"""Document Title: '{title}'
-User Query: "{query}"
 
 Newly Extracted Intra-Document Concepts ({len(intra_concepts_payload)} items, IMMUTABLE):
-{json.dumps(intra_concepts_payload, indent=2)}
+{json_dumps_ingest(intra_concepts_payload)}
 
 Explored Mutable Tree Nodes (Genesis-rooted traversal, {len(explored_tree_payload)} nodes):
-{json.dumps(explored_tree_payload, indent=2)}
+{json_dumps_ingest(explored_tree_payload)}
 
 Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor linking):
-{json.dumps(mutable_anchor_paths, indent=2)}"""
+{json_dumps_ingest(mutable_anchor_paths)}"""
         collective_commands = []
+        link_messages: List[Dict[str, str]] = [
+            {"role": "system", "content": system_collective},
+        ]
+        link_messages.extend(ingest_ctx)
+        link_messages.append({"role": "user", "content": user_collective})
+        t0_link = time.time()
         try:
             payload_collective = self.llm.generate_structured_completion(
-                [
-                    {"role": "system", "content": system_collective},
-                    {"role": "user", "content": user_collective},
-                ],
+                link_messages,
                 response_model=CollectiveLinkingPayload,
                 temperature=0.2,
                 max_tokens=4096,
@@ -1016,14 +1066,21 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
             n for n in mutable_targets if n is not None and not n.is_immutable
         ]
 
+        phase_timings["linking"] = round(time.time() - t0_link, 2)
+
         if mutable_targets:
+            t0_gen = time.time()
             async for gen_evt in self._generalize_affected_target_nodes(
                 mutable_targets=mutable_targets,
                 project_id=project_id,
+                query=query,
+                chat_history=chat_history,
             ):
                 yield gen_evt
+            phase_timings["generalization"] = round(time.time() - t0_gen, 2)
 
         # Phase 4: Reorganization on link-affected mutable targets (degree ≥ τ → LLM discover → split)
+        t0_reorg = time.time()
         reorg_res = await asyncio.to_thread(
             navigator.reorganize_overclustered_nodes,
             mutable_targets,
@@ -1037,6 +1094,14 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
         for reorg_evt in reorg_res.get("emitted_events", []):
             yield reorg_evt
         graph_analytics.refresh_tree_metadata(project_id)
+        phase_timings["reorganization"] = round(time.time() - t0_reorg, 2)
+        phase_timings["total_ingestion"] = round(time.time() - ingest_t0, 2)
+
+        yield {
+            "event": "ingestion_phase_timings",
+            "timings": phase_timings,
+            "timestamp": time.time(),
+        }
 
         yield {
             "event": "ingestion_completed",
@@ -1047,10 +1112,18 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
             "timestamp": time.time(),
         }
 
+        await schedule_rolling_summary_refresh(
+            project_id,
+            chat_history or [],
+            latest_user_query=query,
+        )
+
     async def _generalize_affected_target_nodes(
         self,
         mutable_targets: List[GraphNode],
         project_id: str = "global",
+        query: str = "",
+        chat_history: Optional[List[Dict[str, str]]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Synthesizes updated titles and descriptions for mutable concept nodes that received new connections during ingestion."""
         if not mutable_targets:
@@ -1098,15 +1171,19 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
 
         system_gen = load_prompt("target_node_generalization")
         user_gen = f"""Target Nodes That Received New Ingestion Connections ({len(targets_payload)} nodes):
-{json.dumps(targets_payload, indent=2)}"""
+{json_dumps_ingest(targets_payload)}"""
+        gen_messages: List[Dict[str, str]] = [
+            {"role": "system", "content": system_gen},
+        ]
+        gen_messages.extend(
+            self._ingest_context_blocks(query, chat_history, project_id)
+        )
+        gen_messages.append({"role": "user", "content": user_gen})
 
         try:
             payload = await asyncio.to_thread(
                 self.llm.generate_structured_completion,
-                [
-                    {"role": "system", "content": system_gen},
-                    {"role": "user", "content": user_gen},
-                ],
+                gen_messages,
                 response_model=TargetGeneralizationPayload,
                 temperature=0.2,
                 max_tokens=2048,

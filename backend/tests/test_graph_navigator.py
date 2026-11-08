@@ -67,6 +67,14 @@ def _partition_payload_json(
 
 def test_graph_navigator_shared_exploration():
     """Verify GraphNavigator.traverse_mutable_tree_from_genesis performs tree traversal up to max_depth."""
+    from app.services.llm_gateway import llm_gateway
+
+    if not llm_gateway.is_server_available():
+        print(
+            "  ⏭️ test_graph_navigator_shared_exploration [SKIPPED - vLLM Server Offline]"
+        )
+        return
+
     hub_node = GraphNode(
         _id="concept_genesis",
         node_type="CONCEPT",
@@ -457,6 +465,13 @@ def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier(monkeypatc
 
     project_id = "proj_immutable_guard_test"
 
+    genesis = GraphNode(
+        _id="concept_genesis",
+        node_type="CONCEPT",
+        title="Everything",
+        project_ids=[project_id],
+        metadata={"is_genesis": True, "immutable": False},
+    )
     hub = GraphNode(
         _id="hub_domain",
         node_type="CONCEPT",
@@ -482,10 +497,20 @@ def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier(monkeypatc
         metadata={"immutable": False},
     )
 
+    db_engine.upsert_node(genesis)
     db_engine.upsert_node(hub)
     db_engine.upsert_node(imm_leaf)
     db_engine.upsert_node(mut_branch)
 
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="edge_hub_genesis",
+            source_id="hub_domain",
+            target_id="concept_genesis",
+            description="SUBSET_OF",
+            project_ids=[project_id],
+        )
+    )
     db_engine.upsert_edge(
         GraphEdge(
             _id="edge_hub_to_imm",
@@ -497,15 +522,15 @@ def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier(monkeypatc
     )
     db_engine.upsert_edge(
         GraphEdge(
-            _id="edge_hub_to_mut",
-            source_id="hub_domain",
-            target_id="mut_branch",
+            _id="edge_mut_to_hub",
+            source_id="mut_branch",
+            target_id="hub_domain",
             description="SUBSET_OF",
             project_ids=[project_id],
         )
     )
 
-    agent = GraphNavigator("global")
+    agent = GraphNavigator(project_id)
 
     # Verify candidate neighbors has explicit immutable flags
     adj_map = agent._get_adjacency_map(project_id)
@@ -520,31 +545,38 @@ def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier(monkeypatc
     # Mock chat completion where the model attempts to select both neighbors
     captured_prompt = []
 
-    def mock_chat_completion(messages, **kwargs):
-        captured_prompt.append(messages[-1]["content"])
-        return json.dumps(
-            {
-                "selected_neighbors": [
-                    {"neighbor_index": 1, "rationale": "Selected neighbor 1"},
-                    {"neighbor_index": 2, "rationale": "Selected neighbor 2"},
-                ]
-            }
-        )
-
+    from app.models import PersonaExplorationPayload, SelectedNeighborItem
     from app.services.llm_gateway import llm_gateway
 
-    monkeypatch.setattr(llm_gateway, "generate_chat_completion", mock_chat_completion)
+    def mock_structured(messages, **kwargs):
+        content = messages[-1]["content"]
+        captured_prompt.append(content)
+        if "Hop Level: 1" in content:
+            return PersonaExplorationPayload(
+                selected_neighbors=[
+                    SelectedNeighborItem(neighbor_index=1, rationale="hub"),
+                ]
+            )
+        return PersonaExplorationPayload(
+            selected_neighbors=[
+                SelectedNeighborItem(neighbor_index=1, rationale="mut"),
+                SelectedNeighborItem(neighbor_index=2, rationale="imm"),
+            ]
+        )
+
+    monkeypatch.setattr(llm_gateway, "generate_structured_completion", mock_structured)
 
     res = agent.traverse_mutable_tree_from_genesis(
         query="Test query",
         project_id=project_id,
-        max_depth=1,
+        max_depth=2,
     )
 
-    # Verify immutable node is tagged in prompt
-    assert len(captured_prompt) == 1
-    assert '"immutable": true' in captured_prompt[0]
-    assert '"immutable": false' in captured_prompt[0]
+    # Verify immutable node is tagged in prompt (hop 2 from hub_domain)
+    assert len(captured_prompt) >= 2
+    hop2 = captured_prompt[-1]
+    assert '"immutable":true' in hop2 or '"immutable": true' in hop2
+    assert '"immutable":false' in hop2 or '"immutable": false' in hop2
 
     # Verify the defensive guard dropped the immutable node from traversal
     assert "imm_evidence" not in res["traversed_node_ids"]
