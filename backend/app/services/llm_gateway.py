@@ -354,13 +354,16 @@ class LLMGateway:
         self,
         messages: List[Dict[str, Any]],
         temperature: float = 0.7,
-        max_tokens: int = 1024,
+        max_tokens: Optional[int] = None,
         top_p: float = 0.95,
         enable_reasoning: bool = False,
         caller: Optional[str] = None,
     ):
         """Asynchronously stream response tokens from vLLM, yielding clean sanitized deltas."""
         start_time = time.perf_counter()
+        completion_cap = (
+            max_tokens if max_tokens is not None else settings.LLM_COMPLETION_MAX_TOKENS
+        )
         url = f"{self.base_url}/chat/completions"
         formatted_messages = (
             self.prepare_reasoning_messages(messages) if enable_reasoning else messages
@@ -370,7 +373,7 @@ class LLMGateway:
             "model": self.model,
             "messages": formatted_messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            "max_tokens": completion_cap,
             "top_p": top_p,
             "stream": True,
         }
@@ -383,8 +386,9 @@ class LLMGateway:
 
         collected_tokens = []
         try:
+            stream_timeout = max(60.0, float(settings.LLM_TIMEOUT))
             async with httpx.AsyncClient(
-                timeout=60.0, headers=headers, trust_env=False
+                timeout=stream_timeout, headers=headers, trust_env=False
             ) as client:
                 async with client.stream("POST", url, json=payload) as response:
                     if response.status_code != 200:
@@ -419,7 +423,7 @@ class LLMGateway:
                 messages=messages,
                 duration_seconds=elapsed,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=completion_cap,
                 response_raw=full_response,
                 response_parsed=full_response,
                 status="SUCCESS",
@@ -432,7 +436,7 @@ class LLMGateway:
                 messages=messages,
                 duration_seconds=elapsed,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=completion_cap,
                 status="FAILED",
                 error=str(e),
             )

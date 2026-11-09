@@ -74,7 +74,9 @@ def retrieval_closure_graph():
     return project_id, genesis, hub, imm, root
 
 
-def test_collect_retrieval_subgraph_includes_immutable_and_root(retrieval_closure_graph):
+def test_collect_retrieval_subgraph_includes_immutable_and_root(
+    retrieval_closure_graph,
+):
     project_id, genesis, hub, imm, root = retrieval_closure_graph
     explored = [genesis, hub]
     result = collect_retrieval_subgraph(explored, project_id)
@@ -153,9 +155,7 @@ async def test_execute_retrieval_flow_injects_graph_context(monkeypatch):
     )
     mock_nav.explore_for_retrieval = MagicMock(return_value=fake_finding)
 
-    with patch(
-        "app.agents.orchestrator.GraphNavigator", return_value=mock_nav
-    ):
+    with patch("app.agents.orchestrator.GraphNavigator", return_value=mock_nav):
         events = []
         async for evt in orch.execute_retrieval_flow(
             "What does the graph say?",

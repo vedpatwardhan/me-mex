@@ -74,9 +74,8 @@ class Settings:
     RETRIEVAL_CONTEXT_MAX_CHARS: int = int(
         os.getenv("RETRIEVAL_CONTEXT_MAX_CHARS", "48000")
     )
-    RETRIEVAL_ANSWER_MAX_TOKENS: int = int(
-        os.getenv("RETRIEVAL_ANSWER_MAX_TOKENS", "1024")
-    )
+    # Upper bound on completion tokens for chat/completions (vLLM API field; not input clipping).
+    LLM_COMPLETION_MAX_TOKENS: int = int(os.getenv("LLM_COMPLETION_MAX_TOKENS", "2048"))
 
     HTTPX_MAX_CONNECTIONS: int = int(os.getenv("HTTPX_MAX_CONNECTIONS", "20"))
     HTTPX_MAX_KEEPALIVE: int = int(os.getenv("HTTPX_MAX_KEEPALIVE", "10"))

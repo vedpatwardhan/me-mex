@@ -504,7 +504,6 @@ class ExecutiveOrchestrator:
         chat_history: List[Dict[str, str]],
         project_id: str = "global",
         graph_context: Optional[str] = None,
-        max_tokens: Optional[int] = None,
         llm_caller: str = "ExecutiveOrchestrator.conversation",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Path 1: CONVERSATION (Single-Step Direct Response straightaway)."""
@@ -552,24 +551,13 @@ class ExecutiveOrchestrator:
         system_prompt = f"{base_prompt}{graph_block}{events_summary}"
 
         messages = [{"role": "system", "content": system_prompt}]
-        token_budget = (
-            max_tokens
-            if max_tokens is not None
-            else (
-                settings.RETRIEVAL_ANSWER_MAX_TOKENS
-                if grounded
-                else 512
-            )
-        )
         if chat_history:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": query})
 
-        # Stream tokens progressively
+        # Stream tokens progressively (completion length ceiling is set on LLMGateway, not here)
         full_tokens = []
-        async for token in self.llm.stream_chat_completion(
-            messages, max_tokens=token_budget, caller=llm_caller
-        ):
+        async for token in self.llm.stream_chat_completion(messages, caller=llm_caller):
             full_tokens.append(token)
             yield {
                 "event": "token_chunk",
@@ -582,7 +570,6 @@ class ExecutiveOrchestrator:
             # Fallback to direct synchronous generation if streaming returns empty
             direct_response = self.llm.generate_chat_completion(
                 messages,
-                max_tokens=token_budget,
                 caller=f"{llm_caller}_fallback",
             )
 

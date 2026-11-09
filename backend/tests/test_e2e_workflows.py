@@ -61,7 +61,9 @@ async def test_e2e_retrieval_workflow():
         summary_evts = [e for e in events if e.get("event") == "retrieval_summary"]
         assert len(summary_evts) > 0
         assert "context_node_ids" in summary_evts[0]
-        traversal_evts = [e for e in events if e.get("event") == "graph_traversal_start"]
+        traversal_evts = [
+            e for e in events if e.get("event") == "graph_traversal_start"
+        ]
         assert len(traversal_evts) > 0
 
     complete_evts = [e for e in events if e.get("event") in ["chat_complete", "error"]]

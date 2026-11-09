@@ -26,8 +26,8 @@ def collect_retrieval_subgraph(
     project_id: str,
 ) -> Dict[str, Any]:
     """
-  Post-traversal closure: all explored mutables plus direct immutable neighbors and ROOT provenance.
-  """
+    Post-traversal closure: all explored mutables plus direct immutable neighbors and ROOT provenance.
+    """
     tree = MutableTreeIndex(project_id=project_id)
     mutable_nodes: Dict[str, GraphNode] = {}
     for n in explored_nodes:
@@ -57,9 +57,7 @@ def collect_retrieval_subgraph(
     evidence_rows = [_node_row(n, role="immutable_evidence") for n in evidence.values()]
     root_rows = [_node_row(n, role="root_provenance") for n in roots.values()]
 
-    context_node_ids = sorted(
-        set(mutable_nodes) | set(evidence) | set(roots)
-    )
+    context_node_ids = sorted(set(mutable_nodes) | set(evidence) | set(roots))
 
     return {
         "mutable_context_nodes": mutable_rows,
@@ -90,9 +88,7 @@ def format_retrieval_graph_context(
         ),
         "source_documents": finding.get("root_provenance_nodes", []),
         "traversed_mutable_node_ids": [
-            r["id"]
-            for r in finding.get("mutable_context_nodes", [])
-            if r.get("id")
+            r["id"] for r in finding.get("mutable_context_nodes", []) if r.get("id")
         ],
     }
     sections.append(
