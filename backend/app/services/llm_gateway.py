@@ -3,7 +3,7 @@ import re
 import json
 import time
 import httpx
-from typing import List, Dict, Any, Optional, Type, TypeVar
+from typing import List, Dict, Any, Optional, Type, TypeVar, Callable
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
@@ -274,6 +274,7 @@ class LLMGateway:
         max_retries: int = 2,
         enable_reasoning: bool = False,
         caller: Optional[str] = None,
+        payload_mutator: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
     ) -> T:
         """Invokes LLM with strict JSON Schema constraints and validates output against response_model.
 
@@ -293,10 +294,11 @@ class LLMGateway:
 
         last_error = None
         raw_res = None
+        attempt_messages: List[Dict[str, Any]] = list(messages)
         for attempt in range(1, max_retries + 1):
             try:
                 raw_res = self.generate_chat_completion(
-                    messages=messages,
+                    messages=attempt_messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     response_format=response_format,
@@ -304,7 +306,12 @@ class LLMGateway:
                     enable_reasoning=enable_reasoning,
                     trace=False,
                 )
-                validated_model = response_model.model_validate_json(raw_res)
+                if payload_mutator is not None:
+                    parsed_payload = json.loads(raw_res)
+                    parsed_payload = payload_mutator(parsed_payload)
+                    validated_model = response_model.model_validate(parsed_payload)
+                else:
+                    validated_model = response_model.model_validate_json(raw_res)
                 elapsed = time.perf_counter() - start_time
                 llm_tracer.log_call(
                     caller=caller,
@@ -327,6 +334,15 @@ class LLMGateway:
                         f"[LLMGateway] Structured generation for {response_model.__name__} failed ({e}). "
                         f"Retrying (attempt {attempt + 1}/{max_retries})..."
                     )
+                    attempt_messages = attempt_messages + [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your JSON failed schema validation. Fix every error and return "
+                                "a complete response.\nErrors:\n- " + str(e)
+                            ),
+                        }
+                    ]
                     continue
                 print(
                     f"[LLMGateway ERROR] Structured completion for {response_model.__name__} failed after "

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -177,6 +178,49 @@ def normalize_partition_singleton_subs(
         )
 
     return subs, overflow, edges, demotions
+
+
+def repair_partition_self_loop_rewires(
+    payload: Dict[str, Any],
+    *,
+    is_replacement_split: bool,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """
+    Fix LLM confusion on replacement split: neighbor_index == connect_to_existing_neighbor_index
+    when the model meant to assign the sub_1 cluster (parent id reuse), not self-attach.
+    """
+    data = json.loads(json.dumps(payload))
+    repairs: List[str] = []
+    edges = list(data.get("rewired_edges") or [])
+    sub_aliases = {
+        (s.get("sub_id_alias") or "").strip()
+        for s in (data.get("sub_concepts") or [])
+        if s.get("sub_id_alias")
+    }
+    for i, edge in enumerate(edges):
+        idx = edge.get("neighbor_index")
+        existing = edge.get("connect_to_existing_neighbor_index")
+        if existing is None or idx != existing:
+            continue
+        if is_replacement_split:
+            fixed = dict(edge)
+            fixed.pop("connect_to_existing_neighbor_index", None)
+            fixed["connect_to_sub_alias"] = "sub_1"
+            edges[i] = fixed
+            repairs.append(
+                f"neighbor_index {idx}: self connect_to_existing_neighbor_index "
+                "rewritten to connect_to_sub_alias sub_1 (replacement split)."
+            )
+        elif "sub_1" in sub_aliases:
+            fixed = dict(edge)
+            fixed.pop("connect_to_existing_neighbor_index", None)
+            fixed["connect_to_sub_alias"] = "sub_1"
+            edges[i] = fixed
+            repairs.append(
+                f"neighbor_index {idx}: self-loop rewritten to connect_to_sub_alias sub_1."
+            )
+    data["rewired_edges"] = edges
+    return data, repairs
 
 
 def validate_reorg_partition(

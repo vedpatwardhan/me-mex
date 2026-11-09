@@ -722,3 +722,5 @@ def test_reorg_partition_prompt_injects_strategy_without_jinja():
     assert "REPLACEMENT SPLIT" in prompt_r
     assert "sub_1" in prompt_r
     assert "overflow_neighbors" in prompt_r
+    assert "REWIRED_EDGES INVARIANTS" in prompt_r
+    assert "must differ from `neighbor_index`" in prompt_r

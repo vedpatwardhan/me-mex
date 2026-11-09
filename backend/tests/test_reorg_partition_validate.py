@@ -7,9 +7,11 @@ import pytest
 from app.agents.graph_navigator import GraphNavigator
 from app.db import db_engine
 from app.models import GraphEdge, GraphNode
+from app.models import ReorgPartitionPayload
 from app.services.reorg_rewire_utils import (
     merge_partition_to_engine_rewires,
     normalize_partition_singleton_subs,
+    repair_partition_self_loop_rewires,
     summarize_partition_rewire_plan,
     validate_reorg_partition,
 )
@@ -91,6 +93,35 @@ def test_validate_accepts_existing_mutable_reuse():
         mutable_neighbor_indices={1},
     )
     assert ok, errs
+
+
+def test_repair_replacement_self_loop_rewrites_to_sub_1():
+    raw = {
+        "parent_title": "Hub",
+        "parent_description": "d",
+        "sub_concepts": [
+            {"sub_id_alias": "sub_1", "title": "A", "description": "d"},
+            {"sub_id_alias": "sub_2", "title": "B", "description": "d"},
+        ],
+        "overflow_neighbors": [],
+        "rewired_edges": [
+            {
+                "neighbor_index": 1,
+                "connect_to_existing_neighbor_index": 1,
+                "description": "bad self-wire",
+            },
+            {"neighbor_index": 2, "connect_to_sub_alias": "sub_1"},
+            {"neighbor_index": 3, "connect_to_sub_alias": "sub_2"},
+            {"neighbor_index": 4, "connect_to_sub_alias": "sub_2"},
+        ],
+    }
+    repaired, notes = repair_partition_self_loop_rewires(raw, is_replacement_split=True)
+    assert notes
+    assert repaired["rewired_edges"][0]["connect_to_sub_alias"] == "sub_1"
+    assert (
+        repaired["rewired_edges"][0].get("connect_to_existing_neighbor_index") is None
+    )
+    ReorgPartitionPayload.model_validate(repaired)
 
 
 def test_validate_rejects_self_existing_target():

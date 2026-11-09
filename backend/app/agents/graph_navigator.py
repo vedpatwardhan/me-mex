@@ -33,6 +33,7 @@ from app.services.reorg_rewire_utils import (
     merge_partition_to_engine_rewires,
     normalize_partition_singleton_subs,
     partition_neighbor_count,
+    repair_partition_self_loop_rewires,
     partition_rewire_assignment_kind,
     summarize_partition_rewire_plan,
     validate_reorg_partition,
@@ -78,11 +79,35 @@ def _reorg_split_strategy_block(is_genesis: bool) -> tuple[str, str]:
     block = (
         "REPLACEMENT SPLIT:\n"
         "- **`sub_1` reuses the split target node id** as the replacement hub — assign the "
-        "largest coherent neighbor cluster to `sub_1` when possible.\n"
+        'largest coherent neighbor cluster via **`connect_to_sub_alias`: `"sub_1"`** '
+        "(not `connect_to_existing_neighbor_index`).\n"
+        "- **Forbidden:** `connect_to_existing_neighbor_index` equal to the same "
+        "`neighbor_index` (no self-wires). That field is only for attaching neighbor **j** "
+        "under a **different** mutable batch index **k ≠ j**.\n"
+        "- A neighbor that only anchors `sub_1` may be omitted from `rewired_edges` "
+        "(see coverage exception) instead of self-wiring.\n"
         "- Additional sub-concepts (`sub_2`, …) are new siblings under the tree parent "
         "(same depth; no new wrapper layer under the old hub)."
     )
     return block, "ANCESTOR"
+
+
+def _partition_fixup_user_message(
+    errors: List[str],
+    *,
+    is_replacement_split: bool,
+) -> str:
+    lines = [
+        "Your partition JSON failed validation. Fix and return a complete response.",
+        "Errors:",
+    ]
+    lines.extend(f"- {e}" for e in errors)
+    if is_replacement_split:
+        lines.append(
+            'Replacement split: parent-id reuse is connect_to_sub_alias "sub_1" only — '
+            "never connect_to_existing_neighbor_index with the same value as neighbor_index."
+        )
+    return "\n".join(lines)
 
 
 from app.tools.search_tools import search_tools
@@ -515,6 +540,22 @@ Frontier expansion items ({len(batch_items_payload)} frontier node(s)):
             entry.pop("id", None)
             indexed_neighbors_to_rewire.append(entry)
 
+        is_replacement_split = not is_genesis_hub
+        mutable_indices = sorted(
+            entry["neighbor_index"]
+            for entry in indexed_neighbors_to_rewire
+            if not entry.get("is_immutable")
+        )
+        wiring_lines = [
+            f"Mutable neighbor batch indices (valid connect_to_existing_neighbor_index targets): {mutable_indices}",
+        ]
+        if is_replacement_split:
+            wiring_lines.append(
+                'Replacement split: largest cluster → connect_to_sub_alias "sub_1" '
+                "(engine reuses this hub's node id). Never self-wire "
+                "(connect_to_existing_neighbor_index must differ from neighbor_index)."
+            )
+
         user_partition = "\n\n".join(
             [
                 f"Target over-clustered mutable concept: '{target_node.title}' (ID: {target_node.id})",
@@ -522,10 +563,35 @@ Frontier expansion items ({len(batch_items_payload)} frontier node(s)):
                 f"Reorganization Mode: {mode}",
                 f"Partition neighbors (excl. parent): n = {n_neighbors} (threshold τ = {tau}; max subs ≤ {max_allowed_subs})",
                 "Target: after split, parent/orphan load should trend toward < τ where possible.",
+                *wiring_lines,
                 f"Target Neighbors to Partition ({len(indexed_neighbors_to_rewire)} items):",
                 json_dumps_ingest(indexed_neighbors_to_rewire),
             ]
         )
+
+        def _partition_payload_mutator(raw: Dict[str, Any]) -> Dict[str, Any]:
+            repaired, repair_notes = repair_partition_self_loop_rewires(
+                raw, is_replacement_split=is_replacement_split
+            )
+            for note in repair_notes:
+                _append_reorg_event(
+                    emitted_events,
+                    project_id,
+                    {
+                        "event": "reorg_partition_self_loop_repaired",
+                        "persona_id": self.department_id,
+                        "department_name": self.department_name,
+                        "node_id": target_node.id,
+                        "node_title": target_node.title,
+                        "repair_note": note,
+                        "message": (
+                            f"[{self.department_name}] Auto-repaired partition self-loop "
+                            f"for '{target_node.title}': {note}"
+                        ),
+                        "timestamp": time.time(),
+                    },
+                )
+            return repaired
 
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": system_partition},
@@ -545,6 +611,7 @@ Frontier expansion items ({len(batch_items_payload)} frontier node(s)):
                     max_retries=2,
                     enable_reasoning=settings.REORG_PARTITION_ENABLE_REASONING,
                     caller=f"GraphNavigator[{self.department_name}].reorg_partition_{mode}",
+                    payload_mutator=_partition_payload_mutator,
                 )
             except Exception as e:
                 if attempt >= partition_attempts:
@@ -552,6 +619,15 @@ Frontier expansion items ({len(batch_items_payload)} frontier node(s)):
                         f"[{self.department_name}] Unified partition failed for "
                         f"{target_node.id} (mode={mode}): {e}"
                     ) from e
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": _partition_fixup_user_message(
+                            [str(e)],
+                            is_replacement_split=is_replacement_split,
+                        ),
+                    }
+                )
                 continue
 
             formulated_subs = [s.model_dump() for s in payload.sub_concepts]

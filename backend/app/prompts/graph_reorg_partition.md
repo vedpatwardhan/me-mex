@@ -21,6 +21,15 @@ If a **mutable** neighbor in the batch already acts as a department hub under th
 - **Do not** assign that hub's own index to a new `sub_*` alias (it stays on the split target).
 - Immutable-only stragglers may attach to an existing mutable hub with this field.
 
+## REWIRED_EDGES INVARIANTS (absolute)
+
+- **`connect_to_existing_neighbor_index` must differ from `neighbor_index`** — no self-wires.
+- **Replacement `sub_1` (parent id reuse)** uses **`connect_to_sub_alias`: `"sub_1"`** only — **not** `connect_to_existing_neighbor_index`.
+- `connect_to_existing_neighbor_index` is **only** when neighbor **j** attaches under **another** mutable batch index **k** where **k ≠ j**.
+
+**Bad (replacement split):** `{ "neighbor_index": 1, "connect_to_existing_neighbor_index": 1 }`  
+**Good:** `{ "neighbor_index": 1, "connect_to_sub_alias": "sub_1" }` or omit index 1 if it is only the `sub_1` anchor.
+
 ## MIN-2 PER NEW SUB (absolute)
 
 Every **new** entry in `sub_concepts` must receive **≥ {{ min_sub_neighbors }}** distinct neighbors via `rewired_edges` using `connect_to_sub_alias`. **Never** output a thin new sub with 0 or 1 neighbor.

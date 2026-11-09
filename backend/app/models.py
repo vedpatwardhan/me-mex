@@ -315,8 +315,20 @@ class ReorgSplitPayload(BaseModel):
 
 class RewireEdgeItem(BaseModel):
     neighbor_index: int
-    connect_to_sub_alias: Optional[str] = None
-    connect_to_existing_neighbor_index: Optional[int] = None
+    connect_to_sub_alias: Optional[str] = Field(
+        default=None,
+        description=(
+            "New sub hub alias (sub_1, sub_2, …). For replacement splits, sub_1 reuses "
+            "the split target node id — use this field, not connect_to_existing_neighbor_index."
+        ),
+    )
+    connect_to_existing_neighbor_index: Optional[int] = Field(
+        default=None,
+        description=(
+            "Batch index of a different mutable neighbor (must not equal neighbor_index) "
+            "to attach this neighbor under an existing hub in the batch."
+        ),
+    )
     description: str = ""
 
     @model_validator(mode="after")
