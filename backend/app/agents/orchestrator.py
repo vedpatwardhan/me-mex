@@ -52,6 +52,17 @@ from app.services.retrieval_context import (
 )
 
 
+GRAPH_MUTATION_EVENTS = frozenset(
+    {
+        "root_node_created",
+        "intra_concepts_created",
+        "reorg_completed",
+        "reorg_neighbor_rewired",
+        "ingestion_completed",
+    }
+)
+
+
 class ExecutiveOrchestrator:
     """Executive Orchestrator agent acting as central intent classifier and lifecycle coordinator."""
 
@@ -488,10 +499,15 @@ class ExecutiveOrchestrator:
                     }
 
         last_reply = ""
+        graph_updated = False
         async for item in _run_pipeline():
             if isinstance(item, dict) and "event" in item:
-                if item.get("event") == "chat_complete":
+                evt_type = item.get("event")
+                if evt_type in GRAPH_MUTATION_EVENTS:
+                    graph_updated = True
+                if evt_type == "chat_complete":
                     last_reply = item.get("final_answer") or last_reply
+                    item = {**item, "graph_updated": graph_updated}
                 self.event_queue.push(project_id, item)
             yield item
         await schedule_rolling_summary_refresh(

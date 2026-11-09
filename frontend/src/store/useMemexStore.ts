@@ -239,6 +239,7 @@ export const useMemexStore = create<MemexState>((set, get) => ({
       let accumulatedText = '';
       const accumulatedEvents: string[] = [];
       const touchedNodes: any[] = [];
+      let graphUpdated = false;
 
       const initialAgentMsg: ChatMessage = {
         id: agentMsgId,
@@ -362,6 +363,9 @@ export const useMemexStore = create<MemexState>((set, get) => ({
                 }
               }));
             } else if (evtType === 'chat_complete') {
+              if (eventData.graph_updated === true) {
+                graphUpdated = true;
+              }
               if (!accumulatedText && eventData.final_answer) {
                 accumulatedText = eventData.final_answer;
                 set((state) => ({
@@ -375,6 +379,20 @@ export const useMemexStore = create<MemexState>((set, get) => ({
               }
             } else if (evtType === 'node_touched') {
               touchedNodes.push(eventData);
+              const nodeId = eventData.node_id;
+              if (nodeId) {
+                set((state) => {
+                  const prev = state.thinkingState.visitedNodeIds || [];
+                  if (prev.includes(nodeId)) return state;
+                  return {
+                    ...state,
+                    thinkingState: {
+                      ...state.thinkingState,
+                      visitedNodeIds: [...prev, nodeId],
+                    },
+                  };
+                });
+              }
             }
           } catch (e) {
             console.error('Error parsing SSE event:', e);
@@ -383,14 +401,18 @@ export const useMemexStore = create<MemexState>((set, get) => ({
       }
 
 
-      await get().fetchGraphData();
+      if (graphUpdated) {
+        await get().fetchGraphData();
+      }
 
       set({
         thinkingState: {
           isThinking: false,
           currentAction: 'Idle',
-          visitedNodeIds: touchedNodes.map((n: any) => n.node_id).filter(Boolean)
-        }
+          visitedNodeIds: get().thinkingState.visitedNodeIds.length
+            ? get().thinkingState.visitedNodeIds
+            : touchedNodes.map((n: any) => n.node_id).filter(Boolean),
+        },
       });
     } catch (err) {
       console.error('Chat execution failed:', err);

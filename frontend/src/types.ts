@@ -113,6 +113,7 @@ export interface AgentThinkingState {
 
 export interface IngestionProgressEvent {
   event: 'intent_classified' | 'passage_extraction_progress' | 'ingestion_completed' | 'chat_complete' | 'error';
+  graph_updated?: boolean;
   intent?: string;
   current_chunk?: number;
   total_chunks?: number;

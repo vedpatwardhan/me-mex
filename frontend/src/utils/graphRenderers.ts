@@ -1,4 +1,10 @@
 import { GraphNode, isRootNode, getRootSubType, isImmutableConcept } from '../types';
+import {
+  NODE_RADIUS_DEFAULT,
+  NODE_RADIUS_HOVER,
+  NODE_RADIUS_SELECTED,
+  ROOT_ORBIT_EXTRA,
+} from './graphNodeMetrics';
 
 export const createGlowTextureCache = (): Map<string, HTMLCanvasElement> => {
   const cache = new Map<string, HTMLCanvasElement>();
@@ -39,7 +45,11 @@ export const drawMeMexNode = (
   const isRoot = isRootNode(node);
   const rootType = isRoot ? getRootSubType(node) : null;
   const isImmutable = isImmutableConcept(node);
-  const radius = isSelected ? 9.5 : isHovered ? 8.5 : 7.0;
+  const radius = isSelected
+    ? NODE_RADIUS_SELECTED
+    : isHovered
+      ? NODE_RADIUS_HOVER
+      : NODE_RADIUS_DEFAULT;
 
   let baseColor = '#fbbf24'; // Mutable Concept (Amber)
   if (isRoot) {
@@ -55,7 +65,7 @@ export const drawMeMexNode = (
   if (isSelected || isHovered || isTraversed) {
     const sprite = glowCache.get(baseColor) || glowCache.get('#fbbf24');
     if (sprite) {
-      const glowSize = radius * (isTraversed ? 4.2 : 3.5);
+      const glowSize = radius * (isTraversed ? 3.2 : 3.5);
       ctx.drawImage(sprite, x - glowSize / 2, y - glowSize / 2, glowSize, glowSize);
     }
   }
@@ -65,7 +75,7 @@ export const drawMeMexNode = (
     // Document Root Node: Circular node with distinct dark core, high-contrast border and outer orbit ring
     // Outer subtle orbit ring
     ctx.beginPath();
-    ctx.arc(x, y, radius + 3 / globalScale, 0, 2 * Math.PI, false);
+    ctx.arc(x, y, radius + ROOT_ORBIT_EXTRA / globalScale, 0, 2 * Math.PI, false);
     ctx.strokeStyle = `${baseColor}44`;
     ctx.lineWidth = 1 / globalScale;
     ctx.stroke();
@@ -79,13 +89,22 @@ export const drawMeMexNode = (
     ctx.strokeStyle = baseColor;
     ctx.stroke();
   } else {
-    // Spherical Disc for Concepts
+    // Concept nodes: hollow by default; solid fill when traversed (retrieval/ingestion)
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, 2 * Math.PI, false);
-    ctx.fillStyle = baseColor;
-    ctx.fill();
-    ctx.lineWidth = isSelected ? 2.5 / globalScale : 1.2 / globalScale;
-    ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.3)';
+    if (isTraversed || isSelected) {
+      ctx.fillStyle = baseColor;
+      ctx.fill();
+    } else {
+      ctx.fillStyle = '#0f172a';
+      ctx.fill();
+    }
+    ctx.lineWidth = isTraversed
+      ? 2.2 / globalScale
+      : isSelected
+        ? 2.5 / globalScale
+        : 1.8 / globalScale;
+    ctx.strokeStyle = isTraversed || isSelected ? baseColor : baseColor;
     ctx.stroke();
   }
 
