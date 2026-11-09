@@ -40,6 +40,7 @@ from app.services.reorg_rewire_utils import (
 from app.services.llm_gateway import llm_gateway
 from app.services.prompt_mapper import PromptIdMapper
 from app.prompts import load_prompt
+from app.services.retrieval_context import collect_retrieval_subgraph
 
 
 def _append_reorg_event(
@@ -192,13 +193,32 @@ class GraphNavigator:
         query: str,
         chat_history: Optional[List[Dict[str, str]]] = None,
         project_id: Optional[str] = None,
+        ingest_context_messages: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
-        return self.traverse_mutable_tree_from_genesis(
+        pid = project_id or self.project_id
+        trav_depth = (
+            settings.RETRIEVAL_TRAVERSAL_MAX_DEPTH
+            if settings.RETRIEVAL_TRAVERSAL_MAX_DEPTH is not None
+            else settings.MAX_TRAVERSAL_DEPTH
+        )
+        hop_top_k = settings.RETRIEVAL_TRAVERSAL_TOP_K
+        if hop_top_k is None:
+            hop_top_k = settings.INGEST_TRAVERSAL_TOP_K
+
+        base = self.traverse_mutable_tree_from_genesis(
             query=query,
             chat_history=chat_history,
-            project_id=project_id,
-            traversal_top_k=settings.RETRIEVAL_TRAVERSAL_TOP_K,
+            project_id=pid,
+            max_depth=trav_depth,
+            traversal_top_k=hop_top_k,
+            ingest_context_messages=ingest_context_messages,
+            traversal_prompt="graph_tree_traversal_retrieval",
         )
+        closure = collect_retrieval_subgraph(
+            base.get("explored_nodes", []),
+            pid,
+        )
+        return {**base, **closure}
 
     def traverse_mutable_tree_from_genesis(
         self,
@@ -209,6 +229,7 @@ class GraphNavigator:
         allow_web_search: bool = False,
         traversal_top_k: Optional[int] = None,
         ingest_context_messages: Optional[List[Dict[str, str]]] = None,
+        traversal_prompt: str = "graph_tree_traversal",
     ) -> Dict[str, Any]:
         """Top-down traversal from Genesis over the mutable tree backbone."""
         pid = project_id or self.project_id
@@ -268,10 +289,21 @@ class GraphNavigator:
                     }
                 )
 
+            frontier_titles: List[str] = []
+            for fid in current_frontier:
+                f_node = tree.node_map.get(fid) or db_engine.get_node(fid)
+                if f_node:
+                    frontier_titles.append(f_node.title)
+            frontier_label = (
+                ", ".join(frontier_titles)
+                if frontier_titles
+                else self.genesis_node.title
+            )
+
             prompt_payload = f"""Genesis / Project Scope (Everything):
 {self.genesis_node.description}
 
-Current traversal frontier node: '{current_frontier[0] if current_frontier else self.genesis_node.title}'
+Current traversal frontier node(s): '{frontier_label}'
 User Query / Context: "{query}"
 Current Hop Level: {hop} / {max_traversal_depth}
 
@@ -281,7 +313,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                 {
                     "role": "system",
                     "content": load_prompt(
-                        "graph_tree_traversal",
+                        traversal_prompt,
                         genesis_title=self.genesis_node.title,
                         max_depth=max_traversal_depth,
                         traversal_top_k=hop_top_k,

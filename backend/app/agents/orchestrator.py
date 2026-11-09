@@ -6,7 +6,7 @@ Aligned with docs/ARCHITECTURE.md Section 2:
 - Classifies queries into 3 execution paths (`CONVERSATION`, `RETRIEVAL`, `INGESTION`).
 - Path Lifecycle:
     - `CONVERSATION`: Direct execution -> Final conversation response.
-    - `RETRIEVAL`: Mutually exclusive sub-graph traversal (Step 1) -> Relevance evaluation (Step 2) -> Final conversation response.
+    - `RETRIEVAL`: Genesis tree traversal + immutable evidence closure (Step 1) -> Grounded conversation response (Step 2).
     - `INGESTION`: Fetch URL/PDF & build intra-doc graph (Step 1) -> Genesis tree traversal, collective linking & passage-grounded concept splitting (Step 2) -> Final conversation response.
 - Creates Root Nodes (`ROOT`) and extracted Intra-Document Concepts (`node_type="CONCEPT"`) with `immutable: True`.
 """
@@ -46,6 +46,7 @@ from app.services.conversation_summary import (
     get_rolling_summary,
     schedule_rolling_summary_refresh,
 )
+from app.services.retrieval_context import format_retrieval_graph_context
 
 
 class ExecutiveOrchestrator:
@@ -330,12 +331,27 @@ class ExecutiveOrchestrator:
         )
 
     def classify_intent(
-        self, query: str, chat_history: List[Dict[str, str]]
+        self,
+        query: str,
+        chat_history: List[Dict[str, str]],
+        project_id: str = "global",
     ) -> IntentClassificationPayload:
         """Classifies user input into CONVERSATION, RETRIEVAL, or INGESTION path in a single pass."""
         system_prompt = load_prompt("classify_intent")
 
         messages = [{"role": "system", "content": system_prompt}]
+        if settings.INGEST_USE_ROLLING_SUMMARY:
+            summary = (get_rolling_summary(project_id) or "").strip()
+            if summary:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "Conversation context (rolling summary for this project):\n"
+                            f"{summary[: settings.CHAT_SUMMARY_MAX_CHARS]}"
+                        ),
+                    }
+                )
         if chat_history:
             for item in chat_history[-4:]:
                 role = (
@@ -392,7 +408,9 @@ class ExecutiveOrchestrator:
         async def _run_pipeline() -> AsyncGenerator[Dict[str, Any], None]:
             try:
                 t0_intent = time.time()
-                intent_payload = self.classify_intent(query, chat_history)
+                intent_payload = self.classify_intent(
+                    query, chat_history, project_id=project_id
+                )
                 intent_duration = round(time.time() - t0_intent, 2)
                 intent = intent_payload.intent
 
@@ -485,19 +503,29 @@ class ExecutiveOrchestrator:
         query: str,
         chat_history: List[Dict[str, str]],
         project_id: str = "global",
+        graph_context: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        llm_caller: str = "ExecutiveOrchestrator.conversation",
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Path 1: CONVERSATION (Single-Step Direct Response straightaway)."""
+        grounded = bool(graph_context and graph_context.strip())
         logger.phase_header(
-            "💬 PATH 1: DIRECT CONVERSATIONAL FLOW",
+            "💬 PATH 1: DIRECT CONVERSATIONAL FLOW"
+            if not grounded
+            else "💬 PATH 2: GROUNDED RETRIEVAL RESPONSE",
             f"Project: {project_id} • Prompt: '{query[:80]}...'"
             if len(query) > 80
             else f"Project: {project_id} • Prompt: '{query}'",
-            style="magenta",
+            style="magenta" if not grounded else "green",
         )
 
         yield {
             "event": "conversation_start",
-            "message": "Executive Orchestrator responding directly via conversational mode...",
+            "message": (
+                "Executive Orchestrator synthesizing answer from retrieved graph context..."
+                if grounded
+                else "Executive Orchestrator responding directly via conversational mode..."
+            ),
             "timestamp": time.time(),
         }
 
@@ -514,9 +542,21 @@ class ExecutiveOrchestrator:
             )
 
         base_prompt = load_prompt("conversation")
-        system_prompt = f"{base_prompt}{events_summary}"
+        graph_block = ""
+        if grounded:
+            graph_block = (
+                "\n\n--- Retrieved Knowledge Graph Context (use as primary factual grounding) ---\n"
+                f"{graph_context.strip()}\n"
+                "--- End retrieved context ---"
+            )
+        system_prompt = f"{base_prompt}{graph_block}{events_summary}"
 
         messages = [{"role": "system", "content": system_prompt}]
+        token_budget = (
+            max_tokens
+            if max_tokens is not None
+            else (settings.RETRIEVAL_ANSWER_MAX_TOKENS if grounded else 512)
+        )
         if chat_history:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": query})
@@ -524,7 +564,7 @@ class ExecutiveOrchestrator:
         # Stream tokens progressively
         full_tokens = []
         async for token in self.llm.stream_chat_completion(
-            messages, max_tokens=512, caller="ExecutiveOrchestrator.conversation"
+            messages, max_tokens=token_budget, caller=llm_caller
         ):
             full_tokens.append(token)
             yield {
@@ -538,8 +578,8 @@ class ExecutiveOrchestrator:
             # Fallback to direct synchronous generation if streaming returns empty
             direct_response = self.llm.generate_chat_completion(
                 messages,
-                max_tokens=512,
-                caller="ExecutiveOrchestrator.conversation_fallback",
+                max_tokens=token_budget,
+                caller=f"{llm_caller}_fallback",
             )
 
         yield {
@@ -554,7 +594,7 @@ class ExecutiveOrchestrator:
         chat_history: List[Dict[str, str]],
         project_id: str = "global",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Path 2: RETRIEVAL (Genesis tree traversal -> relevance evaluation -> conversation)."""
+        """Path 2: RETRIEVAL (Genesis tree traversal -> evidence closure -> grounded conversation)."""
         logger.phase_header(
             "🔍 PATH 2: RETRIEVAL & SUB-GRAPH TRAVERSAL",
             f"Project: {project_id} • Query: '{query}'",
@@ -570,32 +610,50 @@ class ExecutiveOrchestrator:
             "timestamp": time.time(),
         }
 
+        retrieval_ctx = self._ingest_context_blocks(query, chat_history, project_id)
         finding = await asyncio.to_thread(
             navigator.explore_for_retrieval,
             query=query,
             chat_history=chat_history,
             project_id=project_id,
+            ingest_context_messages=retrieval_ctx,
         )
         for touch_evt in finding.get("emitted_events", []):
             yield touch_evt
 
-        department_findings = [finding]
         yield {
             "event": "graph_traversal_active",
             "navigator_id": navigator.navigator_id,
             "traversed_node_ids": finding.get("traversed_node_ids", []),
+            "context_node_ids": finding.get("context_node_ids", []),
+            "immutable_evidence_count": len(
+                finding.get("immutable_evidence_nodes", [])
+            ),
             "timestamp": time.time(),
         }
+
+        graph_context = format_retrieval_graph_context(
+            finding,
+            genesis_description=navigator.genesis_node.description,
+            max_chars=settings.RETRIEVAL_CONTEXT_MAX_CHARS,
+        )
 
         yield {
             "event": "retrieval_summary",
-            "message": f"Graph retrieval completed from Genesis for query: '{query}'",
+            "message": (
+                f"Graph retrieval completed from Genesis for query: '{query}' "
+                f"({len(finding.get('context_node_ids', []))} context nodes)."
+            ),
+            "context_node_ids": finding.get("context_node_ids", []),
             "timestamp": time.time(),
         }
 
-        # Final Step: Culminate in conversation response stream
         async for event in self.execute_conversation_flow(
-            query, chat_history, project_id=project_id
+            query,
+            chat_history,
+            project_id=project_id,
+            graph_context=graph_context,
+            llm_caller="ExecutiveOrchestrator.retrieval_conversation",
         ):
             yield event
 

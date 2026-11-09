@@ -67,7 +67,16 @@ class Settings:
     )
     INGEST_TRAVERSAL_MAX_DEPTH: int | None = _optional_int("INGEST_TRAVERSAL_MAX_DEPTH")
     INGEST_TRAVERSAL_TOP_K: int = int(os.getenv("INGEST_TRAVERSAL_TOP_K", "2"))
+    RETRIEVAL_TRAVERSAL_MAX_DEPTH: int | None = _optional_int(
+        "RETRIEVAL_TRAVERSAL_MAX_DEPTH"
+    )
     RETRIEVAL_TRAVERSAL_TOP_K: int | None = _optional_int("RETRIEVAL_TRAVERSAL_TOP_K")
+    RETRIEVAL_CONTEXT_MAX_CHARS: int = int(
+        os.getenv("RETRIEVAL_CONTEXT_MAX_CHARS", "48000")
+    )
+    RETRIEVAL_ANSWER_MAX_TOKENS: int = int(
+        os.getenv("RETRIEVAL_ANSWER_MAX_TOKENS", "1024")
+    )
 
     HTTPX_MAX_CONNECTIONS: int = int(os.getenv("HTTPX_MAX_CONNECTIONS", "20"))
     HTTPX_MAX_KEEPALIVE: int = int(os.getenv("HTTPX_MAX_KEEPALIVE", "10"))
