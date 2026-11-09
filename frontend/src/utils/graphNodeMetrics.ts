@@ -14,7 +14,11 @@ export function nodeCollideRadius(kind: 'root' | 'immutable' | 'mutable' = 'muta
       ? NODE_RADIUS_DEFAULT + ROOT_ORBIT_EXTRA
       : NODE_RADIUS_DEFAULT;
   const gap =
-    kind === 'immutable' ? NODE_COLLIDE_GAP + 6 : kind === 'root' ? NODE_COLLIDE_GAP + 2 : NODE_COLLIDE_GAP;
+    kind === 'immutable'
+      ? NODE_COLLIDE_GAP + 6
+      : kind === 'mutable'
+        ? NODE_COLLIDE_GAP + 6
+        : NODE_COLLIDE_GAP + 2;
   return base + gap;
 }
 

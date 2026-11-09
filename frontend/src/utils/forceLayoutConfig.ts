@@ -78,7 +78,7 @@ export function layoutLinkDistance(kind: LayoutLinkKind, params: ForceParams): n
     case 'evidence_hub':
       return 175;
     case 'mutable_tree':
-      return 110;
+      return 128;
     default:
       return params.linkDistanceDefault;
   }
@@ -110,8 +110,7 @@ export function chargeStrengthForNode(d: any, params: ForceParams): number {
     return params.chargeRootImmutable * 1.02;
   }
   const depth = typeof d._layoutDepth === 'number' ? d._layoutDepth : 0;
-  // Deeper mutables: slightly stronger repulsion so rings don't collapse inward.
-  return params.chargeMutable * (0.78 + Math.min(depth, 6) * 0.05);
+  return params.chargeMutable * (0.9 + Math.min(depth, 6) * 0.045);
 }
 
 /** Phantom ROOT↔immutable links for layout only (not persisted). */
@@ -168,7 +167,7 @@ export function computeGraphStructureKey(
     .map((e) => e.id ?? `${e.source}-${e.target}`)
     .sort()
     .join(',');
-  return `layout-v4|${nodes.length}|${edges.length}|${nIds}|${eIds}`;
+  return `layout-v6|${nodes.length}|${edges.length}|${nIds}|${eIds}`;
 }
 
 export type GraphNodeLike = GraphNode;

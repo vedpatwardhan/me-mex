@@ -143,7 +143,7 @@ export function computeRadialTargets(
   const R_IMM = ringR * 0.78;
   const R_GENESIS = 12;
   /** Mutable band stays well inside immutables / roots. */
-  const R_MUT_OUTER = ringR * 0.48;
+  const R_MUT_OUTER = ringR * 0.58;
 
   const depths = computeMutableDepths(nodes, links);
   const maxDepth = Math.max(1, ...[...depths.values()]);
@@ -221,15 +221,16 @@ export function computeRadialTargets(
 
     const depth = Math.max(1, depths.get(node.id) ?? 1);
     const theta = subtreeAngles.get(node.id) ?? hashAngle(node.id);
-    const innerSpan = Math.max(24, R_MUT_OUTER - R_GENESIS - 10);
+    const innerSpan = Math.max(36, R_MUT_OUTER - R_GENESIS - 6);
     const step = innerSpan / Math.max(1, maxDepth);
-    const radius = R_GENESIS + 6 + depth * step * 0.92;
+    const radius = R_GENESIS + 10 + depth * step * 1.12;
+    const angleWobble = (hashAngle(node.id + ':mut') - Math.PI) * 0.085;
 
     targets.set(node.id, {
       radius: Math.min(radius, R_MUT_OUTER),
-      theta,
-      radialStrength: 0.38 + Math.min(depth, 4) * 0.04,
-      anchorStrength: 0.06,
+      theta: theta + angleWobble,
+      radialStrength: 0.3 + Math.min(depth, 4) * 0.03,
+      anchorStrength: 0.038,
     });
   }
 
