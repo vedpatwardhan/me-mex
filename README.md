@@ -14,6 +14,12 @@ The pipeline is working end-to-end for multi-format knowledge ingestion, sub-gra
 
 ---
 
+This graph is then iterated on to fetch concepts relevant to a particular query and highlighted, here's an image for the same:
+
+<img src="./assets/091126_3.png" alt="Graph After Ingestion" width="100%" />
+
+---
+
 ## 🚀 Running the App
 
 ```bash

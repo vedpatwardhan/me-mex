@@ -12,6 +12,7 @@ from app.db import db_engine
 from app.models import GraphEdge, GraphNode
 from app.models import RetrievalRelevanceItem, RetrievalRelevancePayload
 from app.services.retrieval_context import (
+    build_closure_touch_events,
     collect_retrieval_subgraph,
     filter_retrieval_finding_by_relevance,
     format_retrieval_graph_context,
@@ -91,6 +92,25 @@ def test_collect_retrieval_subgraph_includes_immutable_and_root(
     assert "imm_evidence" in result["context_node_ids"]
 
 
+def test_build_closure_touch_events_for_immutable_and_root(
+    retrieval_closure_graph,
+):
+    project_id, genesis, hub, imm, root = retrieval_closure_graph
+    closure = collect_retrieval_subgraph([genesis, hub], project_id)
+    events = build_closure_touch_events(
+        closure,
+        [genesis.id, hub.id],
+        persona_id="nav_test",
+        persona_name="Graph Navigator",
+    )
+    touched_ids = {e["node_id"] for e in events}
+    assert "imm_evidence" in touched_ids
+    assert "paper_root" in touched_ids
+    assert genesis.id not in touched_ids
+    assert all(e.get("event") == "node_touched" for e in events)
+    assert all(e.get("touch_phase") == "evidence_closure" for e in events)
+
+
 def test_format_retrieval_graph_context_contains_titles(retrieval_closure_graph):
     project_id, genesis, hub, imm, root = retrieval_closure_graph
     finding = collect_retrieval_subgraph([genesis, hub], project_id)
@@ -155,8 +175,22 @@ async def test_execute_retrieval_flow_injects_graph_context(monkeypatch):
         title="Everything",
         description="Scope",
     )
-    mock_nav.explore_for_retrieval = MagicMock(return_value=fake_finding)
+    mock_nav.department_id = "nav_test"
+    mock_nav.department_name = "Graph Navigator"
+    mock_nav.traverse_mutable_tree_from_genesis = MagicMock(
+        return_value={
+            "emitted_events": [],
+            "traversed_node_ids": fake_finding["traversed_node_ids"],
+            "explored_nodes": [],
+        }
+    )
 
+    monkeypatch.setattr(
+        "app.agents.orchestrator.collect_retrieval_subgraph",
+        lambda explored, pid: {
+            k: v for k, v in fake_finding.items() if k != "emitted_events"
+        },
+    )
     monkeypatch.setattr(
         "app.agents.orchestrator.filter_retrieval_finding_by_relevance",
         lambda query, finding, **kw: {
@@ -228,6 +262,88 @@ def test_filter_retrieval_finding_keeps_selected_only(monkeypatch):
         "world" in out["answer_scope"].lower()
         or "decision" in out["answer_scope"].lower()
     )
+
+
+@pytest.mark.asyncio
+async def test_retrieval_flow_streams_touches_before_traversal_active(monkeypatch):
+    from unittest.mock import MagicMock, patch
+
+    from app.agents.orchestrator import ExecutiveOrchestrator
+    from app.models import GraphNode
+
+    orch = ExecutiveOrchestrator()
+
+    def traverse(**kwargs):
+        sink = kwargs.get("event_sink")
+        if sink:
+            sink(
+                {
+                    "event": "node_touched",
+                    "node_id": "concept_genesis",
+                    "node_title": "Everything",
+                    "touch_phase": "traversal",
+                }
+            )
+        return {
+            "emitted_events": [],
+            "traversed_node_ids": ["concept_genesis"],
+            "explored_nodes": [],
+        }
+
+    mock_nav = MagicMock()
+    mock_nav.navigator_id = "nav_test"
+    mock_nav.genesis_node = GraphNode(
+        _id="concept_genesis",
+        node_type="CONCEPT",
+        title="Everything",
+        description="Scope",
+    )
+    mock_nav.department_id = "nav_test"
+    mock_nav.department_name = "Graph Navigator"
+    mock_nav.traverse_mutable_tree_from_genesis = traverse
+
+    closure = {
+        "context_node_ids": ["concept_genesis", "imm_evidence"],
+        "context_nodes": [],
+        "immutable_evidence_nodes": [],
+        "root_provenance_nodes": [],
+        "mutable_context_nodes": [],
+    }
+
+    monkeypatch.setattr(
+        "app.agents.orchestrator.collect_retrieval_subgraph",
+        lambda explored, pid: closure,
+    )
+    monkeypatch.setattr(
+        "app.agents.orchestrator.build_closure_touch_events",
+        lambda *a, **kw: [
+            {
+                "event": "node_touched",
+                "node_id": "imm_evidence",
+                "touch_phase": "evidence_closure",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "app.agents.orchestrator.filter_retrieval_finding_by_relevance",
+        lambda query, finding, **kw: {**finding, "answer_scope": ""},
+    )
+
+    async def fake_stream(messages, max_tokens=512, caller=""):
+        yield "ok"
+
+    monkeypatch.setattr(orch.llm, "stream_chat_completion", fake_stream)
+
+    with patch("app.agents.orchestrator.GraphNavigator", return_value=mock_nav):
+        events = []
+        async for evt in orch.execute_retrieval_flow("q", [], project_id="global"):
+            events.append(evt)
+
+    types = [e.get("event") for e in events]
+    touch_idxs = [i for i, t in enumerate(types) if t == "node_touched"]
+    active_idx = types.index("graph_traversal_active")
+    assert touch_idxs
+    assert max(touch_idxs) < active_idx
 
 
 def test_explore_for_retrieval_merges_closure(retrieval_closure_graph, monkeypatch):

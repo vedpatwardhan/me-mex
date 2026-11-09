@@ -47,6 +47,8 @@ from app.services.conversation_summary import (
     schedule_rolling_summary_refresh,
 )
 from app.services.retrieval_context import (
+    build_closure_touch_events,
+    collect_retrieval_subgraph,
     filter_retrieval_finding_by_relevance,
     format_retrieval_graph_context,
 )
@@ -625,16 +627,71 @@ class ExecutiveOrchestrator:
         }
 
         retrieval_ctx = self._ingest_context_blocks(query, chat_history, project_id)
-        finding = await asyncio.to_thread(
-            navigator.explore_for_retrieval,
-            query=query,
-            chat_history=chat_history,
-            project_id=project_id,
-            ingest_context_messages=retrieval_ctx,
+        trav_depth = (
+            settings.RETRIEVAL_TRAVERSAL_MAX_DEPTH
+            if settings.RETRIEVAL_TRAVERSAL_MAX_DEPTH is not None
+            else settings.MAX_TRAVERSAL_DEPTH
         )
-        for touch_evt in finding.get("emitted_events", []):
-            yield touch_evt
+        hop_top_k = settings.RETRIEVAL_TRAVERSAL_TOP_K
+        if hop_top_k is None:
+            hop_top_k = settings.INGEST_TRAVERSAL_TOP_K
 
+        stream_queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def event_sink(evt: Dict[str, Any]) -> None:
+            if evt.get("event") == "node_touched":
+                loop.call_soon_threadsafe(stream_queue.put_nowait, ("event", evt))
+
+        def run_mutable_traversal() -> Dict[str, Any]:
+            try:
+                result = navigator.traverse_mutable_tree_from_genesis(
+                    query=query,
+                    chat_history=chat_history,
+                    project_id=project_id,
+                    max_depth=trav_depth,
+                    traversal_top_k=hop_top_k,
+                    ingest_context_messages=retrieval_ctx,
+                    traversal_prompt="graph_tree_traversal_retrieval",
+                    event_sink=event_sink,
+                )
+                loop.call_soon_threadsafe(stream_queue.put_nowait, ("done", result))
+                return result
+            except Exception as exc:
+                loop.call_soon_threadsafe(stream_queue.put_nowait, ("error", exc))
+                raise
+
+        asyncio.create_task(asyncio.to_thread(run_mutable_traversal))
+        base: Optional[Dict[str, Any]] = None
+        while base is None:
+            kind, payload = await stream_queue.get()
+            if kind == "event":
+                yield payload
+            elif kind == "done":
+                base = payload
+            elif kind == "error":
+                raise payload
+
+        while not stream_queue.empty():
+            kind, payload = stream_queue.get_nowait()
+            if kind == "event":
+                yield payload
+
+        closure = await asyncio.to_thread(
+            collect_retrieval_subgraph,
+            base.get("explored_nodes", []),
+            project_id,
+        )
+        for touch_evt in build_closure_touch_events(
+            closure,
+            base.get("traversed_node_ids", []),
+            persona_id=navigator.department_id,
+            persona_name=navigator.department_name,
+        ):
+            yield touch_evt
+            await asyncio.sleep(0)
+
+        finding = {**base, **closure}
         explored_count = len(finding.get("context_node_ids", []))
         yield {
             "event": "graph_traversal_active",

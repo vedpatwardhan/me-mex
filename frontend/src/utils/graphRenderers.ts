@@ -83,9 +83,13 @@ export const drawMeMexNode = (
     // Main Root Circle
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, 2 * Math.PI, false);
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = isTraversed ? `${baseColor}22` : '#0f172a';
     ctx.fill();
-    ctx.lineWidth = isSelected ? 2.8 / globalScale : 1.8 / globalScale;
+    ctx.lineWidth = isTraversed
+      ? 2.4 / globalScale
+      : isSelected
+        ? 2.8 / globalScale
+        : 1.8 / globalScale;
     ctx.strokeStyle = baseColor;
     ctx.stroke();
   } else {

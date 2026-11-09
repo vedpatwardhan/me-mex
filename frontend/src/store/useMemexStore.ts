@@ -240,6 +240,36 @@ export const useMemexStore = create<MemexState>((set, get) => ({
       const accumulatedEvents: string[] = [];
       const touchedNodes: any[] = [];
       let graphUpdated = false;
+      const pendingHighlightIds: string[] = [];
+      let highlightRaf = 0;
+
+      const flushHighlightBatch = () => {
+        highlightRaf = 0;
+        if (!pendingHighlightIds.length) return;
+        const batch = [...pendingHighlightIds];
+        pendingHighlightIds.length = 0;
+        set((state) => {
+          const prev = state.thinkingState.visitedNodeIds || [];
+          const merged = [...prev];
+          for (const id of batch) {
+            if (!merged.includes(id)) merged.push(id);
+          }
+          return {
+            ...state,
+            thinkingState: {
+              ...state.thinkingState,
+              visitedNodeIds: merged,
+            },
+          };
+        });
+      };
+
+      const queueNodeHighlight = (nodeId: string) => {
+        pendingHighlightIds.push(nodeId);
+        if (!highlightRaf) {
+          highlightRaf = requestAnimationFrame(flushHighlightBatch);
+        }
+      };
 
       const initialAgentMsg: ChatMessage = {
         id: agentMsgId,
@@ -381,17 +411,7 @@ export const useMemexStore = create<MemexState>((set, get) => ({
               touchedNodes.push(eventData);
               const nodeId = eventData.node_id;
               if (nodeId) {
-                set((state) => {
-                  const prev = state.thinkingState.visitedNodeIds || [];
-                  if (prev.includes(nodeId)) return state;
-                  return {
-                    ...state,
-                    thinkingState: {
-                      ...state.thinkingState,
-                      visitedNodeIds: [...prev, nodeId],
-                    },
-                  };
-                });
+                queueNodeHighlight(nodeId);
               }
             }
           } catch (e) {
@@ -400,6 +420,11 @@ export const useMemexStore = create<MemexState>((set, get) => ({
         }
       }
 
+
+      if (highlightRaf) {
+        cancelAnimationFrame(highlightRaf);
+        flushHighlightBatch();
+      }
 
       if (graphUpdated) {
         await get().fetchGraphData();

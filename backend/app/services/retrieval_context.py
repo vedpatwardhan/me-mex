@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional, Set
 
 from app.config import settings
@@ -72,6 +73,48 @@ def collect_retrieval_subgraph(
         + list(evidence.values())
         + list(roots.values()),
     }
+
+
+def build_closure_touch_events(
+    closure: Dict[str, Any],
+    traversed_node_ids: List[str],
+    *,
+    persona_id: str,
+    persona_name: str,
+) -> List[Dict[str, Any]]:
+    """SSE node_touched events for immutables/roots added by evidence closure (not yet traversed)."""
+    traversed = set(traversed_node_ids)
+    root_ids = {
+        r.get("id") for r in closure.get("root_provenance_nodes", []) if r.get("id")
+    }
+    events: List[Dict[str, Any]] = []
+    for node in closure.get("context_nodes", []):
+        if node.id in traversed:
+            continue
+        if node.is_root_node:
+            role = "root_provenance"
+        elif node.is_immutable:
+            role = "immutable_evidence"
+        else:
+            continue
+        events.append(
+            {
+                "event": "node_touched",
+                "persona_id": persona_id,
+                "persona_name": persona_name,
+                "node_id": node.id,
+                "node_title": node.title,
+                "touch_phase": "evidence_closure",
+                "role": role,
+                "immutable": node.is_immutable or node.id in root_ids,
+                "message": (
+                    f"Evidence '{node.title}' linked in retrieval closure ({role})."
+                ),
+                "timestamp": time.time(),
+            }
+        )
+    events.sort(key=lambda e: e.get("node_id", ""))
+    return events
 
 
 def _rows_for_filter(finding: Dict[str, Any]) -> List[Dict[str, Any]]:

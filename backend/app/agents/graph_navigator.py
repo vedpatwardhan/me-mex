@@ -7,7 +7,7 @@ Genesis-rooted mutable tree traversal, intra-document linking, and selective reo
 import json
 import time
 from collections import defaultdict
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Callable
 from app.db import db_engine
 from app.config import settings
 from app.models import (
@@ -194,6 +194,7 @@ class GraphNavigator:
         chat_history: Optional[List[Dict[str, str]]] = None,
         project_id: Optional[str] = None,
         ingest_context_messages: Optional[List[Dict[str, str]]] = None,
+        event_sink: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         pid = project_id or self.project_id
         trav_depth = (
@@ -213,6 +214,7 @@ class GraphNavigator:
             traversal_top_k=hop_top_k,
             ingest_context_messages=ingest_context_messages,
             traversal_prompt="graph_tree_traversal_retrieval",
+            event_sink=event_sink,
         )
         closure = collect_retrieval_subgraph(
             base.get("explored_nodes", []),
@@ -230,6 +232,7 @@ class GraphNavigator:
         traversal_top_k: Optional[int] = None,
         ingest_context_messages: Optional[List[Dict[str, str]]] = None,
         traversal_prompt: str = "graph_tree_traversal",
+        event_sink: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         """Top-down traversal from Genesis over the mutable tree backbone."""
         pid = project_id or self.project_id
@@ -248,6 +251,11 @@ class GraphNavigator:
         }
         emitted_events: List[Dict[str, Any]] = []
 
+        def _emit(evt: Dict[str, Any]) -> None:
+            emitted_events.append(evt)
+            if event_sink is not None:
+                event_sink(evt)
+
         # Emit node_touched event for Hop 0 Genesis anchor
         genesis_touch_evt = {
             "event": "node_touched",
@@ -255,10 +263,12 @@ class GraphNavigator:
             "persona_name": self.department_name,
             "node_id": self.genesis_node.id,
             "node_title": self.genesis_node.title,
+            "touch_phase": "traversal",
+            "immutable": False,
             "message": f"Concept '{self.genesis_node.title}' touched by {self.department_name}.",
             "timestamp": time.time(),
         }
-        emitted_events.append(genesis_touch_evt)
+        _emit(genesis_touch_evt)
 
         for hop in range(1, max_traversal_depth + 1):
             if not current_frontier:
@@ -350,7 +360,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                     truncated = len(next_frontier) > hop_top_k
                     next_frontier = next_frontier[:hop_top_k]
                     if truncated:
-                        emitted_events.append(
+                        _emit(
                             {
                                 "event": "traversal_neighbors_truncated",
                                 "hop": hop,
@@ -378,6 +388,8 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                         "node_id": n_node.id,
                         "node_title": n_node.title,
                         "rationale": rationale,
+                        "touch_phase": "traversal",
+                        "immutable": False,
                         "message": (
                             f"Concept '{n_node.title}' explored at hop {hop}: {rationale}"
                             if rationale
@@ -385,7 +397,7 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
                         ),
                         "timestamp": time.time(),
                     }
-                    emitted_events.append(evt)
+                    _emit(evt)
 
             current_frontier = next_frontier
 
