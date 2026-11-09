@@ -6,7 +6,7 @@ Genesis-rooted mutable tree traversal, intra-document linking, and selective reo
 
 import json
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import List, Dict, Any, Optional, Set, Callable
 from app.db import db_engine
 from app.config import settings
@@ -16,7 +16,7 @@ from app.models import (
     ReorgDiscoveryPayload,
     ReorgPartitionPayload,
     PersonaIngestionCommandsPayload,
-    PersonaExplorationPayload,
+    GroupedExplorationPayload,
 )
 from app.services.graph_analytics import MutableTreeIndex, graph_analytics
 from app.services.graph_ingestion_engine import (
@@ -188,6 +188,14 @@ class GraphNavigator:
                 }
         return candidate_neighbors
 
+    @staticmethod
+    def _genesis_scope_for_traversal(genesis_node: GraphNode) -> str:
+        desc = (genesis_node.description or "").strip()
+        cap = settings.GENESIS_TRAVERSAL_MAX_CHARS
+        if len(desc) <= cap:
+            return desc
+        return desc[: cap - 3].rstrip() + "..."
+
     def explore_for_retrieval(
         self,
         query: str,
@@ -245,7 +253,6 @@ class GraphNavigator:
         tree = MutableTreeIndex(project_id=pid)
 
         visited_node_ids = set([self.genesis_node.id])
-        current_frontier = [self.genesis_node.id]
         explored_nodes_map: Dict[str, GraphNode] = {
             self.genesis_node.id: self.genesis_node
         }
@@ -270,55 +277,83 @@ class GraphNavigator:
         }
         _emit(genesis_touch_evt)
 
-        for hop in range(1, max_traversal_depth + 1):
-            if not current_frontier:
-                break
+        expand_queue: deque[str] = deque([self.genesis_node.id])
+        node_depth: Dict[str, int] = {self.genesis_node.id: 0}
+        genesis_scope = self._genesis_scope_for_traversal(self.genesis_node)
+        llm_call_count = 0
+        max_input_chars = settings.TRAVERSAL_INPUT_MAX_CHARS
 
-            candidate_neighbors = self.get_tree_mutable_candidates(
-                frontier_ids=current_frontier,
-                tree=tree,
-                visited_ids=visited_node_ids,
+        while expand_queue:
+            batch_frontier_ids: List[str] = []
+            batch_items_payload: List[Dict[str, Any]] = []
+            batch_mappers: List[PromptIdMapper] = []
+            batch_candidates: List[Dict[str, Dict[str, Any]]] = []
+            running_chars = (
+                len(genesis_scope) + len(query) + 400  # JSON wrappers / labels
             )
 
-            if not candidate_neighbors:
-                break
+            while expand_queue:
+                fid = expand_queue[0]
+                depth = node_depth.get(fid, 0)
+                if depth >= max_traversal_depth:
+                    expand_queue.popleft()
+                    continue
 
-            # Evaluate candidate neighbors with persona LLM
-            # Concept Cache Map for Candidate Neighbors in subgraph expansion
-            expansion_mapper = PromptIdMapper(prefix="concept")
-            indexed_candidate_neighbors = []
-            for n_id, n_data in candidate_neighbors.items():
-                n_idx = expansion_mapper.register(n_id)
-                indexed_candidate_neighbors.append(
-                    {
-                        "neighbor_index": n_idx,
-                        "title": n_data.get("title", ""),
-                        "description": n_data.get("description", ""),
-                        "node_type": n_data.get("node_type", "concept"),
-                        "immutable": n_data.get("immutable", False),
-                    }
+                candidate_neighbors = self.get_tree_mutable_candidates(
+                    frontier_ids=[fid],
+                    tree=tree,
+                    visited_ids=visited_node_ids,
                 )
+                if not candidate_neighbors:
+                    expand_queue.popleft()
+                    continue
 
-            frontier_titles: List[str] = []
-            for fid in current_frontier:
+                expansion_mapper = PromptIdMapper(prefix="concept")
+                indexed_neighbors = []
+                for n_id, n_data in candidate_neighbors.items():
+                    n_idx = expansion_mapper.register(n_id)
+                    indexed_neighbors.append(
+                        {
+                            "neighbor_index": n_idx,
+                            "title": n_data.get("title", ""),
+                            "description": n_data.get("description", ""),
+                            "node_type": n_data.get("node_type", "concept"),
+                            "immutable": n_data.get("immutable", False),
+                        }
+                    )
                 f_node = tree.node_map.get(fid) or db_engine.get_node(fid)
-                if f_node:
-                    frontier_titles.append(f_node.title)
-            frontier_label = (
-                ", ".join(frontier_titles)
-                if frontier_titles
-                else self.genesis_node.title
-            )
+                frontier_idx = len(batch_frontier_ids) + 1
+                item = {
+                    "frontier_index": frontier_idx,
+                    "frontier_title": f_node.title if f_node else fid,
+                    "depth_from_genesis": depth,
+                    "candidate_neighbors": indexed_neighbors,
+                }
+                item_chars = len(json_dumps_ingest(item))
+                if batch_frontier_ids and running_chars + item_chars > max_input_chars:
+                    break
 
+                expand_queue.popleft()
+                batch_frontier_ids.append(fid)
+                batch_items_payload.append(item)
+                batch_mappers.append(expansion_mapper)
+                batch_candidates.append(candidate_neighbors)
+                running_chars += item_chars
+
+            if not batch_frontier_ids:
+                break
+
+            llm_call_count += 1
+            hop_label = max(node_depth.get(fid, 0) for fid in batch_frontier_ids) + 1
             prompt_payload = f"""Genesis / Project Scope (Everything):
-{self.genesis_node.description}
+{genesis_scope}
 
-Current traversal frontier node(s): '{frontier_label}'
 User Query / Context: "{query}"
-Current Hop Level: {hop} / {max_traversal_depth}
+Traversal batch depth (max hops from Genesis): {max_traversal_depth}
 
-Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items):
-{json_dumps_ingest(indexed_candidate_neighbors)}"""
+Frontier expansion items ({len(batch_items_payload)} frontier node(s)):
+{json_dumps_ingest(batch_items_payload)}"""
+
             messages = [
                 {
                     "role": "system",
@@ -339,67 +374,83 @@ Candidate Unvisited Neighbor Concepts ({len(indexed_candidate_neighbors)} items)
             try:
                 payload = llm_gateway.generate_structured_completion(
                     messages,
-                    response_model=PersonaExplorationPayload,
+                    response_model=GroupedExplorationPayload,
                     temperature=0.2,
                     max_tokens=1024,
                     max_retries=2,
                     enable_reasoning=False,
                     caller=f"GraphNavigator[{self.department_name}].subgraph_expansion",
                 )
-                # Decode integer neighbor_index back to real string node_id
-                neighbor_rationales: Dict[str, str] = {}
-                for item in payload.selected_neighbors:
-                    real_node_id = expansion_mapper.to_id(item.neighbor_index)
-                    if real_node_id and real_node_id in candidate_neighbors:
-                        # Defensive guard: exploration is only permitted on mutable nodes
-                        if candidate_neighbors[real_node_id]["immutable"]:
-                            continue
-                        neighbor_rationales[real_node_id] = item.rationale
-                next_frontier = list(neighbor_rationales.keys())
-                if hop_top_k is not None and hop_top_k > 0:
-                    truncated = len(next_frontier) > hop_top_k
-                    next_frontier = next_frontier[:hop_top_k]
-                    if truncated:
-                        _emit(
-                            {
-                                "event": "traversal_neighbors_truncated",
-                                "hop": hop,
-                                "top_k": hop_top_k,
-                                "timestamp": time.time(),
-                            }
-                        )
             except Exception as e:
                 print(f"[{self.department_name}] Subgraph expansion error: {e}")
                 raise RuntimeError(
                     f"[{self.department_name}] Subgraph expansion failed: {e}"
                 ) from e
 
-            for nid in next_frontier:
-                visited_node_ids.add(nid)
-                n_node = db_engine.get_node(nid)
-                if n_node:
-                    explored_nodes_map[nid] = n_node
-                    rationale = neighbor_rationales.get(nid, "")
-                    # Emit real-time telemetry event
-                    evt = {
-                        "event": "node_touched",
-                        "persona_id": self.department_id,
-                        "persona_name": self.department_name,
-                        "node_id": n_node.id,
-                        "node_title": n_node.title,
-                        "rationale": rationale,
-                        "touch_phase": "traversal",
-                        "immutable": False,
-                        "message": (
-                            f"Concept '{n_node.title}' explored at hop {hop}: {rationale}"
-                            if rationale
-                            else f"Concept '{n_node.title}' explored at hop {hop} by {self.department_name}."
-                        ),
-                        "timestamp": time.time(),
-                    }
-                    _emit(evt)
+            selections_by_frontier = {
+                sel.frontier_index: sel for sel in payload.frontier_selections
+            }
 
-            current_frontier = next_frontier
+            for local_idx, fid in enumerate(batch_frontier_ids):
+                frontier_index = local_idx + 1
+                expansion_mapper = batch_mappers[local_idx]
+                candidate_neighbors = batch_candidates[local_idx]
+                selection = selections_by_frontier.get(frontier_index)
+                if not selection:
+                    continue
+
+                neighbor_rationales: Dict[str, str] = {}
+                for item in selection.selected_neighbors:
+                    real_node_id = expansion_mapper.to_id(item.neighbor_index)
+                    if real_node_id and real_node_id in candidate_neighbors:
+                        if candidate_neighbors[real_node_id]["immutable"]:
+                            continue
+                        neighbor_rationales[real_node_id] = item.rationale
+
+                next_ids = list(neighbor_rationales.keys())
+                if hop_top_k is not None and hop_top_k > 0:
+                    truncated = len(next_ids) > hop_top_k
+                    next_ids = next_ids[:hop_top_k]
+                    if truncated:
+                        _emit(
+                            {
+                                "event": "traversal_neighbors_truncated",
+                                "hop": hop_label,
+                                "top_k": hop_top_k,
+                                "timestamp": time.time(),
+                            }
+                        )
+
+                parent_depth = node_depth.get(fid, 0)
+                for nid in next_ids:
+                    if nid in visited_node_ids:
+                        continue
+                    visited_node_ids.add(nid)
+                    child_depth = parent_depth + 1
+                    node_depth[nid] = child_depth
+                    if child_depth < max_traversal_depth:
+                        expand_queue.append(nid)
+                    n_node = db_engine.get_node(nid)
+                    if n_node:
+                        explored_nodes_map[nid] = n_node
+                        rationale = neighbor_rationales.get(nid, "")
+                        evt = {
+                            "event": "node_touched",
+                            "persona_id": self.department_id,
+                            "persona_name": self.department_name,
+                            "node_id": n_node.id,
+                            "node_title": n_node.title,
+                            "rationale": rationale,
+                            "touch_phase": "traversal",
+                            "immutable": False,
+                            "message": (
+                                f"Concept '{n_node.title}' explored at hop {hop_label}: {rationale}"
+                                if rationale
+                                else f"Concept '{n_node.title}' explored at hop {hop_label} by {self.department_name}."
+                            ),
+                            "timestamp": time.time(),
+                        }
+                        _emit(evt)
 
         self.last_explored_nodes = list(explored_nodes_map.values())
         return {

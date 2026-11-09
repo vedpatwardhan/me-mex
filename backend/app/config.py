@@ -77,6 +77,22 @@ class Settings:
     RETRIEVAL_RELEVANCE_FILTER: bool = _env_bool("RETRIEVAL_RELEVANCE_FILTER", "true")
     # Upper bound on completion tokens for chat/completions (vLLM API field; not input clipping).
     LLM_COMPLETION_MAX_TOKENS: int = int(os.getenv("LLM_COMPLETION_MAX_TOKENS", "2048"))
+    # vLLM --max-model-len (Colab default 12288); drives passage/traversal saturation.
+    LLM_MODEL_MAX_LEN: int = int(os.getenv("LLM_MODEL_MAX_LEN", "12288"))
+    LLM_COMPLETION_RESERVE_TOKENS: int = int(
+        os.getenv("LLM_COMPLETION_RESERVE_TOKENS", "2048")
+    )
+    LLM_PROMPT_OVERHEAD_TOKENS: int = int(
+        os.getenv("LLM_PROMPT_OVERHEAD_TOKENS", "2800")
+    )
+    INGEST_PASSAGE_MAX_CHARS: int | None = _optional_int("INGEST_PASSAGE_MAX_CHARS")
+    INGEST_PASSAGE_TARGET_MIN_CHARS: int = int(
+        os.getenv("INGEST_PASSAGE_TARGET_MIN_CHARS", "3000")
+    )
+    TRAVERSAL_INPUT_MAX_CHARS: int = int(os.getenv("TRAVERSAL_INPUT_MAX_CHARS", "9000"))
+    GENESIS_TRAVERSAL_MAX_CHARS: int = int(
+        os.getenv("GENESIS_TRAVERSAL_MAX_CHARS", "1500")
+    )
 
     HTTPX_MAX_CONNECTIONS: int = int(os.getenv("HTTPX_MAX_CONNECTIONS", "20"))
     HTTPX_MAX_KEEPALIVE: int = int(os.getenv("HTTPX_MAX_KEEPALIVE", "10"))

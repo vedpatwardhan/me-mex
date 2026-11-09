@@ -46,6 +46,10 @@ from app.services.conversation_summary import (
     get_rolling_summary,
     schedule_rolling_summary_refresh,
 )
+from app.services.passage_packing import (
+    default_passage_max_chars,
+    pack_document_passages,
+)
 from app.services.retrieval_context import (
     build_closure_touch_events,
     collect_retrieval_subgraph,
@@ -134,131 +138,18 @@ class ExecutiveOrchestrator:
         chunk_size: Optional[int] = None,
         min_chunks: int = 1,
         max_chunks: int = 30,
-        max_safe_chunk_size: int = 45000,
+        max_safe_chunk_size: Optional[int] = None,
     ) -> List[str]:
-        """Splits raw document text into cohesive passage chunks, scaling adaptively between min_chunks (1) and max_chunks (30) based on document length."""
-        if not text:
-            return []
-
-        total_len = len(text)
-
-        # 1. Compute dynamic target chunk count:
-        # Tier 1 (<= 1.5k): 1 chunk (X post, brief note)
-        # Tier 2 (1.5k - 4k): 2 chunks (short memo)
-        # Tier 3 (4k - 8k): 3 chunks (medium article)
-        # Tier 4 (8k - 14k): 4 chunks (long overview)
-        # Tier 5 (14k - 25k): 5 chunks (short report)
-        # Tier 6 (> 25k): 5 to 30 chunks (scaling up to 30 for >= 300k chars)
-        if chunk_size is None:
-            if total_len <= 1500:
-                target_chunks = 1
-            elif total_len <= 4000:
-                target_chunks = 2
-            elif total_len <= 8000:
-                target_chunks = 3
-            elif total_len <= 14000:
-                target_chunks = 4
-            elif total_len <= 25000:
-                target_chunks = 5
-            else:
-                scaled_target = 5 + int((total_len - 25000) / 11000)
-                target_chunks = max(min_chunks, min(max_chunks, scaled_target))
-
-            calculated_size = (total_len + target_chunks - 1) // target_chunks
-            chunk_size = min(max_safe_chunk_size, max(500, calculated_size))
-        else:
-            target_chunks = min_chunks
-
-        # If document is short enough to fit entirely in 1 chunk and target is 1, return directly
-        if target_chunks == 1 and total_len <= max_safe_chunk_size:
-            return [text.strip()]
-
-        # 2. Split into semantic paragraph units, breaking oversized paragraphs at sentence boundaries
-        raw_paragraphs = text.split("\n\n")
-        atomic_units: List[str] = []
-        for p in raw_paragraphs:
-            p_str = p.strip()
-            if not p_str:
-                continue
-            if len(p_str) <= chunk_size:
-                atomic_units.append(p_str)
-            else:
-                # Break large paragraph by sentences or newlines
-                import re
-
-                sentences = re.split(r"(?<=[.!?])\s+", p_str)
-                curr_sentence_buf = ""
-                for s in sentences:
-                    if len(curr_sentence_buf) + len(s) + 1 <= chunk_size:
-                        curr_sentence_buf += (" " if curr_sentence_buf else "") + s
-                    else:
-                        if curr_sentence_buf:
-                            atomic_units.append(curr_sentence_buf)
-                        curr_sentence_buf = s
-                if curr_sentence_buf:
-                    atomic_units.append(curr_sentence_buf)
-
-        if not atomic_units:
-            atomic_units = [text[:chunk_size]]
-
-        # 3. Assemble atomic units into chunks up to target chunk_size
-        chunks: List[str] = []
-        curr = ""
-        for unit in atomic_units:
-            if len(curr) + len(unit) + 2 <= chunk_size:
-                curr += ("\n\n" if curr else "") + unit
-            else:
-                if curr:
-                    chunks.append(curr.strip())
-                curr = unit
-        if curr.strip():
-            chunks.append(curr.strip())
-
-        # 4. Target bound enforcement: subdivide if fewer chunks than target and text is substantial
-        effective_min = max(min_chunks, target_chunks)
-        while len(chunks) < effective_min and total_len > 1500:
-            max_idx = max(range(len(chunks)), key=lambda i: len(chunks[i]))
-            largest_chunk = chunks[max_idx]
-            if len(largest_chunk) < 600:
-                break  # cannot split any further without losing coherence
-
-            # Split largest chunk roughly in half at paragraph or sentence boundary
-            midpoint = len(largest_chunk) // 2
-            split_pos = largest_chunk.rfind("\n\n", 0, midpoint + 200)
-            if split_pos == -1 or split_pos < midpoint - 300:
-                split_pos = largest_chunk.rfind(". ", 0, midpoint + 200)
-                if split_pos != -1:
-                    split_pos += 1  # include period
-
-            if (
-                split_pos == -1
-                or split_pos <= 100
-                or split_pos >= len(largest_chunk) - 100
-            ):
-                split_pos = midpoint
-
-            part1 = largest_chunk[:split_pos].strip()
-            part2 = largest_chunk[split_pos:].strip()
-            if part1 and part2:
-                chunks[max_idx] = part1
-                chunks.insert(max_idx + 1, part2)
-            else:
-                break
-
-        # 5. Upper bound enforcement: strictly merge shortest adjacent chunks until len(chunks) <= effective_max
-        effective_max = min(max_chunks, max(target_chunks, min_chunks))
-        while len(chunks) > effective_max:
-            min_idx = 0
-            min_combined_len = float("inf")
-            for i in range(len(chunks) - 1):
-                comb = len(chunks[i]) + len(chunks[i + 1])
-                if comb < min_combined_len:
-                    min_combined_len = comb
-                    min_idx = i
-            chunks[min_idx] = chunks[min_idx] + "\n\n" + chunks[min_idx + 1]
-            chunks.pop(min_idx + 1)
-
-        return chunks if chunks else [text[:chunk_size]]
+        """Pack document text into the fewest passages that fit the vLLM input budget (see passage_packing)."""
+        del min_chunks  # legacy param; packing minimizes call count instead of tier targets
+        cap = chunk_size
+        if cap is None:
+            cap = settings.INGEST_PASSAGE_MAX_CHARS
+        if cap is None:
+            cap = max_safe_chunk_size or default_passage_max_chars()
+        elif max_safe_chunk_size is not None:
+            cap = min(cap, max_safe_chunk_size)
+        return pack_document_passages(text, max_chunk_chars=cap, max_chunks=max_chunks)
 
     def _extract_concepts_from_passage(
         self,
@@ -1050,18 +941,52 @@ class ExecutiveOrchestrator:
             else settings.MAX_TRAVERSAL_DEPTH
         )
         t0_trav = time.time()
-        traversal_finding = await asyncio.to_thread(
-            navigator.traverse_mutable_tree_from_genesis,
-            query=query,
-            chat_history=chat_history,
-            project_id=project_id,
-            max_depth=trav_depth,
-            traversal_top_k=settings.INGEST_TRAVERSAL_TOP_K,
-            ingest_context_messages=ingest_ctx,
-        )
-        phase_timings["traversal"] = round(time.time() - t0_trav, 2)
+        stream_queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def ingest_event_sink(evt: Dict[str, Any]) -> None:
+            if (
+                evt.get("event") == "node_touched"
+                or evt.get("event") == "traversal_neighbors_truncated"
+            ):
+                loop.call_soon_threadsafe(stream_queue.put_nowait, ("event", evt))
+
+        def run_ingest_traversal() -> Dict[str, Any]:
+            try:
+                result = navigator.traverse_mutable_tree_from_genesis(
+                    query=query,
+                    chat_history=chat_history,
+                    project_id=project_id,
+                    max_depth=trav_depth,
+                    traversal_top_k=settings.INGEST_TRAVERSAL_TOP_K,
+                    ingest_context_messages=ingest_ctx,
+                    event_sink=ingest_event_sink,
+                )
+                loop.call_soon_threadsafe(stream_queue.put_nowait, ("done", result))
+                return result
+            except Exception as exc:
+                loop.call_soon_threadsafe(stream_queue.put_nowait, ("error", exc))
+                raise
+
+        asyncio.create_task(asyncio.to_thread(run_ingest_traversal))
+        traversal_finding: Optional[Dict[str, Any]] = None
+        while traversal_finding is None:
+            kind, payload = await stream_queue.get()
+            if kind == "event":
+                yield payload
+            elif kind == "done":
+                traversal_finding = payload
+            elif kind == "error":
+                raise payload
+
         for touch_evt in traversal_finding.get("emitted_events", []):
-            yield touch_evt
+            if touch_evt.get("event") not in (
+                "node_touched",
+                "traversal_neighbors_truncated",
+            ):
+                yield touch_evt
+
+        phase_timings["traversal"] = round(time.time() - t0_trav, 2)
 
         explored_nodes = list(
             {n.id: n for n in traversal_finding.get("explored_nodes", [])}.values()

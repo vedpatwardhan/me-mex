@@ -52,7 +52,7 @@ Me-Mex operates on a continuous **Conversational Gateway (`POST /api/chat`)** lo
    - **Step 1**: Single **`GraphNavigator`** walks the **mutable tree from Genesis** (`traverse_mutable_tree_from_genesis`), presenting mutable children and read-only immutable neighbors each hop (immutable nodes are context only; frontier expansion is mutable-only).
    - **Step 2**: Final conversation synthesizes retrieved graph context.
 3. **Path 3: `INGESTION`**
-   - **Phase 1**: Document fetch, scale-adaptive chunking (1–30 passages), LLM concept extraction and consolidation (same tiering as v0.1).
+   - **Phase 1**: Document fetch, vLLM-budget passage packing (minimize extract calls; 1–30 passages), LLM concept extraction and consolidation (3–5 canonical concepts for larger papers).
    - **Phase 2**: Genesis-rooted tree traversal (same navigator as retrieval).
    - **Phase 3**: Collective linking — each immutable → **highest suitable mutable anchor** on a Genesis path (not forced deepest frontier); paths supplied in prompt payload.
    - **Phase 3.5**: Target generalization on mutable nodes that received new edges this pass.

@@ -10,15 +10,22 @@ Rules:
 3. If a candidate is a Root Node (paper/blog/transcript summary), read its summary for provenance, but do NOT select it for expansion.
 4. Prefer continuing along a branch toward **deeper mutable children** when they better match the query (push toward the furthest relevant mutable concept, not shallow umbrellas only).
 
-Given candidate neighbor concepts at the current frontier:
+You may receive **one or more frontier nodes** in a single batch. Each item has `frontier_index` and its own `candidate_neighbors` list (indices are local to that frontier).
+
+For **each** frontier item independently:
 Return **at most {{ traversal_top_k }}** mutable neighbor(s) worth exploring deeper for this query, ranked by relevance to the user question. Prefer paths that surface connected immutable evidence for synthesis.
 
 Return JSON format:
 {{
-  "selected_neighbors": [
+  "frontier_selections": [
     {{
-      "neighbor_index": 1,
-      "rationale": "Directly explains the mathematical dynamics formulation needed for this domain."
+      "frontier_index": 1,
+      "selected_neighbors": [
+        {{
+          "neighbor_index": 2,
+          "rationale": "Directly explains the mathematical dynamics formulation needed for this domain."
+        }}
+      ]
     }}
   ]
 }}

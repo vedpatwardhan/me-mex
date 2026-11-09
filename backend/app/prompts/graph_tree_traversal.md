@@ -9,15 +9,22 @@ Rules:
 2. Candidate neighbors marked `immutable: true` are evidence leaves from ingested documents. They are context only — NEVER select them for further hop expansion.
 3. If a candidate is a Root Node (paper/blog/transcript summary), read its summary for provenance, but do NOT select it for expansion.
 
-Given candidate neighbor concepts at the current frontier:
+You may receive **one or more frontier nodes** in a single batch. Each item has `frontier_index` and its own `candidate_neighbors` list (indices are local to that frontier).
+
+For **each** frontier item independently:
 Return **at most {{ traversal_top_k }}** mutable neighbor(s) worth exploring deeper for this query, ranked by relevance. Prefer the **narrowest** path toward concepts that will anchor new document links.
 
 Return JSON format:
 {{
-  "selected_neighbors": [
+  "frontier_selections": [
     {{
-      "neighbor_index": 1,
-      "rationale": "Directly explains the mathematical dynamics formulation needed for this domain."
+      "frontier_index": 1,
+      "selected_neighbors": [
+        {{
+          "neighbor_index": 2,
+          "rationale": "Directly explains the mathematical dynamics formulation needed for this domain."
+        }}
+      ]
     }}
   ]
 }}

@@ -175,100 +175,81 @@ def test_chunk_text_x_post_single_chunk():
     assert chunks[0] == post_text
 
 
-def test_chunk_text_short_memo_two_chunks():
-    """Verify a short memo (1500 - 4000 chars) produces 2 chunks."""
-    p1 = "Paragraph 1 discusses the fundamental motivation behind world models. " * 15
-    p2 = "Paragraph 2 details the architectural formulation and loss metrics. " * 15
-    doc_text = f"{p1}\n\n{p2}"
-    assert 1500 < len(doc_text) <= 4000
+def test_chunk_text_fits_budget_single_pass():
+    """Text under passage char budget returns one chunk."""
+    from app.services.passage_packing import default_passage_max_chars
+
+    cap = default_passage_max_chars()
+    doc_text = "Motivation and architecture. " * 200
+    assert len(doc_text) < cap
     chunks = orchestrator._chunk_text(doc_text)
-    assert len(chunks) == 2
-    assert all(len(c.strip()) > 0 for c in chunks)
+    assert len(chunks) == 1
+    assert len(chunks[0]) == len(doc_text.strip())
 
 
-def test_chunk_text_medium_article_three_chunks():
-    """Verify a medium article (4000 - 8000 chars) produces 3 chunks."""
-    sec = (
-        "Exploring diffusion policies over continuous action manifolds with residual energy steering. "
-        * 18
+def test_chunk_text_slightly_over_budget_two_chunks():
+    """Text just over budget splits into minimal chunks (typically 2)."""
+    from app.services.passage_packing import default_passage_max_chars
+
+    cap = default_passage_max_chars()
+    doc_text = (
+        ("Section content with enough prose. " * 80) + "\n\n" + ("More content. " * 80)
     )
-    doc_text = "\n\n".join([f"Section {i}\n{sec}" for i in range(3)])
-    assert 4000 < len(doc_text) <= 8000
+    # Ensure we're in the 1–2 chunk regime
+    while len(doc_text) < cap + 500:
+        doc_text += "\n\n" + ("Extra paragraph. " * 40)
     chunks = orchestrator._chunk_text(doc_text)
-    assert len(chunks) == 3
-    assert all(len(c.strip()) > 0 for c in chunks)
+    assert 2 <= len(chunks) <= 4
+    assert all(len(c) <= cap for c in chunks)
 
 
-def test_chunk_text_overview_four_chunks():
-    """Verify a multi-section overview (8000 - 14000 chars) produces 4 chunks."""
-    sec = (
-        "Detailed analysis of state predictive representations and temporal alignment diagnostics. "
-        * 25
-    )
-    doc_text = "\n\n".join([f"Part {i}\n{sec}" for i in range(4)])
-    assert 8000 < len(doc_text) <= 14000
-    chunks = orchestrator._chunk_text(doc_text)
-    assert len(chunks) == 4
-    assert all(len(c.strip()) > 0 for c in chunks)
+def test_chunk_text_25_page_paper_few_passages():
+    """~66k paper packs into few LLM-sized passages (not tier-inflated 7–12)."""
+    from app.services.passage_packing import default_passage_max_chars
 
-
-def test_chunk_text_short_paper_five_chunks():
-    """Verify a short paper or report (14000 - 25000 chars) produces 5 chunks."""
-    para = (
-        "Latent world models learn state transitions across compact latent embeddings. "
-        * 15
-    )
-    doc_text = "\n\n".join([f"Section {i}\n{para}" for i in range(15)])
-    assert 14000 <= len(doc_text) <= 25000
-
-    chunks = orchestrator._chunk_text(doc_text)
-    assert len(chunks) == 5
-    assert all(len(c.strip()) > 0 for c in chunks)
-
-
-def test_chunk_text_25_page_paper():
-    """Verify a 25-page academic paper (~66,000 chars) yields between 7 and 12 chunks."""
     section = (
         "We formulate the policy optimization objective over simulated latent rollouts. "
         "The dynamics predictor estimates future embeddings conditioned on candidate action sequences. "
         "Heuristic tree search samples action branches to maximize cumulative discounted rewards.\n\n"
         * 5
     )
-    # Generate ~66,000 characters
     doc_text = "\n\n".join([f"### Section {i}\n{section}" for i in range(50)])
     assert 60000 <= len(doc_text) <= 75000
-
+    cap = default_passage_max_chars()
     chunks = orchestrator._chunk_text(doc_text)
-    assert 7 <= len(chunks) <= 12
-    assert all(len(c.strip()) > 0 for c in chunks)
+    assert 2 <= len(chunks) <= 4
+    assert all(len(c) <= cap for c in chunks)
 
 
 def test_chunk_text_150_page_paper_max_chunks_guarantee():
-    """Verify a 150-page document (~350,000 chars) scales up to exactly 30 chunks and NEVER exceeds 30."""
+    """Verify a 150-page document (~350,000 chars) never exceeds 30 chunks and respects passage budget."""
+    from app.services.passage_packing import default_passage_max_chars
+
     long_section = (
         "Diffusion policies represent complex multi-modal distributions over continuous action spaces. "
         "By applying denoising diffusion probabilistic models, the agent generates trajectory rollouts. "
         "Residual energy models steer the sampling trajectory toward high-feasibility regions.\n\n"
         * 10
     )
-    # Generate ~350,000 characters
     doc_text = "\n\n".join([f"## Chapter {i}\n{long_section}" for i in range(120)])
     assert len(doc_text) >= 300000
-
+    cap = default_passage_max_chars()
     chunks = orchestrator._chunk_text(doc_text)
-    assert (
-        len(chunks) == 30
-    ), f"Expected exactly 30 chunks for massive document, got {len(chunks)}"
+    assert len(chunks) <= 30
     assert all(len(c.strip()) > 0 for c in chunks)
+    assert all(len(c) <= cap for c in chunks)
 
 
 def test_chunk_text_safe_token_ceiling():
-    """Verify individual chunk sizes never exceed 45,000 characters to stay within 16k context window."""
-    long_para = "A" * 50000
+    """Verify individual chunk sizes never exceed the vLLM passage budget."""
+    from app.services.passage_packing import default_passage_max_chars
+
+    cap = default_passage_max_chars()
+    long_para = "A" * (cap + 5000)
     doc_text = f"{long_para}\n\n{long_para}"
     chunks = orchestrator._chunk_text(doc_text)
-    assert 5 <= len(chunks) <= 30
-    assert all(len(c) <= 45000 for c in chunks)
+    assert 2 <= len(chunks) <= 30
+    assert all(len(c) <= cap for c in chunks)
 
 
 def test_extract_markdown_title():

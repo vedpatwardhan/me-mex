@@ -395,6 +395,76 @@ def test_reorganize_overclustered_nodes_mixed_neighborhood_single_max_coverage_s
     assert len(res["commands"][0]["sub_concepts"]) >= 1
 
 
+def test_grouped_traversal_uses_grouped_payload(monkeypatch):
+    """Offline: saturated traversal issues GroupedExplorationPayload LLM calls."""
+    from app.models import (
+        GroupedExplorationPayload,
+        GroupedFrontierSelection,
+        SelectedNeighborItem,
+    )
+
+    project_id = "proj_grouped_trav"
+    genesis = GraphNode(
+        _id="concept_genesis",
+        node_type="CONCEPT",
+        title="Everything",
+        description="Genesis scope.",
+        project_ids=[project_id],
+        metadata={"is_genesis": True, "immutable": False},
+    )
+    child = GraphNode(
+        _id="mut_child",
+        node_type="CONCEPT",
+        title="Decision Models",
+        description="Hub",
+        project_ids=[project_id],
+        metadata={"immutable": False},
+    )
+    db_engine.upsert_node(genesis)
+    db_engine.upsert_node(child)
+    db_engine.upsert_edge(
+        GraphEdge(
+            _id="edge_child_genesis",
+            source_id="mut_child",
+            target_id="concept_genesis",
+            description="SUBSET_OF",
+            project_ids=[project_id],
+        )
+    )
+
+    calls = []
+
+    def fake_llm(messages, response_model, **kwargs):
+        calls.append(response_model.__name__)
+        if response_model is GroupedExplorationPayload:
+            return GroupedExplorationPayload(
+                frontier_selections=[
+                    GroupedFrontierSelection(
+                        frontier_index=1,
+                        selected_neighbors=[
+                            SelectedNeighborItem(neighbor_index=1, rationale="relevant")
+                        ],
+                    )
+                ]
+            )
+        raise AssertionError(f"unexpected response_model {response_model}")
+
+    monkeypatch.setattr(
+        "app.agents.graph_navigator.llm_gateway.generate_structured_completion",
+        fake_llm,
+    )
+
+    agent = GraphNavigator(project_id)
+    out = agent.traverse_mutable_tree_from_genesis(
+        query="decision models",
+        project_id=project_id,
+        max_depth=2,
+        traversal_top_k=2,
+    )
+    assert "GroupedExplorationPayload" in calls
+    assert "mut_child" in out["traversed_node_ids"]
+
+
 @pytest.mark.vllm
 def test_graph_navigator_subgraph_expansion_blocks_immutable_frontier():
     """Live vLLM: immutable leaves are not expanded in the traversal frontier."""

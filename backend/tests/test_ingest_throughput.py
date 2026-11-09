@@ -27,5 +27,7 @@ def test_ingest_context_prefers_summary(monkeypatch):
 
 def test_config_ingest_defaults():
     assert settings.INGEST_EXTRACTION_CONCURRENCY >= 2
+    assert settings.INGEST_EXTRACTION_CONCURRENCY <= 8
     assert settings.INGEST_TRAVERSAL_TOP_K >= 1
+    assert settings.LLM_MODEL_MAX_LEN == 12288
     assert settings.HTTPX_MAX_CONNECTIONS >= settings.INGEST_EXTRACTION_CONCURRENCY

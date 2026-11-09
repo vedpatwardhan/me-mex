@@ -54,10 +54,9 @@ Graph-Memex operates on a continuous **Conversational Gateway (`POST /api/chat`)
      - Remote Web URLs: Supports arXiv papers, web blogs, Substack, Medium, and online HTML articles with automatic metadata extraction.
      - Local Filesystem & `file://` URIs: Directly ingests local files (`file:///path/to/doc.pdf`, `/path/to/notes.txt`, `~/docs/guide.md`, `saved_page.html`). Automatically dispatches to format-specialized extractors (PDF parsing, Trafilatura HTML extraction, markdown reader, or auto-titled plain text/notes).
  - Staged Sandbox: Uploaded documents/links do NOT immediately populate the active graph.
- - Scale-Adaptive Document Chunking (1 to 30 Passages):
-     - Dynamically partitions documents based on length: <= 1.5k chars (1 chunk for X posts/short notes), 1.5k–4k (2 chunks), 4k–8k (3 chunks), 8k–14k (4 chunks), 14k–25k (5 chunks), and scales smoothly up to 30 chunks (>= 300k chars), bounded by [1, 30].
-     - Context Window & Token Budget Protection: Guarantees individual chunks never exceed 45,000 characters (~13,000 tokens), safeguarding Ministral 3-8B's 16,384-token context window against prompt overflow while reserving 1,536 completion tokens.
-     - Density-Aware Concept Extraction & Scale-Aware Consolidation: Passages extract 1 to 3 concepts (1 for focused notes, 2–3 for rich passages, max 3). Standard documents (> 6 raw concepts) consolidate strictly into **5 to 7 canonical concepts**; concise documents or notes (<= 6 raw concepts) consolidate into **1 to 3 canonical concepts**.
+ - Context-Saturated Document Chunking (1 to 30 Passages):
+     - Minimizes LLM extract calls: packs each passage up to the vLLM input budget (Colab `--max-model-len 12288`; default ~24k chars per passage after completion/prompt reserve), splitting only when necessary; cap 30 chunks for very large (>= 300k char) documents.
+     - Density-Aware Concept Extraction & Scale-Aware Consolidation: Passages extract 1 to 3 concepts (1 for focused notes, 2–3 for rich passages, max 3). Standard documents (> 6 raw concepts) consolidate into **3 to 5 canonical concepts**; concise documents or notes (<= 6 raw concepts) consolidate into **1 to 3 canonical concepts**.
  - Out-of-Graph Passage Storage: Text chunks are stored as plain text records in `passages`
    collection, linked only via `passage_ids` inside atomic `CONCEPT` nodes.
  - Plain text retrieval: Passages are opened only when clicked to validate concept extraction.

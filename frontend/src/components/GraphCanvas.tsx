@@ -5,7 +5,11 @@ import { isRootNode, getRootSubType, isConceptNode, isImmutableConcept } from '.
 import { createGlowTextureCache, drawMeMexNode } from '../utils/graphRenderers';
 import { prewarmForceSimulation } from '../utils/physicsPipeline';
 import { isDiscLikeLayout } from '../utils/radialLayout';
-import { fitGraphView } from '../utils/graphViewFit';
+import {
+  applyPinnedView,
+  fitGraphView,
+  type PinnedView,
+} from '../utils/graphViewFit';
 import { NODE_POINTER_RADIUS } from '../utils/graphNodeMetrics';
 import {
   chargeStrengthForNode,
@@ -39,7 +43,10 @@ export const GraphCanvas: React.FC = () => {
     new Map()
   );
   const structureKeyRef = useRef<string>('');
-  const autoFitKeyRef = useRef<string>('');
+  /** Initial Everything-node camera; kept across ingestion until user uses zoom controls. */
+  const baselineViewRef = useRef<(PinnedView & { locked: boolean }) | null>(null);
+  const userControlsCameraRef = useRef(false);
+  const suppressCameraEventsRef = useRef(false);
   const stabilizedGraphDataRef = useRef<{ nodes: any[]; links: any[] }>({
     nodes: [],
     links: [],
@@ -162,20 +169,69 @@ export const GraphCanvas: React.FC = () => {
     [stabilizedGraphData.nodes.length]
   );
 
-  useEffect(() => {
-    if (!fgRef.current || !stabilizedGraphData.nodes.length) return;
-    if (autoFitKeyRef.current === structureKey) return;
-    const raf = requestAnimationFrame(() => {
+  const markUserCamera = useCallback(() => {
+    userControlsCameraRef.current = true;
+  }, []);
+
+  const restoreBaselineCamera = useCallback(
+    (durationMs = 0) => {
+      const fg = fgRef.current;
+      const pin = baselineViewRef.current;
+      if (!fg || !pin?.locked || userControlsCameraRef.current) return;
+      suppressCameraEventsRef.current = true;
+      applyPinnedView(fg, pin, durationMs);
       requestAnimationFrame(() => {
-        fitGraphView(fgRef.current, stabilizedGraphData.nodes, {
-          durationMs: 0,
-          allowZoomIn: true,
-        });
-        autoFitKeyRef.current = structureKey;
+        suppressCameraEventsRef.current = false;
       });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [structureKey, stabilizedGraphData.nodes]);
+    },
+    []
+  );
+
+  useEffect(() => {
+    restoreBaselineCamera(0);
+  }, [structureKey, restoreBaselineCamera]);
+
+  const onRenderFramePre = useCallback(() => {
+    const fg = fgRef.current;
+    const nodeList = stabilizedGraphData.nodes;
+    if (!fg || !nodeList.length) return;
+
+    if (userControlsCameraRef.current) return;
+
+    if (!baselineViewRef.current?.locked) {
+      const c = fg.centerAt?.() ?? { x: 0, y: 0 };
+      const pin: PinnedView & { locked: boolean } = {
+        locked: true,
+        zoom: 1,
+        cx: c.x,
+        cy: c.y,
+      };
+      baselineViewRef.current = pin;
+      suppressCameraEventsRef.current = true;
+      if (Math.abs(fg.zoom() - 1) > 0.02) {
+        fg.zoom(1, 0);
+      }
+      requestAnimationFrame(() => {
+        suppressCameraEventsRef.current = false;
+      });
+      return;
+    }
+
+    const pin = baselineViewRef.current;
+    const z = fg.zoom();
+    if (Math.abs(z - pin.zoom) > 0.02) {
+      restoreBaselineCamera(0);
+    }
+  }, [stabilizedGraphData.nodes, restoreBaselineCamera]);
+
+  const onEngineStop = useCallback(() => {
+    restoreBaselineCamera(0);
+  }, [restoreBaselineCamera]);
+
+  const onZoomEnd = useCallback(() => {
+    if (suppressCameraEventsRef.current) return;
+    userControlsCameraRef.current = true;
+  }, []);
 
   useEffect(() => {
     if (!fgRef.current) return;
@@ -268,6 +324,9 @@ export const GraphCanvas: React.FC = () => {
         ref={fgRef}
         graphData={stabilizedGraphData}
         nodeCanvasObject={drawNode}
+        onRenderFramePre={onRenderFramePre}
+        onEngineStop={onEngineStop}
+        onZoomEnd={onZoomEnd}
         cooldownTicks={0}
         d3AlphaDecay={0.04}
         d3VelocityDecay={forceParams.velocityDecay}
@@ -321,26 +380,33 @@ export const GraphCanvas: React.FC = () => {
 
       <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 bg-[#121824]/90 backdrop-blur-md border border-white/10 p-1.5 rounded-xl shadow-xl">
         <button
-          onClick={() => fgRef.current && fgRef.current.zoom(fgRef.current.zoom() * 1.3, 300)}
+          onClick={() => {
+            markUserCamera();
+            fgRef.current && fgRef.current.zoom(fgRef.current.zoom() * 1.3, 300);
+          }}
           className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-white/10 rounded-lg transition-colors"
           title="Zoom In"
         >
           <ZoomIn className="w-4 h-4" />
         </button>
         <button
-          onClick={() => fgRef.current && fgRef.current.zoom(fgRef.current.zoom() / 1.3, 300)}
+          onClick={() => {
+            markUserCamera();
+            fgRef.current && fgRef.current.zoom(fgRef.current.zoom() / 1.3, 300);
+          }}
           className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-white/10 rounded-lg transition-colors"
           title="Zoom Out"
         >
           <ZoomOut className="w-4 h-4" />
         </button>
         <button
-          onClick={() =>
+          onClick={() => {
+            markUserCamera();
             fitGraphView(fgRef.current, stabilizedGraphData.nodes, {
               durationMs: 400,
               allowZoomIn: false,
-            })
-          }
+            });
+          }}
           className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-white/10 rounded-lg transition-colors"
           title="Center graph (zoom out if needed; won’t zoom in)"
         >

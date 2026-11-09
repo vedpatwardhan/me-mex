@@ -401,6 +401,17 @@ class PersonaExplorationPayload(BaseModel):
     selected_neighbors: List[SelectedNeighborItem] = Field(default_factory=list)
 
 
+class GroupedFrontierSelection(BaseModel):
+    frontier_index: int
+    selected_neighbors: List[SelectedNeighborItem] = Field(default_factory=list)
+
+
+class GroupedExplorationPayload(BaseModel):
+    """Saturated batch: one or more frontier nodes expanded in a single LLM call."""
+
+    frontier_selections: List[GroupedFrontierSelection] = Field(default_factory=list)
+
+
 class RetrievalRelevanceItem(BaseModel):
     concept_index: int
     rationale: str = ""
