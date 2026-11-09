@@ -555,7 +555,11 @@ class ExecutiveOrchestrator:
         token_budget = (
             max_tokens
             if max_tokens is not None
-            else (settings.RETRIEVAL_ANSWER_MAX_TOKENS if grounded else 512)
+            else (
+                settings.RETRIEVAL_ANSWER_MAX_TOKENS
+                if grounded
+                else 512
+            )
         )
         if chat_history:
             messages.extend(chat_history)
