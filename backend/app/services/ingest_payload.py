@@ -20,17 +20,19 @@ def ingest_context_message_blocks(
     *,
     rolling_summary: Optional[str] = None,
     chat_history: Optional[List[Dict[str, str]]] = None,
+    summary_max_chars: Optional[int] = None,
 ) -> List[Dict[str, str]]:
     """Build context messages for structured ingestion calls (summary + query, optional history fallback)."""
     blocks: List[Dict[str, str]] = []
     summary = (rolling_summary or "").strip()
     if settings.INGEST_USE_ROLLING_SUMMARY and summary:
+        summary_cap = summary_max_chars or settings.CHAT_SUMMARY_MAX_CHARS
         blocks.append(
             {
                 "role": "system",
                 "content": (
                     "Conversation context (rolling summary for this project):\n"
-                    f"{summary[: settings.CHAT_SUMMARY_MAX_CHARS]}"
+                    f"{summary[:summary_cap]}"
                 ),
             }
         )

@@ -199,7 +199,7 @@ def test_chunk_text_slightly_over_budget_two_chunks():
     while len(doc_text) < cap + 500:
         doc_text += "\n\n" + ("Extra paragraph. " * 40)
     chunks = orchestrator._chunk_text(doc_text)
-    assert 2 <= len(chunks) <= 4
+    assert 2 <= len(chunks) <= 6
     assert all(len(c) <= cap for c in chunks)
 
 
@@ -217,12 +217,12 @@ def test_chunk_text_25_page_paper_few_passages():
     assert 60000 <= len(doc_text) <= 75000
     cap = default_passage_max_chars()
     chunks = orchestrator._chunk_text(doc_text)
-    assert 2 <= len(chunks) <= 4
+    assert 2 <= len(chunks) <= 8
     assert all(len(c) <= cap for c in chunks)
 
 
 def test_chunk_text_150_page_paper_max_chunks_guarantee():
-    """Verify a 150-page document (~350,000 chars) never exceeds 30 chunks and respects passage budget."""
+    """Verify a 150-page document (~350,000 chars) never exceeds 40 chunks and respects passage budget."""
     from app.services.passage_packing import default_passage_max_chars
 
     long_section = (
@@ -235,7 +235,7 @@ def test_chunk_text_150_page_paper_max_chunks_guarantee():
     assert len(doc_text) >= 300000
     cap = default_passage_max_chars()
     chunks = orchestrator._chunk_text(doc_text)
-    assert len(chunks) <= 30
+    assert len(chunks) <= 40
     assert all(len(c.strip()) > 0 for c in chunks)
     assert all(len(c) <= cap for c in chunks)
 

@@ -7,15 +7,14 @@ from typing import List
 
 from app.config import settings
 
-CHARS_PER_TOKEN_HEURISTIC = 3.2
-
 
 def estimate_prompt_budget(
     *,
     model_max_len: int | None = None,
     completion_reserve_tokens: int | None = None,
     prompt_overhead_tokens: int | None = None,
-    chars_per_token: float = CHARS_PER_TOKEN_HEURISTIC,
+    chars_per_token: float | None = None,
+    safety_factor: float | None = None,
 ) -> dict[str, int]:
     """
     Estimate safe passage body size (chars) for one extract_concepts_from_passage call.
@@ -33,15 +32,36 @@ def estimate_prompt_budget(
         if prompt_overhead_tokens is not None
         else settings.LLM_PROMPT_OVERHEAD_TOKENS
     )
-    input_tokens = max(512, max_len - completion - overhead)
-    passage_max_chars = max(500, int(input_tokens * chars_per_token))
+    cpt = (
+        chars_per_token
+        if chars_per_token is not None
+        else settings.LLM_PASSAGE_CHARS_PER_TOKEN
+    )
+    safety = (
+        safety_factor
+        if safety_factor is not None
+        else settings.LLM_PASSAGE_SAFETY_FACTOR
+    )
+    safety = max(0.5, min(1.0, safety))
+    summary_slack = int(settings.INGEST_EXTRACTION_SUMMARY_MAX_CHARS / max(cpt, 1.0))
+    input_tokens = max(512, max_len - completion - overhead - summary_slack)
+    passage_max_chars = max(500, int(input_tokens * cpt * safety))
     return {
         "model_max_len": max_len,
         "completion_reserve_tokens": completion,
         "prompt_overhead_tokens": overhead,
         "input_token_budget": input_tokens,
         "passage_max_chars": passage_max_chars,
+        "chars_per_token": cpt,
+        "safety_factor": safety,
     }
+
+
+def max_passage_body_chars(doc_title: str = "") -> int:
+    """Passage body char cap after reserving extract prompt wrapper + title."""
+    base = default_passage_max_chars()
+    title_reserve = min(800, len(doc_title or "") + 80)
+    return max(500, base - title_reserve)
 
 
 def default_passage_max_chars() -> int:
@@ -78,7 +98,7 @@ def pack_document_passages(
     text: str,
     *,
     max_chunk_chars: int | None = None,
-    max_chunks: int = 30,
+    max_chunks: int = 40,
     min_tail_chars: int | None = None,
 ) -> List[str]:
     """

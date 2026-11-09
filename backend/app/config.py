@@ -77,13 +77,33 @@ class Settings:
     RETRIEVAL_RELEVANCE_FILTER: bool = _env_bool("RETRIEVAL_RELEVANCE_FILTER", "true")
     # Upper bound on completion tokens for chat/completions (vLLM API field; not input clipping).
     LLM_COMPLETION_MAX_TOKENS: int = int(os.getenv("LLM_COMPLETION_MAX_TOKENS", "2048"))
+    CONSOLIDATION_MAX_TOKENS: int = int(os.getenv("CONSOLIDATION_MAX_TOKENS", "2048"))
+    INGESTION_SUMMARY_MAX_TOKENS: int = int(
+        os.getenv("INGESTION_SUMMARY_MAX_TOKENS", "512")
+    )
+    CHAT_COMPLETION_MAX_TOKENS: int = int(
+        os.getenv("CHAT_COMPLETION_MAX_TOKENS", "1024")
+    )
+    CONVERSATION_INCLUDE_EVENT_QUEUE: bool = _env_bool(
+        "CONVERSATION_INCLUDE_EVENT_QUEUE", "false"
+    )
     # vLLM --max-model-len (Colab default 12288); drives passage/traversal saturation.
     LLM_MODEL_MAX_LEN: int = int(os.getenv("LLM_MODEL_MAX_LEN", "12288"))
     LLM_COMPLETION_RESERVE_TOKENS: int = int(
         os.getenv("LLM_COMPLETION_RESERVE_TOKENS", "2048")
     )
     LLM_PROMPT_OVERHEAD_TOKENS: int = int(
-        os.getenv("LLM_PROMPT_OVERHEAD_TOKENS", "2800")
+        os.getenv("LLM_PROMPT_OVERHEAD_TOKENS", "4000")
+    )
+    # PDF/markdown token density (3.0 ≈ middle ground; LEV overflow was ~4 chars/token).
+    LLM_PASSAGE_CHARS_PER_TOKEN: float = float(
+        os.getenv("LLM_PASSAGE_CHARS_PER_TOKEN", "3.0")
+    )
+    LLM_PASSAGE_SAFETY_FACTOR: float = float(
+        os.getenv("LLM_PASSAGE_SAFETY_FACTOR", "0.86")
+    )
+    INGEST_EXTRACTION_SUMMARY_MAX_CHARS: int = int(
+        os.getenv("INGEST_EXTRACTION_SUMMARY_MAX_CHARS", "2400")
     )
     INGEST_PASSAGE_MAX_CHARS: int | None = _optional_int("INGEST_PASSAGE_MAX_CHARS")
     INGEST_PASSAGE_TARGET_MIN_CHARS: int = int(

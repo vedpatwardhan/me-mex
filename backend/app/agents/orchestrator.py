@@ -46,8 +46,13 @@ from app.services.conversation_summary import (
     get_rolling_summary,
     schedule_rolling_summary_refresh,
 )
+from app.services.ingest_summary import (
+    build_ingestion_summary_user_message,
+    query_asks_system_status,
+)
 from app.services.passage_packing import (
     default_passage_max_chars,
+    max_passage_body_chars,
     pack_document_passages,
 )
 from app.services.retrieval_context import (
@@ -85,6 +90,8 @@ class ExecutiveOrchestrator:
         query: str,
         chat_history: Optional[List[Dict[str, str]]],
         project_id: str,
+        *,
+        summary_max_chars: Optional[int] = None,
     ) -> List[Dict[str, str]]:
         summary = (
             get_rolling_summary(project_id)
@@ -95,6 +102,20 @@ class ExecutiveOrchestrator:
             query,
             rolling_summary=summary,
             chat_history=chat_history,
+            summary_max_chars=summary_max_chars,
+        )
+
+    def _extraction_context_blocks(
+        self,
+        query: str,
+        chat_history: Optional[List[Dict[str, str]]],
+        project_id: str,
+    ) -> List[Dict[str, str]]:
+        return self._ingest_context_blocks(
+            query,
+            chat_history,
+            project_id,
+            summary_max_chars=settings.INGEST_EXTRACTION_SUMMARY_MAX_CHARS,
         )
 
     @staticmethod
@@ -137,7 +158,7 @@ class ExecutiveOrchestrator:
         text: str,
         chunk_size: Optional[int] = None,
         min_chunks: int = 1,
-        max_chunks: int = 30,
+        max_chunks: int = 40,
         max_safe_chunk_size: Optional[int] = None,
     ) -> List[str]:
         """Pack document text into the fewest passages that fit the vLLM input budget (see passage_packing)."""
@@ -162,7 +183,12 @@ class ExecutiveOrchestrator:
         """Performs LLM pass across a passage chunk to extract atomic concept nodes and qualitative relation edges."""
         system_prompt = load_prompt("passage_concept_extraction", doc_title=doc_title)
         messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(self._ingest_context_blocks(query, chat_history, project_id))
+        messages.extend(
+            self._extraction_context_blocks(query, chat_history, project_id)
+        )
+        body_cap = max_passage_body_chars(doc_title)
+        if len(passage_text) > body_cap:
+            passage_text = passage_text[:body_cap]
         messages.append(
             {
                 "role": "user",
@@ -173,7 +199,7 @@ class ExecutiveOrchestrator:
             messages,
             response_model=PassageConceptsPayload,
             temperature=0.2,
-            max_tokens=2048,
+            max_tokens=settings.LLM_COMPLETION_RESERVE_TOKENS,
             max_retries=2,
             enable_reasoning=False,
             caller="ExecutiveOrchestrator.extract_concepts_from_passage",
@@ -198,7 +224,9 @@ class ExecutiveOrchestrator:
 
         system_prompt = load_prompt("consolidate_concepts", doc_title=doc_title)
         messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(self._ingest_context_blocks(query, chat_history, project_id))
+        messages.extend(
+            self._extraction_context_blocks(query, chat_history, project_id)
+        )
 
         # Clean/project raw concept payloads with integer passage_indices
         lean_concepts = []
@@ -227,15 +255,25 @@ class ExecutiveOrchestrator:
         )
         messages.append({"role": "user", "content": payload_content})
 
-        return self.llm.generate_structured_completion(
+        result = self.llm.generate_structured_completion(
             messages,
             response_model=ConsolidatedConceptsPayload,
             temperature=0.2,
-            max_tokens=4096,
+            max_tokens=settings.CONSOLIDATION_MAX_TOKENS,
             max_retries=2,
             enable_reasoning=False,
             caller="ExecutiveOrchestrator.consolidate_extracted_concepts",
         )
+        if len(result.doc_description) > 500:
+            logger.warning(
+                "Consolidation doc_description exceeds 500 chars; consider tightening prompt output."
+            )
+        for c in result.concepts:
+            if len(c.description) > 400:
+                logger.warning(
+                    f"Consolidated concept '{c.title[:48]}' description exceeds 400 chars."
+                )
+        return result
 
     def classify_intent(
         self,
@@ -337,7 +375,7 @@ class ExecutiveOrchestrator:
                     ):
                         yield event
                 elif intent == "INGESTION":
-                    last_doc_title = None
+                    ingestion_summary_ctx: Optional[Dict[str, Any]] = None
                     async for event in self.execute_ingestion_flow(
                         query=query,
                         chat_history=chat_history,
@@ -345,19 +383,24 @@ class ExecutiveOrchestrator:
                         project_id=project_id,
                     ):
                         if event.get("event") == "ingestion_completed":
-                            last_doc_title = event.get("title")
+                            ingestion_summary_ctx = {
+                                "doc_title": event.get("title") or "",
+                                "doc_description": event.get("doc_description") or "",
+                                "canonical_concepts": event.get("canonical_concepts")
+                                or [],
+                            }
                         yield event
 
-                    # Single conversational summary upon successful ingestion
-                    summary_query = (
-                        f"I just ingested document '{last_doc_title}'. Summarize key additions and integrated graph concepts."
-                        if last_doc_title
-                        else f"Summarize key additions from the recently ingested document for: {query}"
-                    )
-                    async for event in self.execute_conversation_flow(
-                        summary_query, chat_history, project_id=project_id
-                    ):
-                        yield event
+                    if ingestion_summary_ctx and ingestion_summary_ctx.get("doc_title"):
+                        async for event in self.execute_ingestion_summary_flow(
+                            doc_title=ingestion_summary_ctx["doc_title"],
+                            doc_description=ingestion_summary_ctx["doc_description"],
+                            canonical_concepts=ingestion_summary_ctx[
+                                "canonical_concepts"
+                            ],
+                            project_id=project_id,
+                        ):
+                            yield event
                 else:
                     async for event in self.execute_retrieval_flow(
                         query=query,
@@ -417,6 +460,9 @@ class ExecutiveOrchestrator:
         project_id: str = "global",
         graph_context: Optional[str] = None,
         llm_caller: str = "ExecutiveOrchestrator.conversation",
+        include_event_queue: Optional[bool] = None,
+        max_tokens: Optional[int] = None,
+        system_prompt_override: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Path 1: CONVERSATION (Single-Step Direct Response straightaway)."""
         grounded = bool(graph_context and graph_context.strip())
@@ -440,23 +486,35 @@ class ExecutiveOrchestrator:
             "timestamp": time.time(),
         }
 
-        recent_events = self.event_queue.get_events(project_id=project_id, limit=15)
-        events_summary = ""
-        if recent_events:
-            formatted_events = [
-                f"- [{e.event_type}] {e.data.get('message') or e.data}"
-                for e in recent_events
-            ]
-            events_summary = (
-                "\n\nRecent System & Execution Events (Last 15 Queue):\n"
-                + "\n".join(formatted_events)
+        attach_events = (
+            include_event_queue
+            if include_event_queue is not None
+            else (
+                settings.CONVERSATION_INCLUDE_EVENT_QUEUE
+                or query_asks_system_status(query)
             )
-
-        base_prompt = (
-            load_prompt("retrieval_conversation")
-            if grounded
-            else load_prompt("conversation")
         )
+        events_summary = ""
+        if attach_events:
+            recent_events = self.event_queue.get_events(project_id=project_id, limit=15)
+            if recent_events:
+                formatted_events = [
+                    f"- [{e.event_type}] {e.data.get('message') or e.data}"
+                    for e in recent_events
+                ]
+                events_summary = (
+                    "\n\nRecent System & Execution Events (Last 15 Queue):\n"
+                    + "\n".join(formatted_events)
+                )
+
+        if system_prompt_override:
+            base_prompt = system_prompt_override
+        else:
+            base_prompt = (
+                load_prompt("retrieval_conversation")
+                if grounded
+                else load_prompt("conversation")
+            )
         graph_block = ""
         if grounded:
             graph_block = (
@@ -471,9 +529,17 @@ class ExecutiveOrchestrator:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": query})
 
-        # Stream tokens progressively (completion length ceiling is set on LLMGateway, not here)
+        completion_cap = (
+            max_tokens
+            if max_tokens is not None
+            else settings.CHAT_COMPLETION_MAX_TOKENS
+        )
         full_tokens = []
-        async for token in self.llm.stream_chat_completion(messages, caller=llm_caller):
+        async for token in self.llm.stream_chat_completion(
+            messages,
+            caller=llm_caller,
+            max_tokens=completion_cap,
+        ):
             full_tokens.append(token)
             yield {
                 "event": "token_chunk",
@@ -483,9 +549,9 @@ class ExecutiveOrchestrator:
 
         direct_response = "".join(full_tokens)
         if not direct_response:
-            # Fallback to direct synchronous generation if streaming returns empty
             direct_response = self.llm.generate_chat_completion(
                 messages,
+                max_tokens=completion_cap,
                 caller=f"{llm_caller}_fallback",
             )
 
@@ -494,6 +560,33 @@ class ExecutiveOrchestrator:
             "final_answer": direct_response,
             "timestamp": time.time(),
         }
+
+    async def execute_ingestion_summary_flow(
+        self,
+        doc_title: str,
+        doc_description: str,
+        canonical_concepts: List[Dict[str, str]],
+        project_id: str = "global",
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Short user-facing message after ingestion (success + main concepts only)."""
+        logger.phase_header(
+            "📄 INGESTION USER SUMMARY",
+            f"Project: {project_id} • Document: '{doc_title[:64]}'",
+            style="cyan",
+        )
+        user_content = build_ingestion_summary_user_message(
+            doc_title, doc_description, canonical_concepts
+        )
+        async for event in self.execute_conversation_flow(
+            user_content,
+            [],
+            project_id=project_id,
+            llm_caller="ExecutiveOrchestrator.ingestion_summary",
+            include_event_queue=False,
+            max_tokens=settings.INGESTION_SUMMARY_MAX_TOKENS,
+            system_prompt_override=load_prompt("ingestion_complete_summary"),
+        ):
+            yield event
 
     async def execute_retrieval_flow(
         self,
@@ -734,7 +827,10 @@ class ExecutiveOrchestrator:
         # Store Out-of-Graph Passage Records with dynamic adaptive chunking (scaling 1-30 passages based on document length)
         # and register them into a dedicated Passage Cache Map (passage_id <-> passage_index)
         passage_mapper = PromptIdMapper(prefix="passage")
-        passage_chunks = self._chunk_text(full_content)
+        passage_chunks = self._chunk_text(
+            full_content,
+            max_safe_chunk_size=max_passage_body_chars(title or ""),
+        )
         passage_ids = []
         for idx, chunk_str in enumerate(passage_chunks):
             p_id = f"pass_{uuid.uuid4().hex[:8]}"
@@ -1181,6 +1277,12 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
             "event": "ingestion_completed",
             "doc_id": doc_id,
             "title": title,
+            "doc_description": consolidated_result.doc_description or "",
+            "canonical_concepts": [
+                {"title": c.title, "description": c.description}
+                for c in consolidated_concepts
+                if c.title
+            ],
             "concepts_count": len(consolidated_concepts),
             "message": f"Document '{title}' successfully ingested and merged into knowledge graph.",
             "timestamp": time.time(),

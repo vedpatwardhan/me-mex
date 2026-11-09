@@ -2,34 +2,35 @@ You are the Executive Orchestrator concept consolidation and merging engine.
 You are given a document titled '{{ doc_title }}' and a collection of raw concept extractions collected across multiple passages of the document.
 The accompanying user query and conversation history provide the explicit context for why this content is being ingested and what it is about.
 
-IMPORTANT INGESTION RULE - ZERO DATA LOSS:
-- You MUST preserve 100% of the information, nuances, sub-components, and insights present in the input raw concepts.
-- DO NOT omit, drop, or discard ANY concept, detail, or passage reference from the original list.
-- Consolidation means grouping and deduplicating overlapping ideas into canonical concepts—it does NOT mean summarizing by deleting or stripping details.
-- Every single raw concept from the input MUST either be mapped into a canonical concept or preserved as its own distinct concept.
-- Synthesized markdown descriptions MUST combine all text, insights, and technical details from ALL originating passages without discarding information.
+IMPORTANT INGESTION RULE - COVERAGE (NO DROPPED PASSAGES):
+- Every raw concept MUST be mapped into exactly one canonical concept via `passage_indices`.
+- DO NOT omit or discard any passage index from the input list.
+- Consolidation means grouping overlapping ideas—it is NOT permission to drop raw concepts from coverage.
+- Do not invent concepts not grounded in the input.
+
+OUTPUT LENGTH (keep JSON compact for speed):
+- `doc_description`: at most **2 sentences** (~60 words). High-level gist only.
+- Each canonical `description`: **one sentence**, at most **40 words**. State the core idea; passage-level detail already lives in raw extractions.
+- `title`: short, specific, unique among the set.
 
 Your task:
 1. DOCUMENT GLOBAL SUMMARY:
-   - Provide a `doc_description` that synthesizes an overarching executive summary of the entire document based on all extracted concepts.
-   - Infer a `doc_type` for the document ("paper", "blog", "video", "post").
+   - Provide `doc_description` and infer `doc_type` ("paper", "blog", "video", "post").
 
 2. CONSOLIDATE CONCEPTS:
-   - Group raw concepts that refer to the same underlying idea, component, or methodology under a single canonical title:
-     - If the input contains more than 6 raw concepts (e.g. from a full paper or multi-passage report), consolidate and deduplicate them down to **3 to 5 canonical concepts**.
-     - If the input contains 6 or fewer raw concepts (e.g. from short posts, notes, or few passages), do NOT artificially expand or force 3–5 concepts. Retain the natural number of distinct concepts (e.g. **1 to 3 canonical concepts**) based strictly on the input concepts.
-     - Never invent or hallucinate new concepts not grounded in the input.
-   - Synthesize individual passage descriptions into a concise, information-dense 1-2 sentence markdown description capturing the core technical substance.
-   - Aggregate all originating `passage_indices` (integers) for each consolidated concept into a unified `passage_indices` list.
+   - Group raw concepts that refer to the same underlying idea under one canonical title:
+     - If the input contains more than 6 raw concepts, consolidate to **3 to 5** canonical concepts.
+     - If 6 or fewer raw concepts, retain **1 to 3** natural distinct concepts—do not pad.
+   - Aggregate all originating `passage_indices` (integers) for each canonical concept.
 
 Return JSON format:
 {
-  "doc_description": "Overarching executive summary of the document synthesized across all extracted concepts.",
+  "doc_description": "Brief two-sentence document gist.",
   "doc_type": "paper",
   "concepts": [
     {
       "title": "Canonical Concept Title",
-      "description": "Synthesized comprehensive markdown text retaining all details and nuances across matching passages.",
+      "description": "One short sentence (<=40 words).",
       "passage_indices": [1, 4]
     }
   ]
