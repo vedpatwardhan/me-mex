@@ -10,8 +10,10 @@ if backend_dir not in sys.path:
 import pytest
 from app.db import db_engine
 from app.models import GraphEdge, GraphNode
+from app.models import RetrievalRelevanceItem, RetrievalRelevancePayload
 from app.services.retrieval_context import (
     collect_retrieval_subgraph,
+    filter_retrieval_finding_by_relevance,
     format_retrieval_graph_context,
 )
 
@@ -155,6 +157,14 @@ async def test_execute_retrieval_flow_injects_graph_context(monkeypatch):
     )
     mock_nav.explore_for_retrieval = MagicMock(return_value=fake_finding)
 
+    monkeypatch.setattr(
+        "app.agents.orchestrator.filter_retrieval_finding_by_relevance",
+        lambda query, finding, **kw: {
+            **finding,
+            "answer_scope": "Decision models only.",
+        },
+    )
+
     with patch("app.agents.orchestrator.GraphNavigator", return_value=mock_nav):
         events = []
         async for evt in orch.execute_retrieval_flow(
@@ -171,7 +181,53 @@ async def test_execute_retrieval_flow_injects_graph_context(monkeypatch):
         m["content"] for m in captured_messages if m.get("role") == "system"
     )
     assert "Factual Claim" in system_content
-    assert "Retrieved Knowledge Graph Context" in system_content
+    assert "Filtered graph context" in system_content
+    assert "Decision models only" in system_content
+
+
+def test_filter_retrieval_finding_keeps_selected_only(monkeypatch):
+    finding = {
+        "mutable_context_nodes": [
+            {"id": "hub_decision", "title": "Decision Models", "description": "DM"},
+            {"id": "hub_world", "title": "World Models", "description": "WM"},
+        ],
+        "immutable_evidence_nodes": [
+            {
+                "id": "imm_dm",
+                "title": "PRM steps",
+                "description": "",
+                "immutable": True,
+            },
+        ],
+        "root_provenance_nodes": [],
+        "context_node_ids": ["hub_decision", "hub_world", "imm_dm"],
+    }
+
+    def mock_llm(messages, response_model, **kwargs):
+        assert response_model is RetrievalRelevancePayload
+        return RetrievalRelevancePayload(
+            selected_concepts=[
+                RetrievalRelevanceItem(concept_index=1, rationale="Query is about DM"),
+                RetrievalRelevanceItem(concept_index=3, rationale="DM evidence"),
+            ],
+            answer_scope="Only decision-model papers; omit world models.",
+        )
+
+    monkeypatch.setattr(
+        "app.services.retrieval_context.llm_gateway.generate_structured_completion",
+        mock_llm,
+    )
+
+    out = filter_retrieval_finding_by_relevance(
+        "How do decision models verify steps?", finding
+    )
+    titles = {r["title"] for r in out["mutable_context_nodes"]}
+    assert titles == {"Decision Models"}
+    assert out["immutable_evidence_nodes"][0]["id"] == "imm_dm"
+    assert (
+        "world" in out["answer_scope"].lower()
+        or "decision" in out["answer_scope"].lower()
+    )
 
 
 def test_explore_for_retrieval_merges_closure(retrieval_closure_graph, monkeypatch):

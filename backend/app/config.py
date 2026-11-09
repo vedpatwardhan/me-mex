@@ -74,6 +74,7 @@ class Settings:
     RETRIEVAL_CONTEXT_MAX_CHARS: int = int(
         os.getenv("RETRIEVAL_CONTEXT_MAX_CHARS", "48000")
     )
+    RETRIEVAL_RELEVANCE_FILTER: bool = _env_bool("RETRIEVAL_RELEVANCE_FILTER", "true")
     # Upper bound on completion tokens for chat/completions (vLLM API field; not input clipping).
     LLM_COMPLETION_MAX_TOKENS: int = int(os.getenv("LLM_COMPLETION_MAX_TOKENS", "2048"))
 

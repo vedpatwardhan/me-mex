@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set
 
+from app.config import settings
 from app.db import db_engine
-from app.models import GraphNode
+from app.models import GraphNode, RetrievalRelevancePayload
+from app.prompts import load_prompt
 from app.services.graph_analytics import MutableTreeIndex
 from app.services.ingest_payload import json_dumps_ingest
+from app.services.llm_gateway import llm_gateway
+from app.services.prompt_mapper import PromptIdMapper
 
 
 def _node_row(n: GraphNode, *, role: str) -> Dict[str, Any]:
@@ -70,6 +74,117 @@ def collect_retrieval_subgraph(
     }
 
 
+def _rows_for_filter(finding: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for key, role in (
+        ("mutable_context_nodes", "mutable_hub"),
+        ("immutable_evidence_nodes", "immutable_evidence"),
+        ("root_provenance_nodes", "root_provenance"),
+    ):
+        for row in finding.get(key, []):
+            item = dict(row)
+            item.setdefault("role", role)
+            rows.append(item)
+    return rows
+
+
+def filter_retrieval_finding_by_relevance(
+    query: str,
+    finding: Dict[str, Any],
+    *,
+    chat_history: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    """LLM pass: shrink explored subgraph to query-relevant nodes before synthesis."""
+    if not settings.RETRIEVAL_RELEVANCE_FILTER:
+        finding = dict(finding)
+        finding.setdefault("answer_scope", "")
+        finding["relevance_filter_skipped"] = True
+        return finding
+
+    rows = _rows_for_filter(finding)
+    if not rows:
+        finding = dict(finding)
+        finding["answer_scope"] = ""
+        return finding
+
+    mapper = PromptIdMapper(prefix="concept")
+    indexed: List[Dict[str, Any]] = []
+    for row in rows:
+        node_id = row.get("id")
+        if not node_id:
+            continue
+        idx = mapper.register(node_id)
+        indexed.append(
+            {
+                "concept_index": idx,
+                "title": row.get("title", ""),
+                "description": row.get("description", ""),
+                "role": row.get("role", ""),
+                "immutable": row.get("immutable", False),
+            }
+        )
+
+    messages: List[Dict[str, str]] = [
+        {"role": "system", "content": load_prompt("retrieval_relevance_filter")},
+    ]
+    if chat_history:
+        for item in chat_history[-2:]:
+            role = "assistant" if item.get("role") in ("agent", "assistant") else "user"
+            content = item.get("content") or item.get("text", "")
+            messages.append({"role": role, "content": content})
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                f'User query: "{query}"\n\n'
+                f"Explored candidate concepts ({len(indexed)} items):\n"
+                f"{json_dumps_ingest(indexed)}"
+            ),
+        }
+    )
+
+    try:
+        payload = llm_gateway.generate_structured_completion(
+            messages,
+            response_model=RetrievalRelevancePayload,
+            temperature=0.1,
+            max_tokens=1024,
+            max_retries=2,
+            enable_reasoning=False,
+            caller="ExecutiveOrchestrator.retrieval_relevance_filter",
+        )
+    except Exception:
+        finding = dict(finding)
+        finding["answer_scope"] = ""
+        finding["relevance_filter_failed"] = True
+        return finding
+
+    selected_ids: Set[str] = set()
+    for item in payload.selected_concepts:
+        nid = mapper.to_id(item.concept_index)
+        if nid:
+            selected_ids.add(nid)
+
+    if not selected_ids:
+        finding = dict(finding)
+        finding["answer_scope"] = payload.answer_scope or ""
+        finding["relevance_filter_empty"] = True
+        return finding
+
+    def _filter_key(key: str) -> List[Dict[str, Any]]:
+        return [r for r in finding.get(key, []) if r.get("id") in selected_ids]
+
+    filtered = dict(finding)
+    filtered["mutable_context_nodes"] = _filter_key("mutable_context_nodes")
+    filtered["immutable_evidence_nodes"] = _filter_key("immutable_evidence_nodes")
+    filtered["root_provenance_nodes"] = _filter_key("root_provenance_nodes")
+    filtered["context_node_ids"] = sorted(selected_ids)
+    filtered["answer_scope"] = (payload.answer_scope or "").strip()
+    filtered["relevance_filter_selected_count"] = len(selected_ids)
+    filtered["relevance_filter_explored_count"] = len(rows)
+    return filtered
+
+
 def format_retrieval_graph_context(
     finding: Dict[str, Any],
     *,
@@ -81,18 +196,17 @@ def format_retrieval_graph_context(
     if genesis_description:
         sections.append(f"Genesis project scope:\n{genesis_description.strip()}")
 
+    answer_scope = (finding.get("answer_scope") or "").strip()
+    if answer_scope:
+        sections.append(f"Answer scope (stay within this boundary):\n{answer_scope}")
+
     payload = {
-        "mutable_hubs_traversed": finding.get("mutable_context_nodes", []),
-        "immutable_evidence_linked_to_traversed_hubs": finding.get(
-            "immutable_evidence_nodes", []
-        ),
-        "source_documents": finding.get("root_provenance_nodes", []),
-        "traversed_mutable_node_ids": [
-            r["id"] for r in finding.get("mutable_context_nodes", []) if r.get("id")
-        ],
+        "mutable_hubs_relevant": finding.get("mutable_context_nodes", []),
+        "immutable_evidence_relevant": finding.get("immutable_evidence_nodes", []),
+        "source_documents_relevant": finding.get("root_provenance_nodes", []),
     }
     sections.append(
-        "Retrieved knowledge subgraph (ground answers in these concepts only):\n"
+        "Relevance-filtered knowledge subgraph (ground answers ONLY in these concepts):\n"
         + json_dumps_ingest(payload)
     )
     text = "\n\n".join(sections)

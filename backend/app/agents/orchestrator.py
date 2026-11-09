@@ -46,7 +46,10 @@ from app.services.conversation_summary import (
     get_rolling_summary,
     schedule_rolling_summary_refresh,
 )
-from app.services.retrieval_context import format_retrieval_graph_context
+from app.services.retrieval_context import (
+    filter_retrieval_finding_by_relevance,
+    format_retrieval_graph_context,
+)
 
 
 class ExecutiveOrchestrator:
@@ -540,13 +543,17 @@ class ExecutiveOrchestrator:
                 + "\n".join(formatted_events)
             )
 
-        base_prompt = load_prompt("conversation")
+        base_prompt = (
+            load_prompt("retrieval_conversation")
+            if grounded
+            else load_prompt("conversation")
+        )
         graph_block = ""
         if grounded:
             graph_block = (
-                "\n\n--- Retrieved Knowledge Graph Context (use as primary factual grounding) ---\n"
+                "\n\n--- Filtered graph context (answer ONLY from this subset) ---\n"
                 f"{graph_context.strip()}\n"
-                "--- End retrieved context ---"
+                "--- End filtered context ---"
             )
         system_prompt = f"{base_prompt}{graph_block}{events_summary}"
 
@@ -612,6 +619,7 @@ class ExecutiveOrchestrator:
         for touch_evt in finding.get("emitted_events", []):
             yield touch_evt
 
+        explored_count = len(finding.get("context_node_ids", []))
         yield {
             "event": "graph_traversal_active",
             "navigator_id": navigator.navigator_id,
@@ -620,6 +628,25 @@ class ExecutiveOrchestrator:
             "immutable_evidence_count": len(
                 finding.get("immutable_evidence_nodes", [])
             ),
+            "timestamp": time.time(),
+        }
+
+        finding = await asyncio.to_thread(
+            filter_retrieval_finding_by_relevance,
+            query,
+            finding,
+            chat_history=chat_history,
+        )
+        yield {
+            "event": "retrieval_relevance_filtered",
+            "message": (
+                f"Narrowed retrieval context from {explored_count} explored nodes "
+                f"to {len(finding.get('context_node_ids', []))} query-relevant nodes."
+            ),
+            "explored_context_count": explored_count,
+            "filtered_context_count": len(finding.get("context_node_ids", [])),
+            "context_node_ids": finding.get("context_node_ids", []),
+            "answer_scope": finding.get("answer_scope", ""),
             "timestamp": time.time(),
         }
 

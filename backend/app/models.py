@@ -399,3 +399,18 @@ class SelectedNeighborItem(BaseModel):
 
 class PersonaExplorationPayload(BaseModel):
     selected_neighbors: List[SelectedNeighborItem] = Field(default_factory=list)
+
+
+class RetrievalRelevanceItem(BaseModel):
+    concept_index: int
+    rationale: str = ""
+
+
+class RetrievalRelevancePayload(BaseModel):
+    """Post-traversal prune: which explored nodes actually answer the user query."""
+
+    selected_concepts: List[RetrievalRelevanceItem] = Field(default_factory=list)
+    answer_scope: str = Field(
+        default="",
+        description="One sentence: what the user asked for and what to exclude.",
+    )
