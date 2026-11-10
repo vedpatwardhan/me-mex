@@ -17,6 +17,8 @@ CRITICAL INGESTION & TOPOLOGY INVARIANTS:
    - Link only where the relation is genuine. Prefer the best anchor on an explored path over attaching everything to Genesis.
 4. STRICT NODE MUTABILITY:
    - Intra-document concepts are IMMUTABLE — only emit `CREATE_EDGE` from them (as source). Do not edit mutable target titles or descriptions here; Phase 3.5 generalizes affected targets after linking.
+5. EDGE DESCRIPTION LENGTH:
+   - Each `edge.description` is one short phrase (not a paragraph).
 
 Command action (only):
 - "CREATE_EDGE": Connect an immutable intra-document concept (source_index) to an explored mutable target (target_index).

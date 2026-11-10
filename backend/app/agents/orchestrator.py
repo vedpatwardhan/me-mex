@@ -1031,11 +1031,7 @@ class ExecutiveOrchestrator:
         }
 
         ingest_ctx = self._ingest_context_blocks(query, chat_history, project_id)
-        trav_depth = (
-            settings.INGEST_TRAVERSAL_MAX_DEPTH
-            if settings.INGEST_TRAVERSAL_MAX_DEPTH is not None
-            else settings.MAX_TRAVERSAL_DEPTH
-        )
+        trav_depth = settings.ingest_traversal_max_depth
         t0_trav = time.time()
         stream_queue: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -1166,7 +1162,7 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
                 link_messages,
                 response_model=CollectiveLinkingPayload,
                 temperature=0.2,
-                max_tokens=4096,
+                max_tokens=settings.COLLECTIVE_LINKING_MAX_TOKENS,
                 max_retries=2,
                 enable_reasoning=False,
                 caller="ExecutiveOrchestrator.collective_linking",
@@ -1362,7 +1358,7 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
                 gen_messages,
                 response_model=TargetGeneralizationPayload,
                 temperature=0.2,
-                max_tokens=2048,
+                max_tokens=settings.GENERALIZATION_MAX_TOKENS,
                 max_retries=2,
                 enable_reasoning=False,
                 caller="ExecutiveOrchestrator.generalize_affected_target_nodes",

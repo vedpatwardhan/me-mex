@@ -401,7 +401,7 @@ Frontier expansion items ({len(batch_items_payload)} frontier node(s)):
                     messages,
                     response_model=GroupedExplorationPayload,
                     temperature=0.2,
-                    max_tokens=1024,
+                    max_tokens=settings.SUBGRAPH_EXPANSION_MAX_TOKENS,
                     max_retries=2,
                     enable_reasoning=False,
                     caller=f"GraphNavigator[{self.department_name}].subgraph_expansion",

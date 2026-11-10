@@ -50,8 +50,15 @@ class Settings:
         os.getenv("MAX_UPWARD_REORG_ITERATIONS", "5")
     )
     REORG_PARTITION_MAX_TOKENS: int = int(
-        os.getenv("REORG_PARTITION_MAX_TOKENS", "6144")
+        os.getenv("REORG_PARTITION_MAX_TOKENS", "3072")
     )
+    COLLECTIVE_LINKING_MAX_TOKENS: int = int(
+        os.getenv("COLLECTIVE_LINKING_MAX_TOKENS", "2048")
+    )
+    SUBGRAPH_EXPANSION_MAX_TOKENS: int = int(
+        os.getenv("SUBGRAPH_EXPANSION_MAX_TOKENS", "512")
+    )
+    GENERALIZATION_MAX_TOKENS: int = int(os.getenv("GENERALIZATION_MAX_TOKENS", "1536"))
 
     INGEST_EXTRACTION_CONCURRENCY: int = int(
         os.getenv("INGEST_EXTRACTION_CONCURRENCY", "4")
@@ -66,7 +73,7 @@ class Settings:
         os.getenv("INGEST_STRUCTURED_CHAT_HISTORY_TURNS", "2")
     )
     INGEST_TRAVERSAL_MAX_DEPTH: int | None = _optional_int("INGEST_TRAVERSAL_MAX_DEPTH")
-    INGEST_TRAVERSAL_TOP_K: int = int(os.getenv("INGEST_TRAVERSAL_TOP_K", "2"))
+    INGEST_TRAVERSAL_TOP_K: int = int(os.getenv("INGEST_TRAVERSAL_TOP_K", "1"))
     RETRIEVAL_TRAVERSAL_MAX_DEPTH: int | None = _optional_int(
         "RETRIEVAL_TRAVERSAL_MAX_DEPTH"
     )
@@ -120,6 +127,13 @@ class Settings:
     REORG_PARTITION_ENABLE_REASONING: bool = _env_bool(
         "REORG_PARTITION_ENABLE_REASONING", "false"
     )
+
+    @property
+    def ingest_traversal_max_depth(self) -> int:
+        """Ingest traversal depth when INGEST_TRAVERSAL_MAX_DEPTH env is unset (default 3)."""
+        if self.INGEST_TRAVERSAL_MAX_DEPTH is not None:
+            return self.INGEST_TRAVERSAL_MAX_DEPTH
+        return 3
 
 
 settings = Settings()
