@@ -7,7 +7,9 @@ import { prewarmForceSimulation } from '../utils/physicsPipeline';
 import { isDiscLikeLayout } from '../utils/radialLayout';
 import {
   applyPinnedView,
+  computeFitZoom,
   fitGraphView,
+  graphBounds,
   type PinnedView,
 } from '../utils/graphViewFit';
 import { NODE_POINTER_RADIUS } from '../utils/graphNodeMetrics';
@@ -128,8 +130,14 @@ export const GraphCanvas: React.FC = () => {
         xs.push(p.x);
         ys.push(p.y);
       });
-      const span = Math.max(...xs) - Math.min(...xs) + Math.max(...ys) - Math.min(...ys);
-      if (span < 90) spreadReset = true;
+      const w = Math.max(...xs) - Math.min(...xs);
+      const h = Math.max(...ys) - Math.min(...ys);
+      const span = w + h;
+      if (span < 120) spreadReset = true;
+      if (!spreadReset && w > 48 && h > 48) {
+        const aspect = Math.max(w, h) / Math.max(14, Math.min(w, h));
+        if (aspect > 2.85 && pinned.size >= 10) spreadReset = true;
+      }
       if (!spreadReset && isDiscLikeLayout(pinned.values())) spreadReset = true;
     }
     if (spreadReset) {
@@ -188,6 +196,9 @@ export const GraphCanvas: React.FC = () => {
   );
 
   useEffect(() => {
+    if (!userControlsCameraRef.current) {
+      baselineViewRef.current = null;
+    }
     restoreBaselineCamera(0);
   }, [structureKey, restoreBaselineCamera]);
 
@@ -199,17 +210,34 @@ export const GraphCanvas: React.FC = () => {
     if (userControlsCameraRef.current) return;
 
     if (!baselineViewRef.current?.locked) {
-      const c = fg.centerAt?.() ?? { x: 0, y: 0 };
+      const bounds = graphBounds(nodeList);
+      const canvasW = fg.width?.() ?? 0;
+      const canvasH = fg.height?.() ?? 0;
+      let zoom = 1;
+      let cx = 0;
+      let cy = 0;
+      if (bounds) {
+        cx = bounds.cx;
+        cy = bounds.cy;
+        if (canvasW && canvasH) {
+          zoom = Math.min(1, computeFitZoom(bounds, canvasW, canvasH));
+        }
+      } else {
+        const c = fg.centerAt?.() ?? { x: 0, y: 0 };
+        cx = c.x;
+        cy = c.y;
+      }
       const pin: PinnedView & { locked: boolean } = {
         locked: true,
-        zoom: 1,
-        cx: c.x,
-        cy: c.y,
+        zoom,
+        cx,
+        cy,
       };
       baselineViewRef.current = pin;
       suppressCameraEventsRef.current = true;
-      if (Math.abs(fg.zoom() - 1) > 0.02) {
-        fg.zoom(1, 0);
+      fg.centerAt?.(cx, cy, 0);
+      if (Math.abs(fg.zoom() - zoom) > 0.02) {
+        fg.zoom(zoom, 0);
       }
       requestAnimationFrame(() => {
         suppressCameraEventsRef.current = false;

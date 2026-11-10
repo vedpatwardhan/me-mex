@@ -87,9 +87,9 @@ export function layoutLinkDistance(kind: LayoutLinkKind, params: ForceParams): n
 export function layoutLinkStrength(kind: LayoutLinkKind): number {
   switch (kind) {
     case 'root_evidence':
-      return 0.55;
+      return 0.62;
     case 'evidence_hub':
-      return 0.22;
+      return 0.1;
     case 'mutable_tree':
       return 0.38;
     default:
@@ -167,7 +167,7 @@ export function computeGraphStructureKey(
     .map((e) => e.id ?? `${e.source}-${e.target}`)
     .sort()
     .join(',');
-  return `layout-v6|${nodes.length}|${edges.length}|${nIds}|${eIds}`;
+  return `layout-v8|${nodes.length}|${edges.length}|${nIds}|${eIds}`;
 }
 
 export type GraphNodeLike = GraphNode;

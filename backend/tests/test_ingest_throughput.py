@@ -37,6 +37,6 @@ def test_config_ingest_llm_speed_defaults():
     assert settings.REORG_PARTITION_MAX_TOKENS == 3072
     assert settings.COLLECTIVE_LINKING_MAX_TOKENS == 2048
     assert settings.SUBGRAPH_EXPANSION_MAX_TOKENS == 512
-    assert settings.GENERALIZATION_MAX_TOKENS == 1536
+    assert settings.GENERALIZATION_MAX_TOKENS == 2560
     assert settings.INGEST_TRAVERSAL_TOP_K == 1
     assert settings.ingest_traversal_max_depth == 3

@@ -261,7 +261,12 @@ class PassageConceptsPayload(BaseModel):
 
 class CanonicalConceptItem(BaseModel):
     title: str
-    description: str
+    description: str = Field(
+        ...,
+        description=(
+            "Two to four sentences merging technical substance from grouped raw concepts."
+        ),
+    )
     passage_indices: List[int] = Field(default_factory=list)
 
 
@@ -298,7 +303,13 @@ class ReorgDiscoveryPayload(BaseModel):
 class SubConceptItem(BaseModel):
     sub_id_alias: str
     title: str
-    description: str
+    description: str = Field(
+        ...,
+        description=(
+            "2–4 sentences: umbrella theme for neighbors assigned to this sub; "
+            "must be specific enough for upstream linking."
+        ),
+    )
 
 
 class ReorgSplitPayload(BaseModel):

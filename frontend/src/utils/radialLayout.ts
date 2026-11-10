@@ -133,6 +133,28 @@ function assignSubtreeAngles(
   return angles;
 }
 
+function angleDelta(a: number, b: number): number {
+  let d = b - a;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return Math.abs(d);
+}
+
+/** Half angular gap between a paper root and its ring neighbors. */
+function rootSectorHalfWidth(
+  rootId: string,
+  rootIds: string[],
+  rootAngle: Map<string, number>
+): number {
+  const idx = rootIds.indexOf(rootId);
+  if (idx < 0) return Math.PI / 7;
+  const th = rootAngle.get(rootId) ?? 0;
+  const n = rootIds.length;
+  const prev = rootAngle.get(rootIds[(idx - 1 + n) % n]) ?? th;
+  const next = rootAngle.get(rootIds[(idx + 1) % n]) ?? th;
+  return Math.min(angleDelta(th, prev), angleDelta(th, next)) * 0.86;
+}
+
 export function computeRadialTargets(
   nodes: GraphNode[],
   links: { source: unknown; target: unknown; description?: string }[]
@@ -152,6 +174,7 @@ export function computeRadialTargets(
   const subtreeAngles = assignSubtreeAngles(genesis?.id, childrenOf, depths);
 
   const roots = nodes.filter(isRootNode).sort((a, b) => a.id.localeCompare(b.id));
+  const rootIds = roots.map((r) => r.id);
   const rootAngle = new Map<string, number>();
   roots.forEach((r, i) => {
     rootAngle.set(r.id, (2 * Math.PI * i) / Math.max(1, roots.length) - Math.PI / 2);
@@ -173,13 +196,22 @@ export function computeRadialTargets(
       rootId === '__none__'
         ? hashAngle(group[0]?.id ?? 'imm')
         : rootAngle.get(rootId) ?? hashAngle(rootId);
-    const arc = Math.min(1.55, 0.2 * group.length + 0.28);
-    const mid = (group.length - 1) / 2;
+    const half =
+      rootId === '__none__' || !rootIds.length
+        ? Math.PI / 6
+        : rootSectorHalfWidth(rootId, rootIds, rootAngle);
+    /** Spread evidence along the inner circumference near each blue root — not radial spokes inward. */
+    const maxArc = Math.min(Math.PI * 0.72, half * 1.82);
+    const arc =
+      group.length <= 1
+        ? 0
+        : Math.min(maxArc, Math.max(0.42, 0.26 * group.length + 0.34));
     group.forEach((node, i) => {
       const t = group.length === 1 ? 0.5 : i / (group.length - 1);
-      immAngle.set(node.id, baseTheta - arc / 2 + t * arc);
+      const jitter = (hashAngle(node.id + ':immJ') - Math.PI) * 0.05;
+      immAngle.set(node.id, baseTheta - arc / 2 + t * arc + jitter);
       (node as GraphNode & { _immRadialOffset?: number })._immRadialOffset =
-        (i - mid) * 16;
+        (hashAngle(node.id + ':immR') - 0.5) * 5;
     });
   });
 
@@ -213,8 +245,8 @@ export function computeRadialTargets(
       targets.set(node.id, {
         radius: R_IMM + radialOffset,
         theta,
-        radialStrength: 0.44,
-        anchorStrength: 0.05,
+        radialStrength: 0.5,
+        anchorStrength: 0.068,
       });
       continue;
     }

@@ -35,10 +35,13 @@ export const prewarmForceSimulation = (
   const nodesCopy = nodes.map((n) => {
     const existing = existingPositions?.get(n.id);
     const target = radialTargets.get(n.id);
+    const isImm = isImmutableConcept(n) && !isRootNode(n);
     const { x: seedX, y: seedY } = target
       ? polarToXY(
-          target.radius * (0.92 + (hashJitter(n.id) % 16) / 100),
-          target.theta + hashJitter(n.id) * 0.04
+          isImm
+            ? target.radius
+            : target.radius * (0.92 + (hashJitter(n.id) % 16) / 100),
+          target.theta + (isImm ? 0 : hashJitter(n.id) * 0.04)
         )
       : { x: (hashJitter(n.id) - 0.5) * 40, y: (hashJitter(n.id + 'y') - 0.5) * 40 };
 
@@ -87,7 +90,7 @@ export const prewarmForceSimulation = (
           .forceManyBody()
           .strength((d: any) => chargeStrengthForNode(d, params))
           .theta(0.82)
-          .distanceMax(420)
+          .distanceMax(440)
       )
       .force(
         'link',
@@ -110,7 +113,7 @@ export const prewarmForceSimulation = (
           .radius((d: any) => nodeCollideRadius(collideKind(d)))
           .strength((d: any) => {
             const k = collideKind(d);
-            if (k === 'immutable') return 0.98;
+            if (k === 'immutable') return 0.9;
             if (k === 'mutable') return 0.95;
             return 0.9;
           })
@@ -127,6 +130,7 @@ export const prewarmForceSimulation = (
           .strength((d: any) => d._radialTarget?.radialStrength ?? 0.35)
       )
       .force('radialAnchor', radialAnchorForce())
+      .force('immutableArcSpread', immutableArcSpreadForce())
       .force('center', d3.forceCenter(0, 0).strength(params.centerStrength))
       .velocityDecay(params.velocityDecay);
 
@@ -145,14 +149,16 @@ export const prewarmForceSimulation = (
     if (linkForce && typeof linkForce.strength === 'function') {
       linkForce.strength((l: any) => {
         const kind = classifyLayoutLink(l.source, l.target);
-        return layoutLinkStrength(kind) * 0.35;
+        const base = layoutLinkStrength(kind);
+        if (kind === 'evidence_hub') return base * 0.18;
+        return base * 0.35;
       });
     }
     if (collideForce && typeof collideForce.iterations === 'function') {
       collideForce.iterations(6);
     }
 
-    const separationTicks = onlyNew && onlyNew.size > 0 ? 88 : 175;
+    const separationTicks = onlyNew && onlyNew.size > 0 ? 88 : 190;
     for (let i = 0; i < separationTicks; ++i) {
       simulation.tick();
     }
@@ -186,6 +192,82 @@ function hashJitter(id: string): number {
   return (h & 0xffff) / 0xffff;
 }
 
+/**
+ * Within each paper’s sector, push immutable concepts apart along the arc
+ * (tangentially), not inward toward yellow hubs.
+ */
+function immutableArcSpreadForce(): (alpha: number) => void {
+  let nodes: any[] = [];
+  const force = (alpha: number) => {
+    const groups = new Map<string, any[]>();
+    for (const n of nodes) {
+      if (!isImmutableConcept(n) || isRootNode(n)) continue;
+      const rootId = (n.metadata?.root_node_id as string | undefined) ?? '__none__';
+      if (!groups.has(rootId)) groups.set(rootId, []);
+      groups.get(rootId)!.push(n);
+    }
+
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      const minAngleSep = Math.max(0.1, Math.min(0.28, 0.52 / Math.sqrt(group.length)));
+
+      for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+          const a = group[i];
+          const b = group[j];
+          const ra = Math.hypot(a.x, a.y);
+          const rb = Math.hypot(b.x, b.y);
+          if (ra < 8 || rb < 8) continue;
+          const ta = Math.atan2(a.y, a.x);
+          const tb = Math.atan2(b.y, b.x);
+          let dAngle = tb - ta;
+          while (dAngle > Math.PI) dAngle -= 2 * Math.PI;
+          while (dAngle < -Math.PI) dAngle += 2 * Math.PI;
+
+          const radialSep = Math.abs(ra - rb);
+          const tangentialClose = Math.abs(dAngle) < minAngleSep;
+          const radialStack =
+            Math.abs(dAngle) < 0.09 && radialSep > 10 && radialSep < 120;
+
+          if (!tangentialClose && !radialStack) continue;
+
+          const rMean = (ra + rb) / 2;
+          let push = tangentialClose
+            ? (minAngleSep - Math.abs(dAngle)) * rMean * 0.22
+            : radialStack
+              ? radialSep * 0.14
+              : 0;
+          push *= alpha;
+          if (push <= 0) continue;
+
+          const sign = dAngle >= 0 ? 1 : -1;
+          const ax = -Math.sin(ta);
+          const ay = Math.cos(ta);
+          a.vx -= ax * push * sign;
+          a.vy -= ay * push * sign;
+          b.vx += ax * push * sign;
+          b.vy += ay * push * sign;
+
+          if (radialStack) {
+            const rTarget = rMean;
+            const kr = 0.06 * alpha;
+            const pullA = (rTarget - ra) * kr;
+            const pullB = (rTarget - rb) * kr;
+            a.vx += (a.x / ra) * pullA;
+            a.vy += (a.y / ra) * pullA;
+            b.vx += (b.x / rb) * pullB;
+            b.vy += (b.y / rb) * pullB;
+          }
+        }
+      }
+    }
+  };
+  (force as { initialize?: (n: any[]) => void }).initialize = (n: any[]) => {
+    nodes = n;
+  };
+  return force;
+}
+
 /** Weak pull toward target angle (ballpark radial sectors, not a rigid ring). */
 function radialAnchorForce(): (alpha: number) => void {
   let nodes: any[] = [];
@@ -194,7 +276,10 @@ function radialAnchorForce(): (alpha: number) => void {
       const t = n._radialTarget;
       if (!t) continue;
       const { x: tx, y: ty } = polarToXY(t.radius, t.theta);
-      const k = (t.anchorStrength ?? 0.08) * alpha;
+      let k = (t.anchorStrength ?? 0.08) * alpha;
+      if (isImmutableConcept(n) && !isRootNode(n)) {
+        k *= 1.25;
+      }
       n.vx += (tx - n.x) * k;
       n.vy += (ty - n.y) * k;
     }

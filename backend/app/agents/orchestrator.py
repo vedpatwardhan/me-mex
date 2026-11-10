@@ -15,7 +15,6 @@ import json
 import uuid
 import time
 import asyncio
-from collections import defaultdict
 from typing import List, Dict, Any, AsyncGenerator, Generator, Optional, Union
 from app.db import db_engine
 from app.models import (
@@ -264,14 +263,19 @@ class ExecutiveOrchestrator:
             enable_reasoning=False,
             caller="ExecutiveOrchestrator.consolidate_extracted_concepts",
         )
-        if len(result.doc_description) > 500:
+        if len(result.doc_description) < 120:
             logger.warning(
-                "Consolidation doc_description exceeds 500 chars; consider tightening prompt output."
+                "Consolidation doc_description is very short; may hurt downstream linking."
             )
         for c in result.concepts:
-            if len(c.description) > 400:
+            if len(c.description) < 80:
                 logger.warning(
-                    f"Consolidated concept '{c.title[:48]}' description exceeds 400 chars."
+                    f"Consolidated concept '{c.title[:48]}' description is very short "
+                    "(<80 chars); may cause vague graph branches."
+                )
+            elif len(c.description) > 2000:
+                logger.warning(
+                    f"Consolidated concept '{c.title[:48]}' description exceeds 2000 chars."
                 )
         return result
 
@@ -1301,13 +1305,7 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
         if not mutable_targets:
             return
 
-        all_edges = self.db.get_edges(project_id)
-        # Build adjacency for targets
-        adj_map: Dict[str, List[GraphEdge]] = defaultdict(list)
-        for e in all_edges:
-            adj_map[e.source_id].append(e)
-            adj_map[e.target_id].append(e)
-
+        tree = MutableTreeIndex(project_id=project_id)
         gen_mapper = PromptIdMapper(prefix="target")
         targets_payload = []
         target_map: Dict[int, GraphNode] = {}
@@ -1316,19 +1314,17 @@ Mutable anchor paths (Genesis → frontier; use for highest-suitable-anchor link
             n_idx = gen_mapper.register(node.id)
             target_map[n_idx] = node
 
-            # Gather connected neighbors
-            neighbors = []
-            for edge in adj_map.get(node.id, []):
-                nb_id = edge.target_id if edge.source_id == node.id else edge.source_id
-                nb_node = self.db.get_node(nb_id)
-                if nb_node:
-                    neighbors.append(
-                        {
-                            "title": nb_node.title,
-                            "description": nb_node.description,
-                            "is_immutable": nb_node.is_immutable,
-                        }
-                    )
+            neighbor_entries = GraphNavigator._neighbor_entries_for_hub(
+                node.id, project_id, tree
+            )
+            neighbors = [
+                {
+                    "title": entry["title"],
+                    "description": entry["description"],
+                    "is_immutable": entry["is_immutable"],
+                }
+                for entry in neighbor_entries
+            ]
 
             targets_payload.append(
                 {

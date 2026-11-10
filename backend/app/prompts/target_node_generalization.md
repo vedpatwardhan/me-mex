@@ -16,9 +16,11 @@ CRITICAL INVARIANTS:
    - The updated title should reflect an umbrella or cohesive domain category containing all its connected concepts.
    - The updated description should synthesize the main facets and relationships represented by its connections.
    - Direct immutable neighbors that are not yet placed under a sub-hub are still **in-scope for the parent** — widen the description to include them without forcing sub-category language.
-3. CONCISENESS & CLARITY:
-   - Titles should be clear, concise, and academic/conceptual (2-6 words).
-   - Descriptions should be 2-4 comprehensive sentences capturing the overarching domain scope.
+3. UMBRELLA DESCRIPTION DEPTH (required):
+   - Titles: clear, concise, academic (2–6 words).
+   - Descriptions: **3–5 sentences**, ~100–220 words. Each sentence should cover a **facet** (theme, method, or neighbor cluster) so a parent hub explains enough for upstream linking without vague overlap with sibling branches.
+   - Explicitly mention **newly attached** immutable themes and how they relate to **existing** neighbors listed in the payload.
+   - Do not paste full neighbor descriptions verbatim—synthesize, but keep **technical anchors** (named methods, model families, evaluation angles).
 
 Return JSON format strictly:
 {
@@ -26,7 +28,7 @@ Return JSON format strictly:
     {
       "node_index": 1,
       "updated_title": "Comprehensive Umbrella Concept Title",
-      "updated_description": "Synthesized description accommodating both historical and newly attached concept themes."
+      "updated_description": "Multi-sentence synthesized description accommodating historical and newly attached concept themes with distinct facets."
     }
   ]
 }

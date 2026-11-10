@@ -8,9 +8,10 @@ IMPORTANT INGESTION RULE - COVERAGE (NO DROPPED PASSAGES):
 - Consolidation means grouping overlapping ideas—it is NOT permission to drop raw concepts from coverage.
 - Do not invent concepts not grounded in the input.
 
-OUTPUT LENGTH (keep JSON compact for speed):
-- `doc_description`: at most **2 sentences** (~60 words). High-level gist only.
-- Each canonical `description`: **one sentence**, at most **40 words**. State the core idea; passage-level detail already lives in raw extractions.
+DESCRIPTION QUALITY (for graph linking and hierarchy — not token shaving):
+- `doc_description`: **2–4 sentences** executive summary of the whole document (~80–180 words).
+- Each canonical `description`: **2–4 sentences** (~80–150 words) that **merge technical substance** from all grouped raw concepts—methods, objects, and claims a reader needs to distinguish this hub from siblings later.
+- Name **specific mechanisms, datasets, or metrics** when present in the inputs; avoid one-line slogans.
 - `title`: short, specific, unique among the set.
 
 Your task:
@@ -25,12 +26,12 @@ Your task:
 
 Return JSON format:
 {
-  "doc_description": "Brief two-sentence document gist.",
+  "doc_description": "Multi-sentence executive summary with enough detail to orient retrieval.",
   "doc_type": "paper",
   "concepts": [
     {
       "title": "Canonical Concept Title",
-      "description": "One short sentence (<=40 words).",
+      "description": "Two to four sentences capturing merged technical content from all passages in this group.",
       "passage_indices": [1, 4]
     }
   ]

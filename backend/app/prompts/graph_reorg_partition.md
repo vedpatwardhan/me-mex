@@ -65,15 +65,23 @@ Parent update (compulsory):
 - Provide `parent_title` and `parent_description` for the split target.
 - If title is 'Everything', keep `parent_title` as 'Everything'.
 
+## UMBRELLA DESCRIPTIONS (sub-concepts and parent)
+
+Descriptions are used for **upstream linking and traversal**—each must justify why its assigned neighbors belong together.
+
+- **`sub_concepts[].description`:** **2–4 sentences** (~80–180 words) per minted sub-hub. Name the **shared theme**, list **what kinds of neighbors** belong under this sub (by role/topic, not just titles), and how this sub differs from sibling subs.
+- **`parent_description`:** **2–4 sentences** synthesizing the **remaining umbrella** role of the split target after this partition (what still lives on the parent vs what moved to subs or overflow). Do not paste the old hub description verbatim.
+- Do not use one-line placeholders; vague umbrellas cause duplicate branches elsewhere in the tree.
+
 Return JSON format strictly:
 {
   "parent_title": "Umbrella Title",
-  "parent_description": "Comprehensive description.",
+  "parent_description": "Two to four sentences on the parent hub's remaining umbrella scope after this split.",
   "sub_concepts": [
     {
       "sub_id_alias": "sub_1",
       "title": "Focused Sub-Concept Title 1",
-      "description": "Synthesized description."
+      "description": "Two to four sentences explaining the coherent theme shared by all neighbors assigned to sub_1 and how it differs from other subs."
     }
   ],
   "overflow_neighbors": [
