@@ -30,12 +30,12 @@ export function getForceParams(nodeCount: number): ForceParams {
   // Gentler than sqrt: large graphs still need readable separation
   const scale = Math.pow(N_REF / n, 0.28);
   const chargeScale = Math.max(0.82, Math.min(1.08, scale));
-  const denseBoost = n >= 55 ? 1.12 : 1;
+  const denseBoost = n >= 55 ? 1.14 : 1.03;
 
   return {
     // Roots/immutables on the outer band need stronger local repulsion; genesis stays soft (see chargeStrengthForNode).
-    chargeRootImmutable: -620 * chargeScale * denseBoost,
-    chargeMutable: -320 * chargeScale * denseBoost,
+    chargeRootImmutable: -668 * chargeScale * denseBoost,
+    chargeMutable: -348 * chargeScale * denseBoost,
     linkDistanceDefault: n > 60 ? 115 : 125,
     collideRadius: collideRadiusForGraph(n),
     centerStrength: n > 50 ? 0.006 : 0.012,
@@ -167,7 +167,7 @@ export function computeGraphStructureKey(
     .map((e) => e.id ?? `${e.source}-${e.target}`)
     .sort()
     .join(',');
-  return `layout-v8|${nodes.length}|${edges.length}|${nIds}|${eIds}`;
+  return `layout-v9|${nodes.length}|${edges.length}|${nIds}|${eIds}`;
 }
 
 export type GraphNodeLike = GraphNode;

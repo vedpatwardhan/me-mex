@@ -5,7 +5,7 @@ export const NODE_RADIUS_HOVER = 4.25;
 export const NODE_RADIUS_SELECTED = 4.75;
 export const NODE_POINTER_RADIUS = 7;
 /** Min center-to-center gap between node circles (in addition to both radii). */
-export const NODE_COLLIDE_GAP = 9;
+export const NODE_COLLIDE_GAP = 10;
 export const ROOT_ORBIT_EXTRA = 1.5;
 
 export function nodeCollideRadius(kind: 'root' | 'immutable' | 'mutable' = 'mutable'): number {

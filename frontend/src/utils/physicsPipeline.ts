@@ -113,7 +113,7 @@ export const prewarmForceSimulation = (
           .radius((d: any) => nodeCollideRadius(collideKind(d)))
           .strength((d: any) => {
             const k = collideKind(d);
-            if (k === 'immutable') return 0.9;
+            if (k === 'immutable') return 0.93;
             if (k === 'mutable') return 0.95;
             return 0.9;
           })

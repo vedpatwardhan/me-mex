@@ -61,9 +61,9 @@ export const RightDrawer: React.FC = () => {
   };
 
   return (
-    <aside className="w-[440px] glass-panel border-l border-white/10 flex flex-col h-[calc(100vh-4rem)] text-xs select-none shadow-2xl z-20 shrink-0 transition-all duration-300">
+    <aside className="w-[440px] glass-panel border-l border-white/10 flex flex-col h-[calc(100vh-4rem)] text-xs shadow-2xl z-20 shrink-0 transition-all duration-300">
       {/* Drawer Header */}
-      <div className="p-4 border-b border-white/10 bg-[#090d16]/80 flex items-center justify-between">
+      <div className="p-4 border-b border-white/10 bg-[#090d16]/80 flex items-center justify-between select-none">
         <div className="flex items-center gap-2">
           {getNodeTypeBadge()}
         </div>
@@ -82,8 +82,10 @@ export const RightDrawer: React.FC = () => {
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
         {/* Title */}
         <div className="space-y-1">
-          <h2 className="font-display font-bold text-base text-slate-100 leading-snug tracking-tight">{selectedNode.title}</h2>
-          <div className="text-[10px] text-slate-500 font-mono">ID: {selectedNode.id}</div>
+          <h2 className="font-display font-bold text-base text-slate-100 leading-snug tracking-tight select-text cursor-text">
+            {selectedNode.title}
+          </h2>
+          <div className="text-[10px] text-slate-500 font-mono select-text cursor-text">ID: {selectedNode.id}</div>
         </div>
 
         {/* Sub-Concept Parent Umbrella Hub Linkage */}
@@ -153,14 +155,14 @@ export const RightDrawer: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="bg-[#090d16] p-4 rounded-2xl border border-white/10 text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-wrap shadow-inner font-medium">
+            <div className="bg-[#090d16] p-4 rounded-2xl border border-white/10 text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-wrap shadow-inner font-medium select-text cursor-text">
               {selectedNode.description || selectedNode.content || 'No description provided.'}
             </div>
           )}
         </div>
 
         {/* Delete Node Action Section */}
-        <div className="pt-4 border-t border-white/10">
+        <div className="pt-4 border-t border-white/10 select-none">
           {!confirmDelete ? (
             <button
               onClick={() => setConfirmDelete(true)}
