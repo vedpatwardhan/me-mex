@@ -6,7 +6,7 @@ Me-Mex is an agentic external memory and RAG system designed for organizing, lin
 
 ---
 
-## 📸 Current Status (09/11/26)
+## 📸 Current Status (10/11/26)
 
 The pipeline is working end-to-end for multi-format knowledge ingestion, sub-graph exploration with mutability boundaries, dynamic concept generalization, and scale-aware reorganization. Here's a snapshot of the graph after ingesting 15 research papers across world models, decision models, diffusion and RSI.
 
