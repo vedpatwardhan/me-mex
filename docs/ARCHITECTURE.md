@@ -1,6 +1,6 @@
 # Master Architecture & Technical Specification: Me-Mex
 
-> **Document Purpose**: Single master technical specification for **Me-Mex** (v0.2): system architecture, 3-element graph topology, mutability hierarchy, **Genesis-rooted tree traversal**, graph navigator workflows, engine-dispatch reorganization, WebGL UI/UX, REST/SSE API, FastMCP tools, and backend test specifications.
+> **Document Purpose**: Single master technical specification for **Me-Mex**: system architecture, 3-element graph topology, mutability hierarchy, **Genesis-rooted tree traversal**, graph navigator workflows, engine-dispatch reorganization, WebGL UI/UX, REST/SSE API, FastMCP tools, and backend test specifications.
 
 ---
 
