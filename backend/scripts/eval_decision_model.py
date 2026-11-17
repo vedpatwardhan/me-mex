@@ -12,7 +12,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.v2.services.decision_scorer import MockDecisionScorer, ScorerNode
+from app.services.decision_scorer import MockDecisionScorer, ScorerNode
 
 
 def ranking_hit(probs: dict[str, float], labels: dict[str, float]) -> float:

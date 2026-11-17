@@ -1,6 +1,6 @@
-from app.v2.db import ToolContext
-from app.v2.models import NodeKind
-from app.v2.tools import gist, staging
+from app.db import ToolContext
+from app.models import NodeKind
+from app.tools import gist, staging
 
 
 def test_staging_commit(v2_store, v2_project):

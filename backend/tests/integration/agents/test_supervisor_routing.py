@@ -1,5 +1,5 @@
-from app.v2.agents.workers import route_intent
-from app.v2.models import V2Project
+from app.agents.workers import route_intent
+from app.models import V2Project
 
 
 def test_routes_retrieval():

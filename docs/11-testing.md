@@ -2,7 +2,7 @@
 
 > **Canon:** [06-workflows.md](./06-workflows.md), [04-agent-orchestration.md](./04-agent-orchestration.md), [09-phasing.md](./09-phasing.md). **Goal:** Every **deterministic tool**, **worker agent**, **feature**, and **user workflow** has explicit **unit**, **integration**, and (where applicable) **end-to-end** coverage before a phase exit.
 
-v1 tests under `backend/tests/` target the **tag `v1` orchestrator**. v2 builds a **parallel test tree** aligned with composable tools and workflows; delete or quarantine v1-only suites as modules are replaced—do not treat v1 ingest/reorg tests as v2 gates.
+v1 pytest suites live on git tag **`v1`** only. On `main`, `backend/tests/{unit,integration,e2e}` target composable tools and workflows—no orchestrator monolith gates.
 
 ---
 

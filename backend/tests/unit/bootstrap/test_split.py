@@ -1,6 +1,6 @@
 import json
 
-from app.v2.bootstrap.split_train_eval import split_rows
+from app.bootstrap.split_train_eval import split_rows
 
 
 def test_split_reproducible():

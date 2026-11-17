@@ -1,9 +1,9 @@
 import pytest
 
-from app.v2.db import ToolContext
-from app.v2.errors import ImmutableNodeViolation
-from app.v2.models import NodeKind
-from app.v2.tools import gist, reorg
+from app.db import ToolContext
+from app.errors import ImmutableNodeViolation
+from app.models import NodeKind
+from app.tools import gist, reorg
 
 
 def test_preview_and_apply(v2_store, v2_project):

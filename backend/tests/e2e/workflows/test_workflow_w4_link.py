@@ -1,6 +1,6 @@
-from app.v2.db import ToolContext
-from app.v2.models import NodeKind, V2Node, new_id
-from app.v2.tools import gist
+from app.db import ToolContext
+from app.models import NodeKind, V2Node, new_id
+from app.tools import gist
 
 
 def test_w4_approve_creates_edges(client, v2_store, v2_project_scoped):
@@ -16,7 +16,7 @@ def test_w4_approve_creates_edges(client, v2_store, v2_project_scoped):
     )
     v2_store.upsert_node(hub)
     r = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "connect this ROOT",
             "thread_id": "w4b",
@@ -28,7 +28,7 @@ def test_w4_approve_creates_edges(client, v2_store, v2_project_scoped):
     )
     aid = r.json()["details"]["approval_id"]
     client.post(
-        "/api/v2/agent/resume",
+        "/api/agent/resume",
         json={
             "thread_id": "w4b",
             "approval_id": aid,

@@ -1,5 +1,5 @@
-from app.v2.db import ToolContext
-from app.v2.models import NodeKind, V2Edge, V2Node, new_id
+from app.db import ToolContext
+from app.models import NodeKind, V2Edge, V2Node, new_id
 
 
 def _crowded_hub(v2_store, project_id: str) -> str:
@@ -36,7 +36,7 @@ def test_w5_reorg_preview_then_apply(client, v2_store, v2_project_scoped):
     pid = v2_project_scoped.id
     _crowded_hub(v2_store, pid)
     r = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "split this crowded hub",
             "thread_id": "w5",
@@ -46,7 +46,7 @@ def test_w5_reorg_preview_then_apply(client, v2_store, v2_project_scoped):
     assert r.json()["graph_write"] is False
     aid = r.json()["details"]["approval_id"]
     client.post(
-        "/api/v2/agent/resume",
+        "/api/agent/resume",
         json={
             "thread_id": "w5",
             "approval_id": aid,

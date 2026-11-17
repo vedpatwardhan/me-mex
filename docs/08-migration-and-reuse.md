@@ -110,11 +110,7 @@ me-mex/
 
 ---
 
-## 8. Feature flags (transition)
+## 8. Runtime (`main` branch)
 
-For new v2 projects:
-
-- Disable v1 auto-reorg / auto-link on ingest paths.
-- Route API to LangGraph tool surface when flag on.
-
-Legacy projects may remain on v1 routes until migrated.
+- **Single** FastAPI app: LangGraph harness + deterministic tools under `backend/app/`.
+- **No** v1 `/api/chat`, orchestrator, or feature flags—use tag **`v1`** to run the old stack.

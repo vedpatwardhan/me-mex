@@ -1,6 +1,6 @@
 def test_gist_question_no_implicit_root(client, v2_store, v2_project):
     client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "What's the gist?",
             "thread_id": "ap1",

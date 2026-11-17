@@ -1,10 +1,10 @@
-from app.v2.models import NodeKind
+from app.models import NodeKind
 
 
 def test_w6_note_and_promote(client, v2_store, v2_project_scoped):
     pid = v2_project_scoped.id
     client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "create todo: Read ERA paper",
             "thread_id": "w6",
@@ -15,7 +15,7 @@ def test_w6_note_and_promote(client, v2_store, v2_project_scoped):
     assert todos
     tid = todos[0].id
     r = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "promote todo",
             "thread_id": "w6b",

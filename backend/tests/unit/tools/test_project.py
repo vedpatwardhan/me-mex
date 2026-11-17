@@ -1,5 +1,5 @@
-from app.v2.db import ToolContext
-from app.v2.tools import project as project_tools
+from app.db import ToolContext
+from app.tools import project as project_tools
 
 
 def test_update_scope_syncs_genesis(v2_store, v2_project):

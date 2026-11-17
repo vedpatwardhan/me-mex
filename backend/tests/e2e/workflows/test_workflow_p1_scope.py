@@ -1,6 +1,6 @@
 def test_p1_save_scope(client, v2_store, v2_project):
     r = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "save scope: Robotics manipulation and sim-to-real transfer.",
             "thread_id": "p1",

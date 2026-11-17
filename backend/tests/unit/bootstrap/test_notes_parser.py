@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.v2.bootstrap.notes_to_jsonl import _parse_deeper_read, emit_synthetic_rows
+from app.bootstrap.notes_to_jsonl import _parse_deeper_read, emit_synthetic_rows
 
 
 def test_parse_deeper_read_minimal(tmp_path):

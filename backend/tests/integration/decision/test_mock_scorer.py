@@ -1,4 +1,4 @@
-from app.v2.services.decision_scorer import MockDecisionScorer, ScorerNode
+from app.services.decision_scorer import MockDecisionScorer, ScorerNode
 
 
 def test_mock_frontier_keys():

@@ -1,5 +1,5 @@
-from app.v2.db import ToolContext
-from app.v2.tools import dock
+from app.db import ToolContext
+from app.tools import dock
 
 
 def test_enqueue_and_list_order(v2_store, v2_project):
@@ -15,7 +15,7 @@ def test_enqueue_and_list_order(v2_store, v2_project):
 
 
 def test_suggested_actions_crowded(v2_store, v2_project):
-    from app.v2.models import NodeKind, V2Edge, V2Node, new_id
+    from app.models import NodeKind, V2Edge, V2Node, new_id
 
     ctx = ToolContext(project_id=v2_project.id, thread_id="d1", store=v2_store)
     hub = V2Node(

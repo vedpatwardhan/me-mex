@@ -10,11 +10,9 @@ if backend_dir not in sys.path:
 
 os.environ.setdefault("TESTING", "1")
 os.environ.setdefault("DB_NAME", "test-me-mex")
-os.environ.setdefault("ME_MEX_V2", "1")
-
 from main import app  # noqa: E402
-import app.v2.db.store as store_module  # noqa: E402
-from app.v2.db.store import V2Store  # noqa: E402
+import app.db.store as store_module  # noqa: E402
+from app.db.store import V2Store  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -61,8 +59,8 @@ def v2_project(v2_store):
 @pytest.fixture
 def v2_project_scoped(v2_store):
     p = v2_store.create_project(name="Scoped Project")
-    from app.v2.db import ToolContext
-    from app.v2.tools import project as project_tools
+    from app.db import ToolContext
+    from app.tools import project as project_tools
 
     ctx = ToolContext(project_id=p.id, thread_id="scope", store=v2_store)
     project_tools.update_project_scope(

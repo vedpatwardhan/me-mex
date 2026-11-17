@@ -1,10 +1,10 @@
-from app.v2.models import NodeKind
+from app.models import NodeKind
 
 
 def test_w7_root_then_staging_commit(client, v2_store, v2_project_scoped):
     pid = v2_project_scoped.id
     root = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "create root",
             "thread_id": "w7",
@@ -20,7 +20,7 @@ def test_w7_root_then_staging_commit(client, v2_store, v2_project_scoped):
     )
     root_id = root.json()["details"]["result"]["root_id"]
     staging = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "deep read staging",
             "thread_id": "w7",
@@ -32,7 +32,7 @@ def test_w7_root_then_staging_commit(client, v2_store, v2_project_scoped):
     )
     aid = staging.json()["details"]["approval_id"]
     client.post(
-        "/api/v2/agent/resume",
+        "/api/agent/resume",
         json={
             "thread_id": "w7",
             "approval_id": aid,

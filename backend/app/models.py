@@ -1,450 +1,149 @@
-"""
-Universal Storage & Domain Models: Me-Mex
+"""v2 domain models aligned with me-mex/docs/03-graph-and-memory.md."""
 
-Aligned with docs/ARCHITECTURE.md Section 3:
-- Universal Graph Network: Root Nodes (Document Summaries), Concept Nodes (Immutable vs. Mutable), and Typed Relation Edges.
-- First-Class Temporal Reasoning: Explicit creation/update timestamps (`created_at`, `updated_at`) on all nodes/edges without artificial numerical weight decay.
-- Node Mutability Hierarchy:
-    - Root Nodes (`ROOT`) & Intra-Document Concept Nodes (direct extracted concepts connected to Root Nodes) are Immutable (`metadata.immutable = True`).
-    - Navigator-created intermediate concept nodes are mutable (`metadata.immutable = False`).
-"""
+from __future__ import annotations
 
 import time
-from typing import Dict, List, Literal, Optional, Any
-from pydantic import BaseModel, Field, model_validator
+import uuid
+from enum import Enum
+from typing import Any, Literal, Optional
 
-# Canonical Node Types
-ROOT_NODE_TYPES = {"paper", "blog", "video", "post", "ROOT"}
-NodeType = Literal["paper", "blog", "video", "post", "concept", "ROOT", "CONCEPT"]
+from pydantic import BaseModel, Field
 
 
-class GraphNode(BaseModel):
-    """
-    Universal Active Graph Network Node Entity.
+class NodeKind(str, Enum):
+    ROOT = "ROOT"
+    CONCEPT_I = "CONCEPT_I"
+    CONCEPT_M = "CONCEPT_M"
+    INSIGHT = "INSIGHT"
+    NOTE = "NOTE"
+    TODO = "TODO"
 
-    Stores node metadata, title, description, and passage chunk references.
-    Note: Raw passage text chunks are stored out-of-graph in the `passages` collection
-    and referenced via `passage_ids` to keep the active graph topology clean.
-    """
 
+class TodoStatus(str, Enum):
+    open = "open"
+    done = "done"
+
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+class V2Node(BaseModel):
     id: str = Field(alias="_id")
-    node_type: NodeType = "concept"
     title: str
     description: str = ""
-    passage_ids: List[str] = Field(
-        default_factory=list
-    )  # Out-of-graph passage chunk ID pointers
-    project_ids: List[str] = Field(default_factory=lambda: ["global"])
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    node_kind: NodeKind
+    project_id: str
+    source_uri: Optional[str] = None
+    passage_ids: list[str] = Field(default_factory=list)
+    parent_root_id: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
 
-    @property
-    def is_root_node(self) -> bool:
-        """Returns True if node represents a base document container (paper, blog, video, post)."""
-        return self.node_type in ROOT_NODE_TYPES
+    def to_mongo(self) -> dict[str, Any]:
+        doc = self.model_dump(by_alias=True)
+        doc["metadata"] = {**doc.get("metadata", {}), "node_kind": self.node_kind.value}
+        doc["node_type"] = "ROOT" if self.node_kind == NodeKind.ROOT else "concept"
+        if self.node_kind == NodeKind.CONCEPT_I:
+            doc["metadata"]["immutable"] = True
+        return doc
 
-    @property
-    def is_immutable(self) -> bool:
-        """
-        Returns True if node represents ground-truth evidence (Root Node or Intra-Document Concept)
-        that cannot be modified, split, or deleted by persona agents.
-        """
-        if self.is_root_node or self.metadata.get("immutable", False):
-            return True
-        return False
+    @classmethod
+    def from_mongo(cls, doc: dict[str, Any]) -> "V2Node":
+        kind = doc.get("metadata", {}).get("node_kind") or "CONCEPT_M"
+        return cls(
+            _id=doc["_id"],
+            title=doc.get("title", ""),
+            description=doc.get("description", ""),
+            node_kind=NodeKind(kind),
+            project_id=(doc.get("project_ids") or [doc.get("project_id", "")])[0]
+            if doc.get("project_ids")
+            else doc.get("project_id", "global"),
+            source_uri=doc.get("metadata", {}).get("source_uri"),
+            passage_ids=doc.get("passage_ids") or [],
+            parent_root_id=doc.get("metadata", {}).get("parent_root_id"),
+            metadata=doc.get("metadata") or {},
+            created_at=doc.get("created_at", time.time()),
+            updated_at=doc.get("updated_at", time.time()),
+        )
 
-    def to_prompt_dict(self) -> Dict[str, str]:
-        """Returns clean representation (id, title, description) for LLM prompts."""
-        return {"id": self.id, "title": self.title, "description": self.description}
 
-
-class GraphEdge(BaseModel):
-    """
-    Unweighted graph edge between two nodes.
-
-    Optional `description` is natural-language provenance only (not a relation type enum).
-    Temporal progression is tracked via `created_at` without numerical weight decay.
-    """
-
+class V2Edge(BaseModel):
     id: str = Field(alias="_id")
     source_id: str
     target_id: str
-    is_directional: bool = True  # False for symmetric parallel concepts
-    description: str = ""  # Natural language explanation of relationship
-    status: str = "PRIMARY_ACTIVE"  # "PRIMARY_ACTIVE" | "HISTORICAL_SUPERSEDED"
-    provenance_quote: Optional[str] = None
-    project_ids: List[str] = Field(default_factory=lambda: ["global"])
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    note: str = ""
+    project_id: str
     created_at: float = Field(default_factory=time.time)
 
-    # Aliases for frontend compatibility
-    @property
-    def source_node_id(self) -> str:
-        return self.source_id
-
-    @property
-    def target_node_id(self) -> str:
-        return self.target_id
-
-
-# 3. Document Metadata Record
-class DocumentRecord(BaseModel):
-    id: str = Field(alias="_id")
-    title: str
-    file_path: str
-    media_type: str = "PAPER"  # "PAPER" | "BLOG" | "TRANSCRIPT" | "CODE"
-    source_url: Optional[str] = None
-    ingested_at: float = Field(default_factory=time.time)
+    def to_mongo(self) -> dict[str, Any]:
+        return {
+            "_id": self.id,
+            "source_id": self.source_id,
+            "target_id": self.target_id,
+            "description": self.note,
+            "note": self.note,
+            "project_ids": [self.project_id],
+            "metadata": {"v2": True},
+            "created_at": self.created_at,
+        }
 
 
-# 4. Out-of-Graph Passage Chunk Record
-class PassageRecord(BaseModel):
-    id: str = Field(alias="_id")
-    doc_id: str
-    chunk_index: int
-    text_content: str
-    created_at: float = Field(default_factory=time.time)
-
-
-# 5. Department Macro Document Record
-class MacroDocumentRecord(BaseModel):
-    id: str = Field(alias="_id")
-    department_name: str
-    scope_concept_ids: List[str] = Field(default_factory=list)
-    summary_text: str
-    last_updated: float = Field(default_factory=time.time)
-
-    @property
-    def department_id(self) -> str:
-        return self.id
-
-
-# 6. Staging Sandbox Record
-class StagingRecord(BaseModel):
-    id: str = Field(alias="_id")
-    title: str
-    raw_content: str
-    source_type: str = "url"
-    status: str = "STAGED"  # "STAGED" | "INTEGRATED" | "REJECTED"
-    extracted_candidate_concepts: List[str] = Field(default_factory=list)
-
-
-# 7. Workspace Project & Agent Interaction Models
-class ProjectWorkspace(BaseModel):
+class V2Project(BaseModel):
     id: str = Field(alias="_id")
     name: str
-    description: str
-    node_ids: List[str] = Field(default_factory=list)
-    edge_ids: List[str] = Field(default_factory=list)
-    created_at: float = Field(default_factory=time.time)
-    conversation_summary: str = ""
-    conversation_summary_updated_at: float = 0.0
-
-
-class AgentProposal(BaseModel):
-    id: str = Field(alias="_id")
-    proposal_type: str  # "link" | "concept_merge" | "decay"
-    title: str
-    description: str
-    source_node_id: Optional[str] = None
-    target_node_id: Optional[str] = None
-    status: str = "pending"  # "pending" | "accepted" | "rejected"
+    introduction: str = ""
+    genesis_node_id: str = ""
     created_at: float = Field(default_factory=time.time)
 
+    def to_mongo(self) -> dict[str, Any]:
+        return {
+            "_id": self.id,
+            "name": self.name,
+            "description": self.introduction,
+            "introduction": self.introduction,
+            "genesis_node_id": self.genesis_node_id,
+            "created_at": self.created_at,
+            "node_ids": [],
+            "edge_ids": [],
+        }
 
-class IntakeRequest(BaseModel):
-    source_type: str  # "url" | "text" | "voice" | "pdf"
-    content_or_url: str
-    title_hint: Optional[str] = None
-    project_id: str = "global"
 
-
-class ReportRequest(BaseModel):
+class StagingConcept(BaseModel):
+    concept_id: str
     title: str
-    project_id: str = "global"
-    target_node_ids: List[str] = Field(default_factory=list)
+    description: str = ""
+    dropped: bool = False
 
 
-class ReportResponse(BaseModel):
+class StagingBundle(BaseModel):
+    root_id: Optional[str] = None
+    pending_url: Optional[str] = None
+    content_hash: str = ""
+    concepts: list[StagingConcept] = Field(default_factory=list)
+    updated_at: float = Field(default_factory=time.time)
+
+
+class PendingApproval(BaseModel):
     id: str = Field(alias="_id")
+    project_id: str
+    thread_id: str
+    approval_type: str
     title: str
-    markdown_content: str
-    provenance_mappings: Dict[str, str] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "approved", "dismissed"] = "pending"
     created_at: float = Field(default_factory=time.time)
 
 
-# 8. Project-Scoped Chat Message Record
-class ChatMessageRecord(BaseModel):
-    id: str = Field(alias="_id")
-    project_id: str = "global"
-    sender: Literal["user", "agent"]
+class AgentTurnRequest(BaseModel):
     text: str
-    is_voice: bool = False
-    grounded_node_ids: List[str] = Field(default_factory=list)
-    created_at: float = Field(default_factory=time.time)
+    thread_id: str
+    context_json: dict[str, Any] = Field(default_factory=dict)
 
 
-# 9. Project-Scoped System Event Record (Last 15 Queue)
-class ProjectEventRecord(BaseModel):
-    id: str = Field(alias="_id")
-    project_id: str = "global"
-    event_type: str
-    data: Dict[str, Any] = Field(default_factory=dict)
-    timestamp: float = Field(default_factory=time.time)
-
-
-# 10. Persona Ingestion Command Models
-class ConceptCommandData(BaseModel):
-    id: Optional[str] = Field(
-        default=None,
-        description="ID of existing graph node for EDIT/DELETE or candidate ID for CREATE/EDIT.",
-    )
-    title: str = Field(..., description="Title of the concept.")
-    description: str = Field(
-        default="", description="Description or insight body of the concept."
-    )
-    passage_ids: List[str] = Field(
-        default_factory=list, description="Associated passage IDs."
-    )
-
-
-class EdgeCommandData(BaseModel):
-    id: Optional[str] = Field(
-        default=None, description="ID of existing edge for EDIT_EDGE or DELETE_EDGE."
-    )
-    source_id: Optional[str] = Field(
-        default=None,
-        description="Candidate node ID or existing node ID for source concept.",
-    )
-    target_id: Optional[str] = Field(
-        default=None,
-        description="Candidate node ID or existing node ID for target concept.",
-    )
-    description: str = Field(
-        default="", description="Qualitative relationship description."
-    )
-
-
-class PersonaIngestionCommand(BaseModel):
-    command_type: Literal[
-        "CREATE_CONCEPT",
-        "EDIT_CONCEPT",
-        "DELETE_CONCEPT",
-        "CONSTRUCT_EDGE",
-        "EDIT_EDGE",
-        "DELETE_EDGE",
-    ]
-    concept: Optional[ConceptCommandData] = None
-    edge: Optional[EdgeCommandData] = None
-
-
-# 11. Canonical Structured Output Models for Backend LLM Calls
-
-
-class IntentClassificationPayload(BaseModel):
-    intent: Literal["CONVERSATION", "RETRIEVAL", "INGESTION"]
-    doc_type: Optional[str] = None
-    source_url: Optional[str] = None
-    raw_text: Optional[str] = None
-
-
-class ConceptExtractionItem(BaseModel):
-    idx: int
-    title: str
-    description: str
-
-
-class PassageConceptsPayload(BaseModel):
-    concepts: List[ConceptExtractionItem]
-
-
-class CanonicalConceptItem(BaseModel):
-    title: str
-    description: str = Field(
-        ...,
-        description=(
-            "Two to four sentences merging technical substance from grouped raw concepts."
-        ),
-    )
-    passage_indices: List[int] = Field(default_factory=list)
-
-
-class ConsolidatedConceptsPayload(BaseModel):
-    doc_description: str
-    doc_type: Optional[str] = None
-    concepts: List[CanonicalConceptItem]
-
-
-class EdgeCommandPayload(BaseModel):
-    source_index: int
-    target_index: int
-    description: str = ""
-
-
-class LinkingCommand(BaseModel):
-    action: Literal["CREATE_EDGE"] = "CREATE_EDGE"
-    edge: EdgeCommandPayload
-
-
-class CollectiveLinkingPayload(BaseModel):
-    commands: List[LinkingCommand]
-
-
-class DiscoveredCandidateItem(BaseModel):
-    candidate_index: int
-    rationale: str = ""
-
-
-class ReorgDiscoveryPayload(BaseModel):
-    candidates: List[DiscoveredCandidateItem] = Field(default_factory=list)
-
-
-class SubConceptItem(BaseModel):
-    sub_id_alias: str
-    title: str
-    description: str = Field(
-        ...,
-        description=(
-            "2–4 sentences: umbrella theme for neighbors assigned to this sub; "
-            "must be specific enough for upstream linking."
-        ),
-    )
-
-
-class ReorgSplitPayload(BaseModel):
-    parent_title: str = Field(
-        ...,
-        description="Updated umbrella title for the split target node accommodating all newly formed sub-concepts and their rewired relations.",
-    )
-    parent_description: str = Field(
-        ...,
-        description="Updated comprehensive description for the split target synthesizing its broader scope and accommodating all sub-concepts.",
-    )
-    sub_concepts: List[SubConceptItem]
-
-
-class RewireEdgeItem(BaseModel):
-    neighbor_index: int
-    connect_to_sub_alias: Optional[str] = Field(
-        default=None,
-        description=(
-            "New sub hub alias (sub_1, sub_2, …). For replacement splits, sub_1 reuses "
-            "the split target node id — use this field, not connect_to_existing_neighbor_index."
-        ),
-    )
-    connect_to_existing_neighbor_index: Optional[int] = Field(
-        default=None,
-        description=(
-            "Batch index of a different mutable neighbor (must not equal neighbor_index) "
-            "to attach this neighbor under an existing hub in the batch."
-        ),
-    )
-    description: str = ""
-
-    @model_validator(mode="after")
-    def exactly_one_rewire_target(self) -> "RewireEdgeItem":
-        alias = (self.connect_to_sub_alias or "").strip()
-        has_sub = bool(alias)
-        has_existing = self.connect_to_existing_neighbor_index is not None
-        if has_sub == has_existing:
-            raise ValueError(
-                "Each rewired_edges row must set exactly one of "
-                "connect_to_sub_alias or connect_to_existing_neighbor_index."
-            )
-        if (
-            has_existing
-            and self.neighbor_index == self.connect_to_existing_neighbor_index
-        ):
-            raise ValueError(
-                "connect_to_existing_neighbor_index must differ from neighbor_index."
-            )
-        return self
-
-
-class ReorgRewirePayload(BaseModel):
-    rewired_edges: List[RewireEdgeItem]
-
-
-class OverflowNeighborItem(BaseModel):
-    neighbor_index: int
-    rationale: str = ""
-
-
-class ReorgPartitionPayload(BaseModel):
-    parent_title: str = Field(
-        ...,
-        description="Updated umbrella title for the split target accommodating sub-concepts and rewired relations.",
-    )
-    parent_description: str = Field(
-        ...,
-        description="Updated comprehensive description for the split target synthesizing its broader scope.",
-    )
-    sub_concepts: List[SubConceptItem] = Field(
-        ...,
-        description="At least one sub-concept; each must receive ≥2 neighbors via rewired_edges.",
-    )
-    overflow_neighbors: List[OverflowNeighborItem] = Field(default_factory=list)
-    rewired_edges: List[RewireEdgeItem] = Field(
-        ...,
-        description=(
-            "Neighbor assignments: connect_to_sub_alias (new sub_*) or "
-            "connect_to_existing_neighbor_index (mutable batch neighbor). "
-            "Overflow via overflow_neighbors."
-        ),
-    )
-
-
-class NodeGeneralizationItem(BaseModel):
-    node_index: int
-    updated_title: str = Field(
-        ...,
-        description="Updated, broader title accommodating all newly connected and existing concepts.",
-    )
-    updated_description: str = Field(
-        ...,
-        description="Comprehensive synthesized description accommodating all attached concepts.",
-    )
-
-
-class TargetGeneralizationPayload(BaseModel):
-    generalizations: List[NodeGeneralizationItem]
-
-
-class PersonaIngestionCommandsPayload(BaseModel):
-    commands: List[PersonaIngestionCommand]
-
-
-class SelectedNeighborItem(BaseModel):
-    neighbor_index: int
-    rationale: str = ""
-
-
-class PersonaExplorationPayload(BaseModel):
-    selected_neighbors: List[SelectedNeighborItem] = Field(default_factory=list)
-
-
-class GroupedFrontierSelection(BaseModel):
-    frontier_index: int
-    selected_neighbors: List[SelectedNeighborItem] = Field(default_factory=list)
-
-
-class GroupedExplorationPayload(BaseModel):
-    """Saturated batch: one or more frontier nodes expanded in a single LLM call."""
-
-    frontier_selections: List[GroupedFrontierSelection] = Field(default_factory=list)
-
-
-class RetrievalRelevanceItem(BaseModel):
-    concept_index: int
-    rationale: str = ""
-
-
-class RetrievalRelevancePayload(BaseModel):
-    """Post-traversal prune: which explored nodes actually answer the user query."""
-
-    selected_concepts: List[RetrievalRelevanceItem] = Field(default_factory=list)
-    answer_scope: str = Field(
-        default="",
-        description="One sentence: what the user asked for and what to exclude.",
-    )
+class AgentResumeRequest(BaseModel):
+    thread_id: str
+    approval_id: str
+    action: Literal["approve", "dismiss"]
+    context_json: dict[str, Any] = Field(default_factory=dict)

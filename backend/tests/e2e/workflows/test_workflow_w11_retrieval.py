@@ -1,6 +1,6 @@
-from app.v2.db import ToolContext
-from app.v2.models import NodeKind, V2Edge, V2Node, new_id
-from app.v2.tools import gist
+from app.db import ToolContext
+from app.models import NodeKind, V2Edge, V2Node, new_id
+from app.tools import gist
 
 
 def test_w11_retrieval_highlight(client, v2_store, v2_project_scoped):
@@ -25,7 +25,7 @@ def test_w11_retrieval_highlight(client, v2_store, v2_project_scoped):
         V2Edge(_id=new_id("e"), source_id=seed.id, target_id=leaf.id, project_id=pid)
     )
     r = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "what relates to manipulation?",
             "thread_id": "w11",

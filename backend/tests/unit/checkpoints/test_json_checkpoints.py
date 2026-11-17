@@ -1,4 +1,4 @@
-from app.v2.services.checkpoints import JsonCheckpointStore
+from app.services.checkpoints import JsonCheckpointStore
 
 
 def test_save_load(tmp_path):

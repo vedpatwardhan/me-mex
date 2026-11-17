@@ -1,8 +1,8 @@
 import pytest
 
-from app.v2.db import ToolContext
-from app.v2.models import NodeKind, V2Edge, V2Node, new_id
-from app.v2.tools import gist, link
+from app.db import ToolContext
+from app.models import NodeKind, V2Edge, V2Node, new_id
+from app.tools import gist, link
 
 
 def test_create_root_insight_edges(v2_store, v2_project):

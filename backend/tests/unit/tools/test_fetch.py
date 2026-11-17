@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from app.v2.db import ToolContext
-from app.v2.tools import fetch
+from app.db import ToolContext
+from app.tools import fetch
 
 
 def test_fetch_local_file(v2_store, v2_project, tmp_path):

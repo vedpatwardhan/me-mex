@@ -1,10 +1,10 @@
-from app.v2.models import NodeKind
+from app.models import NodeKind
 
 
 def test_w3_staging_then_commit(client, v2_store, v2_project_scoped):
     pid = v2_project_scoped.id
     root = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "create root",
             "thread_id": "w3",
@@ -20,7 +20,7 @@ def test_w3_staging_then_commit(client, v2_store, v2_project_scoped):
     )
     root_id = root.json()["details"]["result"]["root_id"]
     r = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "deep read this paper",
             "thread_id": "w3",
@@ -37,7 +37,7 @@ def test_w3_staging_then_commit(client, v2_store, v2_project_scoped):
         n for n in v2_store.list_nodes(pid) if n.node_kind == NodeKind.CONCEPT_I
     ]
     done = client.post(
-        "/api/v2/agent/resume",
+        "/api/agent/resume",
         json={
             "thread_id": "w3",
             "approval_id": approval_id,

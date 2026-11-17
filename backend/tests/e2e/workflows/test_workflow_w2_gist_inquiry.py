@@ -1,6 +1,6 @@
 def test_gist_inquiry_no_root(client, v2_store, v2_project):
     r = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "What's the gist of this paper?",
             "thread_id": "w2",
@@ -17,7 +17,7 @@ def test_gist_inquiry_no_root(client, v2_store, v2_project):
 
 def test_direct_gist_commit(client, v2_store, v2_project):
     r = client.post(
-        "/api/v2/agent/turn",
+        "/api/agent/turn",
         json={
             "text": "create root",
             "thread_id": "w2b",

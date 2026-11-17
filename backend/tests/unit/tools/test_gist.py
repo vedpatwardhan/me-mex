@@ -1,6 +1,6 @@
-from app.v2.db import ToolContext
-from app.v2.models import NodeKind
-from app.v2.tools import gist
+from app.db import ToolContext
+from app.models import NodeKind
+from app.tools import gist
 
 
 def test_create_root_gist(v2_store, v2_project):
