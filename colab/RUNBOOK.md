@@ -13,7 +13,17 @@ uv run python -m app.bootstrap.split_train_eval data/decision_training/robotics/
 ## Train on Colab
 
 1. Upload `backend/data/decision_training/robotics/train.jsonl` and `val.jsonl`.
-2. Fine-tune LoRA on **`mistralai/Ministral-3-8B-Instruct-2512`** (PEFT / Unsloth) → save to `/content/decision-lora`.
+2. Fine-tune (from repo root on Colab):
+
+   ```bash
+   cd /content/me-mex
+   python colab/train_decision_lora.py \
+     --train backend/data/decision_training/robotics/train.jsonl \
+     --val backend/data/decision_training/robotics/val.jsonl \
+     --output /content/decision-lora
+   ```
+
+   Base: **`mistralai/Ministral-3-8B-Instruct-2512`** (PEFT LoRA, see script flags).
 3. Serve with vLLM (notebook §5):
 
    ```text

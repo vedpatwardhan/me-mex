@@ -13,14 +13,19 @@ Run on Colab: uvicorn inference_gateway:app --host 0.0.0.0 --port 7860
 
 from __future__ import annotations
 
-import json
 import os
-import re
+import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+
+_COLAB = Path(__file__).resolve().parent
+if str(_COLAB) not in sys.path:
+    sys.path.insert(0, str(_COLAB))
+from decision_prompt import build_decision_prompt, parse_relevance_probs  # noqa: E402
 
 VLLM_BASE = os.getenv("VLLM_BASE", "http://127.0.0.1:8000/v1").rstrip("/")
 SPEECH_BASE = os.getenv("SPEECH_BASE", "http://127.0.0.1:7861").rstrip("/")
@@ -81,41 +86,6 @@ async def vllm_proxy(path: str, request: Request) -> Response:
     return await _proxy_vllm(request, path)
 
 
-def _build_decision_prompt(query: dict, frontier: list[dict]) -> str:
-    lines = [
-        "Score relevance of each frontier node to the query node.",
-        'Return JSON only: {"relevance_probs": {"<frontier_id>": <0-1 float>, ...}}',
-        "Probabilities must sum to 1.0 over all frontier ids.",
-        "",
-        f"QUERY: id={query.get('id')} kind={query.get('node_kind')} title={query.get('title')}",
-    ]
-    if query.get("gist"):
-        lines.append(f"  gist: {query.get('gist')[:400]}")
-    lines.append("FRONTIER:")
-    for n in frontier:
-        lines.append(
-            f"  - id={n.get('id')} kind={n.get('node_kind')} title={n.get('title')}"
-        )
-    return "\n".join(lines)
-
-
-def _parse_relevance_probs(text: str, frontier_ids: set[str]) -> dict[str, float]:
-    text = text.strip()
-    match = re.search(r"\{[\s\S]*\}", text)
-    if match:
-        text = match.group(0)
-    data = json.loads(text)
-    raw = data.get("relevance_probs", data)
-    probs = {str(k): float(v) for k, v in raw.items() if k in frontier_ids}
-    if len(probs) != len(frontier_ids):
-        missing = frontier_ids - set(probs.keys())
-        raise ValueError(f"missing frontier ids in model output: {missing}")
-    total = sum(probs.values())
-    if total <= 0:
-        raise ValueError("non-positive probability sum")
-    return {k: v / total for k, v in probs.items()}
-
-
 async def decision_score(request: Request) -> JSONResponse:
     """
     Body: { query_node, frontier[], adapter_id? } → { relevance_probs }.
@@ -130,7 +100,7 @@ async def decision_score(request: Request) -> JSONResponse:
         return JSONResponse({"relevance_probs": {}})
 
     frontier_ids = {str(n["id"]) for n in frontier}
-    prompt = _build_decision_prompt(query, frontier)
+    prompt = build_decision_prompt(query, frontier)
     payload: dict[str, Any] = {
         "model": DEFAULT_CHAT_MODEL,
         "messages": [{"role": "user", "content": prompt}],
@@ -145,7 +115,7 @@ async def decision_score(request: Request) -> JSONResponse:
         resp = await _client.post(f"{VLLM_BASE}/chat/completions", json=payload)
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"]
-        probs = _parse_relevance_probs(content, frontier_ids)
+        probs = parse_relevance_probs(content, frontier_ids)
     except Exception as exc:
         # Uniform fallback so smoke tests can run before LoRA is calibrated
         n = len(frontier)

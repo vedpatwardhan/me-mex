@@ -12,6 +12,8 @@ peft
 datasets
 accelerate
 bitsandbytes
+trl
+torch
 
 # Speech CPU sidecar (§6)
 faster-whisper
