@@ -2,6 +2,10 @@
 
 Join **`deeper_read_notes.md`** + **`overall_insights.md`** only (`select_papers` is not used here).
 
+**Training semantics:** Each **paper** (parenthetical cite → ROOT + gist) is the **query**. Each **flat subsection** (`## Section — ### Subsection` title) is a **class** on the frontier. The model scores relevance over **all** subsections; label 1.0 on subsection(s) where that paper is cited in the numbered notes. No nested graph hops in bootstrap v1.
+
+**Excluded** top-level `##` blocks in `overall_insights.md`: **General Notes**, **Blogs**, **Podcast(s)** — not parsed for cites, classes, or alignment stats.
+
 ## Alignment report (run first)
 
 ```bash
@@ -25,7 +29,7 @@ uv run python -m app.bootstrap.notes_to_jsonl --docs-dir ../../docs
 uv run python -m app.bootstrap.split_train_eval data/decision_training/robotics/bootstrap.jsonl --out-dir data/decision_training/robotics
 ```
 
-Last run (reference): **750** bootstrap rows → **592** train / **158** val; alignment **501** matched cites, **53** unmatched, **564** ROOTs indexed.
+Last run (reference): **485** paper→subsection rows → **378** train / **107** val; alignment **501** matched cites, **53** unmatched, **564** ROOTs indexed.
 
 ## Eval (mock vs live)
 

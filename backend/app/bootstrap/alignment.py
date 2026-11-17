@@ -9,7 +9,8 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
-ROOT_LINE = re.compile(r"^###\s+(.+?):\s*(\d{4}\.\d{4,5})\s*$")
+# Greedy (.+) so titles with commas match arXiv on the final colon (e.g. "A, B: 2608.18484")
+ROOT_LINE = re.compile(r"^###\s+(.+):\s*(\d{4}\.\d{4,5})\s*$")
 ROOT_LINE_PLAIN = re.compile(r"^###\s+(.+?)\s*$")
 ARXIV_INLINE = re.compile(r"\b(\d{4}\.\d{4,5})\b")
 PAREN_CITE = re.compile(r"\(([^)]+)\)")
@@ -17,6 +18,20 @@ NUMBERED_INSIGHT = re.compile(r"^\s*\d+\.\s+(.+)$")
 
 AUTO_MATCH_THRESHOLD = 0.92
 SUGGESTION_LIMIT = 3
+
+# Top-level ## blocks in overall_insights.md omitted from bootstrap / alignment cites
+EXCLUDED_TOP_LEVEL_SECTIONS = frozenset(
+    {
+        "general notes",
+        "blogs",
+        "podcast",
+        "podcasts",
+    }
+)
+
+
+def is_excluded_top_section(title: str) -> bool:
+    return title.strip().lower() in EXCLUDED_TOP_LEVEL_SECTIONS
 
 
 @dataclass
@@ -44,6 +59,8 @@ class SectionRecord:
     section_id: str
     title: str
     level: int
+    parent_title: str | None = None
+    flat_title: str | None = None
 
 
 def _slug(s: str, max_len: int = 64) -> str:
@@ -81,7 +98,14 @@ def parse_deeper_read_roots(path: Path) -> list[RootRecord]:
             m2 = ROOT_LINE_PLAIN.match(first)
             if not m2:
                 continue
-            short_label = m2.group(1).strip()
+            header_rest = m2.group(1).strip()
+            # ### ERA: 2510.xxx handled above; ### DRIS: https://... → match cite "DRIS"
+            short_label = header_rest
+            if ": " in header_rest:
+                left, right = header_rest.split(":", 1)
+                right = right.strip()
+                if not re.match(r"^\d{4}\.\d{4,5}\s*$", right):
+                    short_label = left.strip()
             arx_m = ARXIV_INLINE.search(chunk)
             arxiv = arx_m.group(1) if arx_m else None
             root_id = (
@@ -89,7 +113,7 @@ def parse_deeper_read_roots(path: Path) -> list[RootRecord]:
                 if arxiv
                 else f"root_{_slug(short_label)}"
             )
-            title = f"{short_label}: {arxiv}" if arxiv else short_label
+            title = header_rest if not arxiv else f"{short_label}: {arxiv}"
         gist = " ".join(ln.strip() for ln in lines[1:] if ln.strip())[:500]
         records.append(
             RootRecord(
@@ -112,6 +136,7 @@ def parse_overall_insights(
     insights: list[InsightRecord] = []
     current_section: SectionRecord | None = None
     current_sub: SectionRecord | None = None
+    skip_branch = False
     insight_idx = 0
 
     for i, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -120,29 +145,43 @@ def parse_overall_insights(
             continue
         if line.startswith("## ") and not line.startswith("### "):
             title = line[3:].strip()
-            current_section = SectionRecord(
-                section_id=f"sec_{_slug(title)}", title=title, level=2
-            )
+            skip_branch = is_excluded_top_section(title)
             current_sub = None
+            if skip_branch:
+                current_section = None
+                continue
+            current_section = SectionRecord(
+                section_id=f"sec_{_slug(title)}",
+                title=title,
+                level=2,
+                flat_title=title,
+            )
             sections.append(current_section)
             continue
         if line.startswith("### "):
+            if skip_branch or current_section is None:
+                current_sub = None
+                continue
             title = line[4:].strip()
-            parent = current_section.section_id if current_section else "sec_root"
+            parent_title = current_section.title
+            flat = f"{parent_title} — {title}"
             current_sub = SectionRecord(
-                section_id=f"sub_{_slug(title)}", title=title, level=3
+                section_id=f"sub_{_slug(flat)}",
+                title=title,
+                level=3,
+                parent_title=parent_title,
+                flat_title=flat,
             )
             sections.append(current_sub)
             continue
         m = NUMBERED_INSIGHT.match(line)
-        if m and current_section:
+        if m and current_section and not skip_branch:
             text = m.group(1).strip()
             tokens: list[str] = []
             for paren in PAREN_CITE.findall(text):
-                for part in re.split(r",|/|&", paren):
-                    tok = part.strip()
-                    if tok:
-                        tokens.append(tok)
+                paren = paren.strip()
+                if paren:
+                    tokens.append(paren)
             insight_idx += 1
             sec_id = (
                 current_sub.section_id if current_sub else current_section.section_id
@@ -160,8 +199,24 @@ def parse_overall_insights(
     return sections, insights
 
 
-def _split_cite_tokens(token: str) -> list[str]:
-    return [p.strip() for p in re.split(r",|/|&", token) if p.strip()]
+def _split_cite_tokens(token: str, indexes: dict[str, Any] | None = None) -> list[str]:
+    """Split parenthetical cite lists; keep comma-in-title as one token when it matches a ROOT."""
+    whole = token.strip()
+    if not whole:
+        return []
+    if indexes is not None:
+        rid, _, _ = resolve_cite_token(whole, indexes)
+        if rid:
+            return [whole]
+    parts = [p.strip() for p in re.split(r",|/|&", whole) if p.strip()]
+    if len(parts) <= 1:
+        return parts or [whole]
+    if indexes is None:
+        return parts
+    # Multi-cite paren: only split when the full string is not a known ROOT title
+    resolved = [_split_cite_tokens(p, indexes) for p in parts]
+    flat = [t for sub in resolved for t in sub]
+    return flat
 
 
 def build_root_indexes(roots: list[RootRecord]) -> dict[str, Any]:
@@ -290,7 +345,7 @@ def build_alignment_report(
     cite_count = 0
     for ins in insights:
         for raw_tok in ins.cite_tokens:
-            for tok in _split_cite_tokens(raw_tok):
+            for tok in _split_cite_tokens(raw_tok, indexes):
                 cite_count += 1
                 rid, method, candidates = resolve_cite_token(tok, indexes)
                 entry_base = {
