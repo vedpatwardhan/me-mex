@@ -1,2 +1,0 @@
-# Dependencies are managed by uv — see /me-mex/pyproject.toml
-# Install: cd me-mex && uv sync --all-groups
