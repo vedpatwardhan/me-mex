@@ -1,8 +1,8 @@
 from app.models import NodeKind
 
 
-def test_w6_note_and_promote(client, v2_store, v2_project_scoped):
-    pid = v2_project_scoped.id
+def test_w6_note_and_promote(client, store, project_scoped):
+    pid = project_scoped.id
     client.post(
         "/api/agent/turn",
         json={
@@ -11,7 +11,7 @@ def test_w6_note_and_promote(client, v2_store, v2_project_scoped):
             "context_json": {"active_project_id": pid},
         },
     )
-    todos = [n for n in v2_store.list_nodes(pid) if n.node_kind == NodeKind.TODO]
+    todos = [n for n in store.list_nodes(pid) if n.node_kind == NodeKind.TODO]
     assert todos
     tid = todos[0].id
     r = client.post(
@@ -26,4 +26,4 @@ def test_w6_note_and_promote(client, v2_store, v2_project_scoped):
         },
     )
     assert r.json()["graph_write"] is True
-    assert v2_store.get_node(tid).node_kind == NodeKind.CONCEPT_M
+    assert store.get_node(tid).node_kind == NodeKind.CONCEPT_M

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.db import ToolContext
-from app.models import NodeKind, V2Edge, new_id
+from app.models import NodeKind, Edge, new_id
 
 
 def write_reorg_proposal(ctx: ToolContext, *, proposal: dict[str, Any]) -> dict:
@@ -42,9 +42,9 @@ def apply_reorg_plan(ctx: ToolContext, *, proposal_id: str) -> dict:
 def split_section(ctx: ToolContext, *, hub_id: str, new_hub_title: str) -> dict:
     hub = ctx.store.assert_mutable(hub_id)
     new_id_hub = new_id("hub")
-    from app.models import V2Node
+    from app.models import Node
 
-    child = V2Node(
+    child = Node(
         _id=new_id_hub,
         title=new_hub_title,
         description="",
@@ -53,7 +53,7 @@ def split_section(ctx: ToolContext, *, hub_id: str, new_hub_title: str) -> dict:
     )
     ctx.store.upsert_node(child)
     ctx.store.add_edge(
-        V2Edge(
+        Edge(
             _id=new_id("edge"),
             source_id=hub_id,
             target_id=new_id_hub,
@@ -69,9 +69,7 @@ def merge_mutable_nodes(ctx: ToolContext, *, source_id: str, target_id: str) -> 
     for nid in ctx.store.neighbors(source_id):
         eid = new_id("edge")
         ctx.store.add_edge(
-            V2Edge(
-                _id=eid, source_id=target_id, target_id=nid, project_id=ctx.project_id
-            )
+            Edge(_id=eid, source_id=target_id, target_id=nid, project_id=ctx.project_id)
         )
     ctx.store.delete_node(source_id, force=True)
     return {"merged_into": target_id}
@@ -83,7 +81,7 @@ def relocate_under_parent(
     ctx.store.assert_mutable(node_id)
     eid = new_id("edge")
     ctx.store.add_edge(
-        V2Edge(
+        Edge(
             _id=eid,
             source_id=new_parent_id,
             target_id=node_id,
@@ -98,7 +96,7 @@ def add_edge(
 ) -> dict:
     eid = new_id("edge")
     ctx.store.add_edge(
-        V2Edge(
+        Edge(
             _id=eid,
             source_id=source_id,
             target_id=target_id,

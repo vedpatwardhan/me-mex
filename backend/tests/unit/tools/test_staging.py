@@ -3,8 +3,8 @@ from app.models import NodeKind
 from app.tools import gist, staging
 
 
-def test_staging_commit(v2_store, v2_project):
-    ctx = ToolContext(project_id=v2_project.id, thread_id="t1", store=v2_store)
+def test_staging_commit(store, project):
+    ctx = ToolContext(project_id=project.id, thread_id="t1", store=store)
     root = gist.create_or_update_root_gist(ctx, title="R", gist="g")
     key = staging.upsert_staging_bundle(
         ctx,
@@ -17,8 +17,6 @@ def test_staging_commit(v2_store, v2_project):
     )
     assert len(out["concept_ids"]) == 1
     children = [
-        n
-        for n in v2_store.list_nodes(v2_project.id)
-        if n.node_kind == NodeKind.CONCEPT_I
+        n for n in store.list_nodes(project.id) if n.node_kind == NodeKind.CONCEPT_I
     ]
     assert len(children) == 1

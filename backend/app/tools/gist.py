@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.db import ToolContext
-from app.models import NodeKind, V2Node, new_id
+from app.models import NodeKind, Node, new_id
 
 
 def create_or_update_root_gist(
@@ -13,7 +13,7 @@ def create_or_update_root_gist(
 ) -> dict:
     store = ctx.store
     rid = root_id or new_id("root")
-    node = V2Node(
+    node = Node(
         _id=rid,
         title=title,
         description=gist,
@@ -36,7 +36,7 @@ def attach_source_uri(ctx: ToolContext, *, root_id: str, uri: str) -> dict:
 
 def create_note(ctx: ToolContext, *, title: str, body: str) -> dict:
     nid = new_id("note")
-    node = V2Node(
+    node = Node(
         _id=nid,
         title=title,
         description=body,
@@ -49,7 +49,7 @@ def create_note(ctx: ToolContext, *, title: str, body: str) -> dict:
 
 def create_todo(ctx: ToolContext, *, title: str, body: str = "") -> dict:
     nid = new_id("todo")
-    node = V2Node(
+    node = Node(
         _id=nid,
         title=title,
         description=body,

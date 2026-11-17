@@ -1,6 +1,6 @@
-def test_w9_summarize_no_graph_write(client, v2_store, v2_project_scoped):
-    pid = v2_project_scoped.id
-    before = len(v2_store.list_nodes(pid))
+def test_w9_summarize_no_graph_write(client, store, project_scoped):
+    pid = project_scoped.id
+    before = len(store.list_nodes(pid))
     r = client.post(
         "/api/agent/turn",
         json={
@@ -10,4 +10,4 @@ def test_w9_summarize_no_graph_write(client, v2_store, v2_project_scoped):
         },
     )
     assert r.json()["graph_write"] is False
-    assert len(v2_store.list_nodes(pid)) == before
+    assert len(store.list_nodes(pid)) == before

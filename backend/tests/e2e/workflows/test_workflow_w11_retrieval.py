@@ -1,28 +1,28 @@
 from app.db import ToolContext
-from app.models import NodeKind, V2Edge, V2Node, new_id
+from app.models import NodeKind, Edge, Node, new_id
 from app.tools import gist
 
 
-def test_w11_retrieval_highlight(client, v2_store, v2_project_scoped):
-    pid = v2_project_scoped.id
-    seed = V2Node(
+def test_w11_retrieval_highlight(client, store, project_scoped):
+    pid = project_scoped.id
+    seed = Node(
         _id=new_id("seed"),
         title="Manipulation",
         description="",
         node_kind=NodeKind.CONCEPT_M,
         project_id=pid,
     )
-    v2_store.upsert_node(seed)
-    leaf = V2Node(
+    store.upsert_node(seed)
+    leaf = Node(
         _id=new_id("leaf"),
         title="Policy",
         description="",
         node_kind=NodeKind.CONCEPT_M,
         project_id=pid,
     )
-    v2_store.upsert_node(leaf)
-    v2_store.add_edge(
-        V2Edge(_id=new_id("e"), source_id=seed.id, target_id=leaf.id, project_id=pid)
+    store.upsert_node(leaf)
+    store.add_edge(
+        Edge(_id=new_id("e"), source_id=seed.id, target_id=leaf.id, project_id=pid)
     )
     r = client.post(
         "/api/agent/turn",
@@ -36,4 +36,4 @@ def test_w11_retrieval_highlight(client, v2_store, v2_project_scoped):
         },
     )
     assert r.json()["graph_write"] is False
-    assert v2_store.get_highlight_ids("w11")
+    assert store.get_highlight_ids("w11")

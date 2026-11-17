@@ -1,8 +1,8 @@
 from app.models import NodeKind
 
 
-def test_w3_staging_then_commit(client, v2_store, v2_project_scoped):
-    pid = v2_project_scoped.id
+def test_w3_staging_then_commit(client, store, project_scoped):
+    pid = project_scoped.id
     root = client.post(
         "/api/agent/turn",
         json={
@@ -33,9 +33,7 @@ def test_w3_staging_then_commit(client, v2_store, v2_project_scoped):
     assert r.json()["graph_write"] is False
     approval_id = r.json()["details"]["approval_id"]
     assert approval_id
-    assert not [
-        n for n in v2_store.list_nodes(pid) if n.node_kind == NodeKind.CONCEPT_I
-    ]
+    assert not [n for n in store.list_nodes(pid) if n.node_kind == NodeKind.CONCEPT_I]
     done = client.post(
         "/api/agent/resume",
         json={

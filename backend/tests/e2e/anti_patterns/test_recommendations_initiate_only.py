@@ -1,21 +1,21 @@
 from app.db import ToolContext
-from app.models import NodeKind, V2Edge, V2Node, new_id
+from app.models import NodeKind, Edge, Node, new_id
 from app.tools import gist
 
 
-def test_link_turn_no_edges_until_resume(client, v2_store, v2_project_scoped):
-    pid = v2_project_scoped.id
-    ctx = ToolContext(project_id=pid, thread_id="x", store=v2_store)
+def test_link_turn_no_edges_until_resume(client, store, project_scoped):
+    pid = project_scoped.id
+    ctx = ToolContext(project_id=pid, thread_id="x", store=store)
     root = gist.create_or_update_root_gist(ctx, title="R", gist="g")
-    hub = V2Node(
+    hub = Node(
         _id=new_id("hub"),
         title="Insight hub",
         description="",
         node_kind=NodeKind.CONCEPT_M,
         project_id=pid,
     )
-    v2_store.upsert_node(hub)
-    before = v2_store._db.edges.count_documents({})
+    store.upsert_node(hub)
+    before = store._db.edges.count_documents({})
     r = client.post(
         "/api/agent/turn",
         json={
@@ -29,5 +29,5 @@ def test_link_turn_no_edges_until_resume(client, v2_store, v2_project_scoped):
     )
     assert r.json()["graph_write"] is False
     assert r.json()["details"]["approval_id"]
-    after = v2_store._db.edges.count_documents({})
+    after = store._db.edges.count_documents({})
     assert after == before

@@ -1,20 +1,20 @@
 from app.db import ToolContext
-from app.models import NodeKind, V2Node, new_id
+from app.models import NodeKind, Node, new_id
 from app.tools import gist
 
 
-def test_w4_approve_creates_edges(client, v2_store, v2_project_scoped):
-    pid = v2_project_scoped.id
-    ctx = ToolContext(project_id=pid, thread_id="x", store=v2_store)
+def test_w4_approve_creates_edges(client, store, project_scoped):
+    pid = project_scoped.id
+    ctx = ToolContext(project_id=pid, thread_id="x", store=store)
     root = gist.create_or_update_root_gist(ctx, title="R", gist="g")
-    hub = V2Node(
+    hub = Node(
         _id=new_id("hub"),
         title="Hub",
         description="",
         node_kind=NodeKind.CONCEPT_M,
         project_id=pid,
     )
-    v2_store.upsert_node(hub)
+    store.upsert_node(hub)
     r = client.post(
         "/api/agent/turn",
         json={
@@ -36,5 +36,5 @@ def test_w4_approve_creates_edges(client, v2_store, v2_project_scoped):
             "context_json": {"active_project_id": pid},
         },
     )
-    neighbors = v2_store.neighbors(root["root_id"])
+    neighbors = store.neighbors(root["root_id"])
     assert hub.id in neighbors or len(neighbors) > 0

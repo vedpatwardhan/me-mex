@@ -1,4 +1,4 @@
-"""Mongo persistence for v2 tools (deterministic only)."""
+"""Mongo persistence for deterministic tools."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ from app.models import (
     NodeKind,
     PendingApproval,
     StagingBundle,
-    V2Edge,
-    V2Node,
-    V2Project,
+    Edge,
+    Node,
+    Project,
     new_id,
 )
 
@@ -28,10 +28,10 @@ MUTABLE_KINDS = {NodeKind.CONCEPT_M, NodeKind.INSIGHT, NodeKind.NOTE, NodeKind.T
 class ToolContext:
     project_id: str
     thread_id: str = "default"
-    store: "V2Store" = None  # type: ignore[assignment]
+    store: "Store" = None  # type: ignore[assignment]
 
 
-class V2Store:
+class Store:
     def __init__(self, db_name: Optional[str] = None):
         self._client = MongoClient(settings.MONGO_URI, serverSelectionTimeoutMS=2000)
         self._db = self._client[db_name or settings.DB_NAME]
@@ -41,16 +41,16 @@ class V2Store:
 
     # --- projects ---
 
-    def create_project(self, name: str, project_id: Optional[str] = None) -> V2Project:
+    def create_project(self, name: str, project_id: Optional[str] = None) -> Project:
         pid = project_id or new_id("proj")
         genesis_id = f"genesis_{pid}"
-        project = V2Project(
+        project = Project(
             _id=pid,
             name=name,
             introduction="",
             genesis_node_id=genesis_id,
         )
-        genesis = V2Node(
+        genesis = Node(
             _id=genesis_id,
             title=GENESIS_TITLE,
             description="Project spine",
@@ -66,11 +66,11 @@ class V2Store:
         )
         return project
 
-    def get_project(self, project_id: str) -> V2Project:
+    def get_project(self, project_id: str) -> Project:
         doc = self._db.projects.find_one({"_id": project_id})
         if not doc:
             raise NotFoundError(project_id)
-        return V2Project(
+        return Project(
             _id=doc["_id"],
             name=doc["name"],
             introduction=doc.get("introduction") or doc.get("description", ""),
@@ -91,13 +91,13 @@ class V2Store:
 
     # --- nodes ---
 
-    def get_node(self, node_id: str) -> V2Node:
+    def get_node(self, node_id: str) -> Node:
         doc = self._db.nodes.find_one({"_id": node_id})
         if not doc:
             raise NotFoundError(node_id)
-        return V2Node.from_mongo(doc)
+        return Node.from_mongo(doc)
 
-    def upsert_node(self, node: V2Node) -> None:
+    def upsert_node(self, node: Node) -> None:
         doc = node.to_mongo()
         doc["project_ids"] = [node.project_id]
         self._db.nodes.replace_one({"_id": node.id}, doc, upsert=True)
@@ -113,22 +113,22 @@ class V2Store:
 
     def list_nodes(
         self, project_id: str, kinds: Optional[list[NodeKind]] = None
-    ) -> list[V2Node]:
+    ) -> list[Node]:
         query: dict[str, Any] = {"project_ids": project_id}
         docs = self._db.nodes.find(query)
-        nodes = [V2Node.from_mongo(d) for d in docs]
+        nodes = [Node.from_mongo(d) for d in docs]
         if kinds:
             nodes = [n for n in nodes if n.node_kind in kinds]
         return nodes
 
-    def _is_immutable(self, node: V2Node) -> bool:
+    def _is_immutable(self, node: Node) -> bool:
         if node.node_kind == NodeKind.ROOT:
             return True
         if node.node_kind == NodeKind.CONCEPT_I:
             return True
         return bool(node.metadata.get("immutable"))
 
-    def assert_mutable(self, node_id: str) -> V2Node:
+    def assert_mutable(self, node_id: str) -> Node:
         node = self.get_node(node_id)
         if self._is_immutable(node):
             raise ImmutableNodeViolation(node_id)
@@ -136,13 +136,13 @@ class V2Store:
 
     # --- edges ---
 
-    def add_edge(self, edge: V2Edge) -> None:
+    def add_edge(self, edge: Edge) -> None:
         self._db.edges.replace_one({"_id": edge.id}, edge.to_mongo(), upsert=True)
 
     def remove_edge(self, edge_id: str) -> None:
         self._db.edges.delete_one({"_id": edge_id})
 
-    def find_edge(self, source_id: str, target_id: str) -> Optional[V2Edge]:
+    def find_edge(self, source_id: str, target_id: str) -> Optional[Edge]:
         doc = self._db.edges.find_one(
             {
                 "$or": [
@@ -153,7 +153,7 @@ class V2Store:
         )
         if not doc:
             return None
-        return V2Edge(
+        return Edge(
             _id=doc["_id"],
             source_id=doc["source_id"],
             target_id=doc["target_id"],
@@ -253,13 +253,13 @@ class V2Store:
         return doc.get("node_ids", []) if doc else []
 
 
-_store: Optional[V2Store] = None
+_store: Optional[Store] = None
 
 
-def get_store(db_name: Optional[str] = None) -> V2Store:
+def get_store(db_name: Optional[str] = None) -> Store:
     global _store
     if db_name is not None:
-        return V2Store(db_name=db_name)
+        return Store(db_name=db_name)
     if _store is None:
-        _store = V2Store()
+        _store = Store()
     return _store

@@ -1,4 +1,4 @@
-"""v2 domain models aligned with me-mex/docs/03-graph-and-memory.md."""
+"""Domain models aligned with me-mex/docs/03-graph-and-memory.md."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
-class V2Node(BaseModel):
+class Node(BaseModel):
     id: str = Field(alias="_id")
     title: str
     description: str = ""
@@ -50,7 +50,7 @@ class V2Node(BaseModel):
         return doc
 
     @classmethod
-    def from_mongo(cls, doc: dict[str, Any]) -> "V2Node":
+    def from_mongo(cls, doc: dict[str, Any]) -> "Node":
         kind = doc.get("metadata", {}).get("node_kind") or "CONCEPT_M"
         return cls(
             _id=doc["_id"],
@@ -69,7 +69,7 @@ class V2Node(BaseModel):
         )
 
 
-class V2Edge(BaseModel):
+class Edge(BaseModel):
     id: str = Field(alias="_id")
     source_id: str
     target_id: str
@@ -85,12 +85,12 @@ class V2Edge(BaseModel):
             "description": self.note,
             "note": self.note,
             "project_ids": [self.project_id],
-            "metadata": {"v2": True},
+            "metadata": {},
             "created_at": self.created_at,
         }
 
 
-class V2Project(BaseModel):
+class Project(BaseModel):
     id: str = Field(alias="_id")
     name: str
     introduction: str = ""

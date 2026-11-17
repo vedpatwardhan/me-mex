@@ -65,7 +65,7 @@ me-mex/
     app/
       agents/           # LangGraph supervisor + workers
       tools/            # deterministic graph tools + search_tools
-      db/               # V2Store / Mongo
+      db/               # Store / Mongo
       api/              # FastAPI routes
       bootstrap/        # notes → JSONL
       services/         # llm_gateway, decision_scorer, checkpoints, …

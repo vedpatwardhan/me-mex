@@ -4,7 +4,7 @@ import hashlib
 import time
 
 from app.db import ToolContext
-from app.models import NodeKind, StagingBundle, StagingConcept, V2Node, new_id
+from app.models import NodeKind, StagingBundle, StagingConcept, Node, new_id
 from app.tools import fetch as fetch_tool
 
 
@@ -78,7 +78,7 @@ def commit_intra_doc_graph(
         ctx.store.upsert_passage(
             passage_id, root_id, concept.description or concept.title
         )
-        node = V2Node(
+        node = Node(
             _id=cid,
             title=concept.title,
             description=concept.description,
@@ -89,10 +89,10 @@ def commit_intra_doc_graph(
             metadata={"immutable": True, "parent_root_id": root_id},
         )
         ctx.store.upsert_node(node)
-        from app.models import V2Edge
+        from app.models import Edge
 
         ctx.store.add_edge(
-            V2Edge(
+            Edge(
                 _id=new_id("edge"),
                 source_id=root_id,
                 target_id=cid,

@@ -1,8 +1,8 @@
 from app.models import NodeKind
 
 
-def test_w7_root_then_staging_commit(client, v2_store, v2_project_scoped):
-    pid = v2_project_scoped.id
+def test_w7_root_then_staging_commit(client, store, project_scoped):
+    pid = project_scoped.id
     root = client.post(
         "/api/agent/turn",
         json={
@@ -43,9 +43,7 @@ def test_w7_root_then_staging_commit(client, v2_store, v2_project_scoped):
             },
         },
     )
-    roots = [n for n in v2_store.list_nodes(pid) if n.node_kind == NodeKind.ROOT]
-    concepts = [
-        n for n in v2_store.list_nodes(pid) if n.node_kind == NodeKind.CONCEPT_I
-    ]
+    roots = [n for n in store.list_nodes(pid) if n.node_kind == NodeKind.ROOT]
+    concepts = [n for n in store.list_nodes(pid) if n.node_kind == NodeKind.CONCEPT_I]
     assert len(roots) >= 1
     assert len(concepts) >= 1

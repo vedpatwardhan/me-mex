@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.db import ToolContext
-from app.models import NodeKind, V2Edge, new_id
+from app.models import NodeKind, Edge, new_id
 
 ROOT_LINK_KINDS = {NodeKind.ROOT}
 INSIGHT_TARGETS = {NodeKind.INSIGHT, NodeKind.CONCEPT_M}
@@ -24,7 +24,7 @@ def create_root_insight_edges(
             raise ValueError("default: link ROOT to hubs/insights, not CONCEPT_I")
         eid = new_id("edge")
         ctx.store.add_edge(
-            V2Edge(
+            Edge(
                 _id=eid,
                 source_id=root_id,
                 target_id=tid,
