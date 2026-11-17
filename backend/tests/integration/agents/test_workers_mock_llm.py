@@ -1,4 +1,4 @@
-from app.agents.workers import run_intradoc_extract
+from app.llm import get_chains
 
 
 def test_mock_vllm_chat_fixture(mock_vllm_chat, store, project):
@@ -11,10 +11,12 @@ def test_mock_vllm_chat_fixture(mock_vllm_chat, store, project):
 
 
 def test_recorded_intradoc_fixture(recorded_intra_doc_chunks):
-    concepts = run_intradoc_extract(
-        text="passage one\n\npassage two",
-        doc_title="FixtureDoc",
-        user_intent="deep read",
+    concepts = get_chains().intradoc.invoke(
+        {
+            "text": "passage one\n\npassage two",
+            "doc_title": "FixtureDoc",
+            "user_intent": "deep read",
+        }
     )
     titles = {c["title"] for c in concepts}
     assert "Sim-to-real transfer" in titles

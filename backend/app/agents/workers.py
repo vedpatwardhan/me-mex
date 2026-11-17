@@ -1,36 +1,47 @@
-"""Headless worker handlers — model calls in agent layer; tools stay deterministic."""
+"""Headless worker handlers — LLM via `get_chains().*.invoke()` only."""
 
 from __future__ import annotations
 
-import uuid
+import json
 from typing import Any
 
 from app.db import ToolContext
-from app.services.chat_llm import get_chat_llm, stub_intradoc_concepts
-from app.services.passage_packing import pack_document_passages
+from app.config import settings
+from app.llm import get_chains
 from app.services.decision_scorer import ScorerNode, get_decision_scorer
 from app.tools import dock, gist, link, project, reorg, staging
 from app.tools import fetch as fetch_tool
-from app.config import settings
 
 
 def route_intent(text: str, context: dict, project: Any) -> str:
-    return get_chat_llm().classify_worker(text, context, project)
+    scope = (project.introduction or "").strip() or "(empty)"
+    payload = json.dumps({"text": text, "context": context}, ensure_ascii=False)
+    result = get_chains().supervisor.invoke(
+        {
+            "text": text,
+            "context": context,
+            "project_scope": scope,
+            "payload": payload,
+        }
+    )
+    return result if isinstance(result, str) else result.worker
 
 
 def conversation_worker(
     ctx: ToolContext, text: str, *, gist_draft: str | None = None
 ) -> dict:
-    project = ctx.store.get_project(ctx.project_id)
-    reply = get_chat_llm().conversation_reply(
-        text, project=project, gist_draft=gist_draft
+    if gist_draft:
+        return {"reply": gist_draft, "graph_write": False}
+    proj = ctx.store.get_project(ctx.project_id)
+    reply = get_chains().conversation.invoke(
+        {"text": text, "project_scope": proj.introduction or ""}
     )
     return {"reply": reply, "graph_write": False}
 
 
 def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     fields = context.get("custom_fields") or {}
-    project = ctx.store.get_project(ctx.project_id)
+    proj = ctx.store.get_project(ctx.project_id)
     if "create root" in text.lower() or fields.get("force_gist_commit"):
         title = fields.get("title") or "Untitled source"
         gist_text = fields.get("gist") or text
@@ -39,43 +50,10 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
         if uri and out.get("root_id"):
             gist.attach_source_uri(ctx, root_id=out["root_id"], uri=str(uri))
         return {"reply": "ROOT gist saved.", "result": out, "graph_write": True}
-    draft = get_chat_llm().gist_draft(text, project=project)
-    return conversation_worker(ctx, text, gist_draft=draft)
-
-
-def run_intradoc_extract(
-    *,
-    text: str,
-    doc_title: str,
-    user_intent: str,
-) -> list[dict[str, Any]]:
-    """Pack passages → per-passage extract → consolidate (stub or live via get_chat_llm)."""
-    chat = get_chat_llm()
-    passages = pack_document_passages(text) if text.strip() else [""]
-    raw = [
-        chat.extract_passage(
-            p,
-            doc_title=doc_title,
-            passage_index=i,
-            user_intent=user_intent,
-        )
-        for i, p in enumerate(passages)
-    ]
-    consolidated = chat.consolidate_extractions(
-        raw,
-        doc_title=doc_title,
-        user_intent=user_intent,
+    draft = get_chains().gist_draft.invoke(
+        {"text": text, "project_scope": proj.introduction or ""}
     )
-    out: list[dict[str, Any]] = []
-    for i, c in enumerate(consolidated.concepts):
-        out.append(
-            {
-                "concept_id": f"c{i + 1}_{uuid.uuid4().hex[:6]}",
-                "title": c.title,
-                "description": c.description,
-            }
-        )
-    return out or stub_intradoc_concepts()
+    return conversation_worker(ctx, text, gist_draft=draft)
 
 
 def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
@@ -92,10 +70,8 @@ def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     if not doc_text.strip():
         doc_text = fields.get("raw_text") or text
 
-    concepts = run_intradoc_extract(
-        text=doc_text,
-        doc_title=title,
-        user_intent=text,
+    concepts = get_chains().intradoc.invoke(
+        {"text": doc_text, "doc_title": title, "user_intent": text}
     )
     key_out = staging.upsert_staging_bundle(
         ctx,
@@ -205,7 +181,7 @@ def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     if not seed:
         return {"reply": "Graph empty.", "graph_write": False}
 
-    project = ctx.store.get_project(ctx.project_id)
+    proj = ctx.store.get_project(ctx.project_id)
     scorer = get_decision_scorer()
     visited = {seed}
     expand: list[str] = []
@@ -232,8 +208,15 @@ def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
         current = hop[0][0]
 
     link.highlight_nodes(ctx, node_ids=expand + [seed])
-    summary = get_chat_llm().retrieval_summary(
-        query=text, highlighted_ids=expand, project=project
+    summary = get_chains().retrieval_summary.invoke(
+        {
+            "project_scope": proj.introduction or "",
+            "payload": (
+                f"User asked: {text}\n"
+                f"Related node ids: {', '.join(expand[:8])}\n"
+                "Brief summary; no graph writes."
+            ),
+        }
     )
     return {
         "reply": summary,
@@ -271,5 +254,14 @@ def project_scope_worker(ctx: ToolContext, text: str) -> dict:
         intro = text.split(":", 1)[-1].strip() if ":" in text else text
         project.update_project_scope(ctx, introduction=intro)
         return {"reply": "Scope saved.", "graph_write": True}
-    reply = get_chat_llm().project_scope_reply(text, project=proj)
+    reply = get_chains().project_scope.invoke(
+        {
+            "payload": json.dumps(
+                {
+                    "current_scope": proj.introduction or "",
+                    "user_message": text,
+                }
+            ),
+        }
+    )
     return {"reply": reply, "graph_write": False}

@@ -17,8 +17,14 @@ os.environ.setdefault("DECISION_SCORER_MODE", "mock")
 from main import app  # noqa: E402
 import app.db.store as store_module  # noqa: E402
 from app.db.store import Store  # noqa: E402
-from app.services.chat_llm import StubChatLLM, set_chat_llm_override
+from app.llm.chains import (
+    AgentChains,
+    get_chains,
+    set_chains_override,
+    set_recorded_intradoc,
+)
 from app.services.decision_scorer import set_decision_scorer_override
+from langchain_core.runnables import RunnableLambda
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -32,10 +38,12 @@ def reset_store_singleton():
 
 @pytest.fixture(autouse=True)
 def reset_llm_overrides():
-    set_chat_llm_override(None)
+    set_chains_override(None)
+    set_recorded_intradoc(None)
     set_decision_scorer_override(None)
     yield
-    set_chat_llm_override(None)
+    set_chains_override(None)
+    set_recorded_intradoc(None)
     set_decision_scorer_override(None)
 
 
@@ -143,27 +151,23 @@ def tmpdir_checkpoint(tmp_path, monkeypatch):
 
 @pytest.fixture
 def mock_vllm_chat():
-    """Fixed chat + routing via StubChatLLM override."""
-
-    class FixedChatLLM(StubChatLLM):
-        def conversation_reply(
-            self, text, *, project, gist_draft=None, scope_hint=None
-        ):
-            return "Fixed assistant reply for tests."
-
-        def classify_worker(self, text, context, project):
-            return "conversation"
-
-    llm = FixedChatLLM()
-    set_chat_llm_override(llm)
-    return llm
+    """Fixed assistant reply via LangChain chain override."""
+    base = get_chains()
+    set_chains_override(
+        AgentChains(
+            supervisor=base.supervisor,
+            conversation=RunnableLambda(lambda _: "Fixed assistant reply for tests."),
+            gist_draft=base.gist_draft,
+            project_scope=base.project_scope,
+            retrieval_summary=base.retrieval_summary,
+            intradoc=base.intradoc,
+        )
+    )
 
 
 @pytest.fixture
 def recorded_intra_doc_chunks():
     path = FIXTURES / "intradoc" / "recorded_chunks.json"
     data = json.loads(path.read_text())
-    llm = StubChatLLM()
-    llm.recorded_intradoc = data
-    set_chat_llm_override(llm)
+    set_recorded_intradoc(data)
     return data
