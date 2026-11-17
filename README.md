@@ -87,7 +87,7 @@ All agent and graph endpoints live under **`/api/*`** (`/api/projects`, `/api/ag
 
 ## Decision bootstrap
 
-[docs/05-models-and-runtime.md](./docs/05-models-and-runtime.md), `app/bootstrap/`, `backend/data/decision_training/README.md`, [colab/RUNBOOK.md](./colab/RUNBOOK.md).
+[docs/05-models-and-runtime.md](./docs/05-models-and-runtime.md), `app/bootstrap/`, `backend/data/decision_training/README.md`, [colab/RUNBOOK.md](./colab/RUNBOOK.md), [colab/TOPOLOGY.md](./colab/TOPOLOGY.md), [colab/me_mex_inference_stack.ipynb](./colab/me_mex_inference_stack.ipynb).
 
 ```bash
 uv run python backend/scripts/eval_decision_model.py --dry-run

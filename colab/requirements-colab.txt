@@ -1,0 +1,20 @@
+# Me-Mex Colab inference stack (install in notebook §2)
+vllm==0.31.0
+mistral-common==1.12.0
+transformers>=5.10.4,<5.17.0
+fastapi
+uvicorn[standard]
+httpx
+python-multipart
+
+# LoRA training (optional §4)
+peft
+datasets
+accelerate
+bitsandbytes
+
+# Speech CPU sidecar (§6)
+faster-whisper
+kokoro
+soundfile
+numpy
