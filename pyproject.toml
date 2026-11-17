@@ -1,0 +1,57 @@
+[project]
+name = "memex"
+version = "0.2.0"
+description = "Me-Mex v2 research graph backend"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.0.0",
+    "python-multipart>=0.0.9",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "httpx>=0.27.0",
+    "pymongo>=4.6.0",
+    "openai>=1.20.0",
+    "arxiv>=2.1.0",
+    "duckduckgo-search>=6.0.0",
+    "trafilatura>=1.10.0",
+    "pypdf>=5.0.0",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "networkx>=3.1",
+    "rustworkx>=0.14.0",
+    "fastmcp>=0.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-xdist>=3.5.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.6.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests/unit", "backend/tests/integration", "backend/tests/e2e"]
+pythonpath = ["backend"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"
+markers = [
+    "vllm: requires live Colab vLLM + LoRA",
+    "mongodb: requires MongoDB",
+    "slow: long-running tests",
+    "livekit: Phase 2 LiveKit worker",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

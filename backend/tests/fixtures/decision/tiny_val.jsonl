@@ -1,0 +1,1 @@
+{"query_node": {"id": "q1", "title": "ROOT A", "node_kind": "ROOT"}, "frontier": [{"id": "f1", "title": "Hub", "node_kind": "CONCEPT_M"}, {"id": "f2", "title": "Other", "node_kind": "CONCEPT_M"}], "label_relevance": {"f1": 1.0, "f2": 0.2}}

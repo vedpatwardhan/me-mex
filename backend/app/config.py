@@ -128,6 +128,19 @@ class Settings:
         "REORG_PARTITION_ENABLE_REASONING", "false"
     )
 
+    # v2 flags
+    ME_MEX_V2: bool = _env_bool("ME_MEX_V2", "true")
+    V2_DISABLE_V1_AUTOPATHS: bool = _env_bool("V2_DISABLE_V1_AUTOPATHS", "true")
+    LORA_ADAPTER_ID: str = os.getenv("LORA_ADAPTER_ID", "decision-lora")
+    CHECKPOINTS_DIR: str = os.getenv(
+        "CHECKPOINTS_DIR",
+        str(BACKEND_DIR / "data" / "checkpoints"),
+    )
+    DECISION_TRAINING_DIR: str = os.getenv(
+        "DECISION_TRAINING_DIR",
+        str(BACKEND_DIR / "data" / "decision_training"),
+    )
+
     @property
     def ingest_traversal_max_depth(self) -> int:
         """Ingest traversal depth when INGEST_TRAVERSAL_MAX_DEPTH env is unset (default 3)."""

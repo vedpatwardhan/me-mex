@@ -41,10 +41,19 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-*.ipynb
 
 # Temporary files
 temp_*
 backend/temp_downloads/
 data/
-docs/reports/
+# Track v2 training layout docs only (runtime JSONL/checkpoints stay local)
+!backend/data/
+backend/data/**
+!backend/data/decision_training/
+backend/data/decision_training/**
+!backend/data/decision_training/README.md
+backend/logs/**
+!backend/logs/decision_traces/
+backend/logs/decision_traces/**
+!backend/logs/decision_traces/.gitkeep
+reports

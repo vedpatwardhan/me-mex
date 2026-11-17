@@ -4,14 +4,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.config import settings
 from app.models import (
     ProjectWorkspace,
     ChatMessageRecord,
 )
 from app.agents.orchestrator import orchestrator
 from app.db import db_engine
+from app.v2.api.routes import router as v2_router
 
-app = FastAPI(title="Me-Mex (me-mex) Backend Engine", version="0.1.0")
+app = FastAPI(title="Me-Mex (me-mex) Backend Engine", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,6 +22,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if settings.ME_MEX_V2:
+    app.include_router(v2_router)
 
 
 @app.get("/")
