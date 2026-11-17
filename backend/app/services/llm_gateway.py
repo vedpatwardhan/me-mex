@@ -8,9 +8,12 @@ from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
 
+import logging
+
 from app.config import settings
-from app.services.logger import logger, console
 from app.services.llm_tracer import llm_tracer
+
+_log = logging.getLogger(__name__)
 
 # Configuration for vLLM Server on Colab / Remote
 COLAB_VLLM_URL = settings.COLAB_VLLM_URL
@@ -215,14 +218,13 @@ class LLMGateway:
             vllm_reasoning = "".join(collected_reasoning)
 
             if vllm_reasoning:
-                console.print(
-                    f"      [dim]🧠 Model reasoning trace generated: {len(vllm_reasoning)} chars[/dim]"
-                )
+                _log.debug("Model reasoning trace: %s chars", len(vllm_reasoning))
             elif enable_reasoning:
                 parsed = self.parse_reasoning_output(raw_content)
                 if parsed["thinking"]:
-                    console.print(
-                        f"      [dim]🧠 Parsed [THINK] reasoning trace: {len(parsed['thinking'])} chars[/dim]"
+                    _log.debug(
+                        "Parsed [THINK] reasoning trace: %s chars",
+                        len(parsed["thinking"]),
                     )
 
             final_text = ""
@@ -262,7 +264,7 @@ class LLMGateway:
                     status="FAILED",
                     error=str(e),
                 )
-            logger.error_box("LLMGateway Request Failed", str(e))
+            _log.error("LLMGateway request failed: %s", e)
             raise ConnectionError(f"vLLM Server unreachable or error ({e})")
 
     def generate_structured_completion(

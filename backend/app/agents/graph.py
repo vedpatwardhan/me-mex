@@ -45,7 +45,7 @@ def _worker_node(state: AgentState) -> AgentState:
     if w == "gist":
         out = workers.gist_worker(ctx, text, context)
     elif w == "intradoc":
-        out = workers.intradoc_worker(ctx, context)
+        out = workers.intradoc_worker(ctx, text, context)
     elif w == "link":
         out = workers.link_place_worker(ctx, context)
     elif w == "reorg":

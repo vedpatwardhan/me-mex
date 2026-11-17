@@ -13,7 +13,7 @@ The monolithic v1 stack (orchestrator ingest, `/api/chat`) is preserved only on 
 | Workflow-driven writes + explicit approve | URL → auto ingest + link + reorg |
 | Deterministic tools + LangGraph workers | v1 `ExecutiveOrchestrator` |
 | Headless REST + pytest (`/api/*`) | LiveKit dock UI (Phase 2+) |
-| Mock DecisionScorer in default CI | Trained LoRA (optional `pytest -m vllm`) |
+| Agents call `get_chat_llm()` / `get_decision_scorer()` (stub in CI) | **LoRA train + deploy on Colab** (`pytest -m vllm` for exit gate) |
 
 Canon: **[`docs/`](./docs/)** — [docs/README.md](./docs/README.md), [docs/09-phasing.md](./docs/09-phasing.md), [docs/11-testing.md](./docs/11-testing.md).
 
@@ -42,7 +42,10 @@ DB_NAME=me-mex
 
 ```bash
 uv run uvicorn main:app --app-dir backend --host 0.0.0.0 --port 8000 --reload
-uv run pytest
+uv run pytest   # default excludes -m vllm (see backend/pytest.ini)
+# Bootstrap decision JSONL (Colab LoRA prep):
+cd backend && uv run python -m app.bootstrap.notes_to_jsonl
+cd backend && uv run python -m app.bootstrap.split_train_eval data/decision_training/robotics/bootstrap.jsonl --out-dir data/decision_training/robotics
 ```
 
 Example:

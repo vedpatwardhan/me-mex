@@ -1,0 +1,12 @@
+[
+  {
+    "passage_index": 0,
+    "title": "Sim-to-real transfer",
+    "description": "Domain randomization bridges simulation and deployment."
+  },
+  {
+    "passage_index": 1,
+    "title": "Contact-rich manipulation",
+    "description": "Policies trained with dense rewards on tactile feedback."
+  }
+]

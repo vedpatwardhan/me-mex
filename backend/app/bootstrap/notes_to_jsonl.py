@@ -7,6 +7,8 @@ import json
 import re
 from pathlib import Path
 
+from app.config import ROOT_DIR, settings
+
 
 def _parse_deeper_read(path: Path) -> dict[str, dict]:
     """Map title fragment → gist row."""
@@ -61,17 +63,13 @@ def main() -> None:
     parser.add_argument(
         "--docs-dir",
         type=Path,
-        default=Path(__file__).resolve().parents[5] / "docs",
+        default=ROOT_DIR.parent / "docs",
         help="cortex-os docs with deeper_read_notes.md",
     )
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path(__file__).resolve().parents[3]
-        / "data"
-        / "decision_training"
-        / "robotics"
-        / "bootstrap.jsonl",
+        default=Path(settings.DECISION_TRAINING_DIR) / "robotics" / "bootstrap.jsonl",
     )
     args = parser.parse_args()
     roots = _parse_deeper_read(args.docs_dir / "deeper_read_notes.md")

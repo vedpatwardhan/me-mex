@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from app.db import ToolContext
 from app.models import NodeKind, Node, new_id
+from app.services.timing import timed_tool
 
 
+@timed_tool
 def create_or_update_root_gist(
     ctx: ToolContext,
     *,

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.config import settings
 from app.db import ToolContext
 from app.models import PendingApproval, new_id
+from app.services.timing import timed_tool
 
 
+@timed_tool
 def enqueue_pending_approval(
     ctx: ToolContext,
     *,
@@ -44,7 +47,10 @@ def get_suggested_next_actions(ctx: ToolContext) -> dict:
     nodes = ctx.store.list_nodes(ctx.project_id)
     suggestions: list[dict] = []
     for n in nodes:
-        if n.node_kind.value == "CONCEPT_M" and ctx.store.degree(n.id) > 7:
+        if (
+            n.node_kind.value == "CONCEPT_M"
+            and ctx.store.degree(n.id) > settings.DEGREE_THRESHOLD
+        ):
             suggestions.append(
                 {"type": "reorg", "title": f"Hub crowded: {n.title}", "node_id": n.id}
             )

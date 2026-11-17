@@ -1,12 +1,11 @@
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
-# Path to backend directory and root directory
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BACKEND_DIR.parent
 
-# Determine environment: check ENV_FILE or test mode
 env_file = os.getenv("ENV_FILE")
 if env_file:
     load_dotenv(dotenv_path=Path(env_file))
@@ -36,65 +35,20 @@ class Settings:
     def DB_NAME(self) -> str:
         return os.getenv("DB_NAME", "me-mex")
 
+    # Remote inference (Colab vLLM)
     COLAB_VLLM_URL: str = os.getenv("COLAB_VLLM_URL", "http://localhost:8000/v1")
     LLM_MODEL_NAME: str = os.getenv(
         "LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512"
     )
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "180.0"))
+    LORA_ADAPTER_ID: str = os.getenv("LORA_ADAPTER_ID", "decision-lora")
 
-    DEGREE_THRESHOLD: int = int(os.getenv("DEGREE_THRESHOLD", "7"))
-    MIN_CLUSTER_SIZE: int = int(os.getenv("MIN_CLUSTER_SIZE", "2"))
-    MAX_TRAVERSAL_DEPTH: int = int(os.getenv("MAX_TRAVERSAL_DEPTH", "5"))
-    REACHABILITY_HOP_K: int = int(os.getenv("REACHABILITY_HOP_K", "3"))
-    MAX_UPWARD_REORG_ITERATIONS: int = int(
-        os.getenv("MAX_UPWARD_REORG_ITERATIONS", "5")
-    )
-    REORG_PARTITION_MAX_TOKENS: int = int(
-        os.getenv("REORG_PARTITION_MAX_TOKENS", "3072")
-    )
-    COLLECTIVE_LINKING_MAX_TOKENS: int = int(
-        os.getenv("COLLECTIVE_LINKING_MAX_TOKENS", "2048")
-    )
-    SUBGRAPH_EXPANSION_MAX_TOKENS: int = int(
-        os.getenv("SUBGRAPH_EXPANSION_MAX_TOKENS", "512")
-    )
-    GENERALIZATION_MAX_TOKENS: int = int(os.getenv("GENERALIZATION_MAX_TOKENS", "2560"))
+    # stub | live — chat completions from worker agents
+    CHAT_LLM_MODE: str = os.getenv("CHAT_LLM_MODE", "stub").lower()
+    # mock | live — LoRA DecisionScorer HTTP
+    DECISION_SCORER_MODE: str = os.getenv("DECISION_SCORER_MODE", "mock").lower()
 
-    INGEST_EXTRACTION_CONCURRENCY: int = int(
-        os.getenv("INGEST_EXTRACTION_CONCURRENCY", "4")
-    )
-    INGEST_JSON_COMPACT: bool = _env_bool("INGEST_JSON_COMPACT", "true")
-    INGEST_USE_ROLLING_SUMMARY: bool = _env_bool("INGEST_USE_ROLLING_SUMMARY", "true")
-    CHAT_SUMMARY_MAX_CHARS: int = int(os.getenv("CHAT_SUMMARY_MAX_CHARS", "4000"))
-    CHAT_SUMMARY_REFRESH_MIN_TURNS: int = int(
-        os.getenv("CHAT_SUMMARY_REFRESH_MIN_TURNS", "4")
-    )
-    INGEST_STRUCTURED_CHAT_HISTORY_TURNS: int = int(
-        os.getenv("INGEST_STRUCTURED_CHAT_HISTORY_TURNS", "2")
-    )
-    INGEST_TRAVERSAL_MAX_DEPTH: int | None = _optional_int("INGEST_TRAVERSAL_MAX_DEPTH")
-    INGEST_TRAVERSAL_TOP_K: int = int(os.getenv("INGEST_TRAVERSAL_TOP_K", "1"))
-    RETRIEVAL_TRAVERSAL_MAX_DEPTH: int | None = _optional_int(
-        "RETRIEVAL_TRAVERSAL_MAX_DEPTH"
-    )
-    RETRIEVAL_TRAVERSAL_TOP_K: int | None = _optional_int("RETRIEVAL_TRAVERSAL_TOP_K")
-    RETRIEVAL_CONTEXT_MAX_CHARS: int = int(
-        os.getenv("RETRIEVAL_CONTEXT_MAX_CHARS", "48000")
-    )
-    RETRIEVAL_RELEVANCE_FILTER: bool = _env_bool("RETRIEVAL_RELEVANCE_FILTER", "true")
-    # Upper bound on completion tokens for chat/completions (vLLM API field; not input clipping).
-    LLM_COMPLETION_MAX_TOKENS: int = int(os.getenv("LLM_COMPLETION_MAX_TOKENS", "2048"))
-    CONSOLIDATION_MAX_TOKENS: int = int(os.getenv("CONSOLIDATION_MAX_TOKENS", "3072"))
-    INGESTION_SUMMARY_MAX_TOKENS: int = int(
-        os.getenv("INGESTION_SUMMARY_MAX_TOKENS", "512")
-    )
-    CHAT_COMPLETION_MAX_TOKENS: int = int(
-        os.getenv("CHAT_COMPLETION_MAX_TOKENS", "1024")
-    )
-    CONVERSATION_INCLUDE_EVENT_QUEUE: bool = _env_bool(
-        "CONVERSATION_INCLUDE_EVENT_QUEUE", "false"
-    )
-    # vLLM --max-model-len (Colab default 12288); drives passage/traversal saturation.
+    # Token / context budgets (passage packing + agent calls)
     LLM_MODEL_MAX_LEN: int = int(os.getenv("LLM_MODEL_MAX_LEN", "12288"))
     LLM_COMPLETION_RESERVE_TOKENS: int = int(
         os.getenv("LLM_COMPLETION_RESERVE_TOKENS", "2048")
@@ -102,7 +56,6 @@ class Settings:
     LLM_PROMPT_OVERHEAD_TOKENS: int = int(
         os.getenv("LLM_PROMPT_OVERHEAD_TOKENS", "4000")
     )
-    # PDF/markdown token density (3.0 ≈ middle ground; LEV overflow was ~4 chars/token).
     LLM_PASSAGE_CHARS_PER_TOKEN: float = float(
         os.getenv("LLM_PASSAGE_CHARS_PER_TOKEN", "3.0")
     )
@@ -116,19 +69,23 @@ class Settings:
     INGEST_PASSAGE_TARGET_MIN_CHARS: int = int(
         os.getenv("INGEST_PASSAGE_TARGET_MIN_CHARS", "3000")
     )
-    TRAVERSAL_INPUT_MAX_CHARS: int = int(os.getenv("TRAVERSAL_INPUT_MAX_CHARS", "9000"))
-    GENESIS_TRAVERSAL_MAX_CHARS: int = int(
-        os.getenv("GENESIS_TRAVERSAL_MAX_CHARS", "1500")
+    LLM_COMPLETION_MAX_TOKENS: int = int(os.getenv("LLM_COMPLETION_MAX_TOKENS", "2048"))
+    CONSOLIDATION_MAX_TOKENS: int = int(os.getenv("CONSOLIDATION_MAX_TOKENS", "3072"))
+    CHAT_COMPLETION_MAX_TOKENS: int = int(
+        os.getenv("CHAT_COMPLETION_MAX_TOKENS", "1024")
     )
+    INGEST_EXTRACTION_CONCURRENCY: int = int(
+        os.getenv("INGEST_EXTRACTION_CONCURRENCY", "4")
+    )
+
+    # Graph traversal (RetrievalWorker BFS)
+    MAX_TRAVERSAL_DEPTH: int = int(os.getenv("MAX_TRAVERSAL_DEPTH", "5"))
+    RETRIEVAL_TRAVERSAL_TOP_K: int = int(os.getenv("RETRIEVAL_TRAVERSAL_TOP_K", "3"))
+    DEGREE_THRESHOLD: int = int(os.getenv("DEGREE_THRESHOLD", "7"))
 
     HTTPX_MAX_CONNECTIONS: int = int(os.getenv("HTTPX_MAX_CONNECTIONS", "20"))
     HTTPX_MAX_KEEPALIVE: int = int(os.getenv("HTTPX_MAX_KEEPALIVE", "10"))
 
-    REORG_PARTITION_ENABLE_REASONING: bool = _env_bool(
-        "REORG_PARTITION_ENABLE_REASONING", "false"
-    )
-
-    LORA_ADAPTER_ID: str = os.getenv("LORA_ADAPTER_ID", "decision-lora")
     CHECKPOINTS_DIR: str = os.getenv(
         "CHECKPOINTS_DIR",
         str(BACKEND_DIR / "data" / "checkpoints"),
@@ -137,13 +94,6 @@ class Settings:
         "DECISION_TRAINING_DIR",
         str(BACKEND_DIR / "data" / "decision_training"),
     )
-
-    @property
-    def ingest_traversal_max_depth(self) -> int:
-        """Ingest traversal depth when INGEST_TRAVERSAL_MAX_DEPTH env is unset (default 3)."""
-        if self.INGEST_TRAVERSAL_MAX_DEPTH is not None:
-            return self.INGEST_TRAVERSAL_MAX_DEPTH
-        return 3
 
 
 settings = Settings()

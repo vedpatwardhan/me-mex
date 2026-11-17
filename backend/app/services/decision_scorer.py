@@ -63,10 +63,17 @@ class HttpDecisionScorer:
         return probs
 
 
-_default_scorer: DecisionScorerProtocol = MockDecisionScorer()
+_scorer_override: DecisionScorerProtocol | None = None
 
 
-def get_decision_scorer(live: bool = False) -> DecisionScorerProtocol:
-    if live:
+def set_decision_scorer_override(scorer: DecisionScorerProtocol | None) -> None:
+    global _scorer_override
+    _scorer_override = scorer
+
+
+def get_decision_scorer() -> DecisionScorerProtocol:
+    if _scorer_override is not None:
+        return _scorer_override
+    if settings.DECISION_SCORER_MODE == "live":
         return HttpDecisionScorer()
-    return _default_scorer
+    return MockDecisionScorer()

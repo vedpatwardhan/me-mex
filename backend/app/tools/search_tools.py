@@ -7,7 +7,9 @@ import trafilatura
 from duckduckgo_search import DDGS
 
 
-from app.services.logger import logger
+import logging
+
+_logger = logging.getLogger(__name__)
 
 
 class SearchTools:
@@ -16,7 +18,7 @@ class SearchTools:
     @staticmethod
     def search_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """Search DuckDuckGo for live web results, snippets, and page URLs."""
-        logger.info(
+        _logger.info(
             f"🔍 [bold blue]SearchTools[/bold blue] Querying DuckDuckGo Web Search for: '[cyan]{query}[/cyan]'"
         )
         try:
@@ -32,7 +34,7 @@ class SearchTools:
                     )
             return results
         except Exception as e:
-            logger.warning(
+            _logger.warning(
                 f"[SearchTools] DuckDuckGo search failed: {e}. Returning fallback result."
             )
             return [
@@ -46,7 +48,7 @@ class SearchTools:
     @staticmethod
     def search_arxiv(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
         """Search ArXiv API for relevant paper metadata and abstracts."""
-        logger.info(
+        _logger.info(
             f"📚 [bold blue]SearchTools[/bold blue] Querying ArXiv for: '[cyan]{query}[/cyan]'"
         )
         try:
@@ -69,9 +71,7 @@ class SearchTools:
                 )
             return results
         except Exception as e:
-            logger.error_box(
-                "SearchTools ArXiv Query Failed", f"Query: '{query}'\nError: {e}"
-            )
+            _logger.error("ArXiv search failed query=%r: %s", query, e)
             raise RuntimeError(f"ArXiv search query failed for '{query}': {e}") from e
 
     @staticmethod
@@ -129,7 +129,7 @@ class SearchTools:
                             title = res.title.replace("\n", " ").strip()
                             break
                 except Exception as arxiv_err:
-                    logger.warning(
+                    _logger.warning(
                         f"[SearchTools] ArXiv paper title lookup error: {arxiv_err}"
                     )
 
@@ -184,7 +184,7 @@ class SearchTools:
                 "char_count": len(markdown_output),
             }
         except Exception as e:
-            logger.warning(f"[SearchTools] PDF extraction failed for {url}: {e}")
+            _logger.warning(f"[SearchTools] PDF extraction failed for {url}: {e}")
             return {
                 "url": url,
                 "content": "",
@@ -210,7 +210,7 @@ class SearchTools:
                         if meta and meta.title and meta.title.strip():
                             extracted = f"# {meta.title.strip()}\n\n{extracted.strip()}"
                     except Exception as meta_err:
-                        logger.warning(
+                        _logger.warning(
                             f"[SearchTools] HTML metadata title extraction failed: {meta_err}"
                         )
 
@@ -224,7 +224,7 @@ class SearchTools:
                     "char_count": len(extracted),
                 }
 
-            logger.warning(
+            _logger.warning(
                 f"[SearchTools] Document extraction failed: No text extracted from HTML at {url}"
             )
             return {
@@ -235,7 +235,7 @@ class SearchTools:
                 "error": f"Failed to extract article content from {url}",
             }
         except Exception as e:
-            logger.warning(f"[SearchTools] HTML extraction exception for {url}: {e}")
+            _logger.warning(f"[SearchTools] HTML extraction exception for {url}: {e}")
             return {
                 "url": url,
                 "content": "",
@@ -282,7 +282,7 @@ class SearchTools:
                     content_bytes = file_path.read_bytes()
                     return SearchTools._extract_pdf_content(content_bytes, url_repr)
             except Exception as magic_err:
-                logger.debug(
+                _logger.debug(
                     f"[SearchTools] Magic byte check failed for {file_path}: {magic_err}"
                 )
 
@@ -324,7 +324,7 @@ class SearchTools:
             }
 
         except Exception as e:
-            logger.warning(
+            _logger.warning(
                 f"[SearchTools] Local file extraction failed for {target_url}: {e}"
             )
             return {
@@ -386,7 +386,7 @@ class SearchTools:
                 return SearchTools._extract_html_content(resp.text, url)
 
         except Exception as e:
-            logger.warning(
+            _logger.warning(
                 f"[SearchTools] Document extraction exception for {url}: {e}"
             )
             return {
@@ -423,7 +423,9 @@ class SearchTools:
             filepath.write_text(header + markdown_content, encoding="utf-8")
             return str(filepath)
         except Exception as e:
-            logger.warning(f"[SearchTools] Warning: Failed to save debug markdown: {e}")
+            _logger.warning(
+                f"[SearchTools] Warning: Failed to save debug markdown: {e}"
+            )
             return ""
 
 
