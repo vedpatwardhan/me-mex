@@ -223,11 +223,12 @@ def _live_intradoc() -> Runnable:
 
 def _stub_supervisor() -> Runnable:
     def _run(inp: dict) -> WorkerName:
-        project = Project(
-            _id="p",
-            name="p",
-            introduction=inp.get("project_scope") or "",
-        )
+        intro = inp.get("introduction")
+        if intro is None:
+            intro = inp.get("project_scope") or ""
+            if intro == "(empty)":
+                intro = ""
+        project = Project(_id="p", name="p", introduction=intro)
         return keyword_route(inp["text"], inp.get("context") or {}, project)
 
     return RunnableLambda(_run)

@@ -14,13 +14,14 @@ from app.tools import fetch as fetch_tool
 
 
 def route_intent(text: str, context: dict, project: Any) -> str:
-    scope = (project.introduction or "").strip() or "(empty)"
+    intro = (project.introduction or "").strip()
     payload = json.dumps({"text": text, "context": context}, ensure_ascii=False)
     result = get_chains().supervisor.invoke(
         {
             "text": text,
             "context": context,
-            "project_scope": scope,
+            "project_scope": intro if intro else "(empty)",
+            "introduction": intro,
             "payload": payload,
         }
     )
