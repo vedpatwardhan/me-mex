@@ -1,14 +1,13 @@
 from pathlib import Path
 
 import pytest
-
 from app.bootstrap.alignment import (
     build_alignment_report,
+    build_root_indexes,
     is_excluded_top_section,
     parse_deeper_read_roots,
     parse_overall_insights,
     resolve_cite_token,
-    build_root_indexes,
 )
 from app.bootstrap.decision_prompt import (
     build_decision_prompt,
@@ -23,7 +22,7 @@ def test_excluded_overall_insights_sections(tmp_path: Path):
         "## VLAs\n\n1. Keep (ERA).\n\n## General Notes\n\n1. Skip (ERA).\n",
         encoding="utf-8",
     )
-    sections, insights = parse_overall_insights(p)
+    _sections, insights = parse_overall_insights(p)
     assert len(insights) == 1
     assert is_excluded_top_section("General Notes")
     assert is_excluded_top_section("Podcast")
@@ -40,10 +39,9 @@ def test_cite_with_comma_in_title_not_split(tmp_path: Path):
         "## VLAs\n\n1. Note (Partition the Support, Reconstruct the Residual).\n",
         encoding="utf-8",
     )
-    report, roots, *_ = build_alignment_report(docs)
+    report, _roots, *_ = build_alignment_report(docs)
     assert any(
-        l["cite_token"] == "Partition the Support, Reconstruct the Residual"
-        for l in report.matched
+        l["cite_token"] == "Partition the Support, Reconstruct the Residual" for l in report.matched
     )
     assert "Partition the Support" not in [u["cite_token"] for u in report.unmatched]
 

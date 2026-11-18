@@ -1,7 +1,7 @@
+from app.api.livekit import router as livekit_router
+from app.api.routes import router as api_router
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from app.api.routes import router as api_router
 
 app = FastAPI(title="Me-Mex Backend", version="0.2.0")
 
@@ -14,6 +14,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+app.include_router(livekit_router)
 
 
 @app.get("/")

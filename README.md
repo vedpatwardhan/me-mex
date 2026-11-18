@@ -12,7 +12,7 @@ The monolithic v1 stack (orchestrator ingest, `/api/chat`) is preserved only on 
 |--------------------|---------------|
 | Workflow-driven writes + explicit approve | URL → auto ingest + link + reorg |
 | Deterministic tools + LangGraph workers | v1 `ExecutiveOrchestrator` |
-| Headless REST + pytest (`/api/*`) | LiveKit dock UI (Phase 2+) |
+| Headless REST + pytest (`/api/*`) | Phase 2 voice shell (LiveKit + dock) — see below |
 | Agents call `get_chains().invoke` / `get_decision_scorer()` (mock in CI) | **Colab four-model stack** for prod routing (`pytest -m vllm` gateway smoke) |
 
 Canon: **[`docs/`](./docs/)** — [docs/README.md](./docs/README.md), [docs/09-phasing.md](./docs/09-phasing.md), [docs/11-testing.md](./docs/11-testing.md).
@@ -76,9 +76,75 @@ me-mex/
       bootstrap/        # notes → JSONL
       services/         # llm_gateway, decision_scorer, checkpoints, …
     tests/              # unit, integration, e2e
-  frontend/             # legacy UI until Phase 2
+  frontend/             # voice rail + recommendations dock + canvas
+  agent/                # LiveKit worker (Phase 2)
   colab/                # gateway, vLLM, speech, training scripts
 ```
+
+---
+
+## Phase 2 runtime topology
+
+WebRTC stays **local**; model weights stay on **Colab** (same `trycloudflare` host as Phase 1).
+
+```mermaid
+flowchart TB
+  subgraph local [Local_Mac]
+    UI[React_v2_UI]
+    LK[LiveKit_server]
+    WK[agent_worker]
+    API[FastAPI_backend]
+    MG[(MongoDB)]
+    CP[checkpoints_JSON]
+    UI <-->|audio_data| LK
+    WK <-->|room| LK
+    UI -->|REST_graph| API
+    WK -->|astream_events| LangGraph
+    LangGraph[LangGraph_root_graph] --> Workers
+    Workers --> Tools[deterministic_tools]
+    Tools --> MG
+    LangGraph --> CP
+    API --> MG
+  end
+  subgraph colab [Colab_VM]
+    CF[cloudflared]
+    GW[inference_gateway_7860]
+    CF --> GW
+    GW --> VLLM[vLLM_8000_GPU]
+    GW --> RERANK[BGE_CPU]
+    GW --> SP[speech_sidecar_7861]
+  end
+  WK -->|HTTPS| CF
+  API -->|optional_REST_turns| CF
+```
+
+| Env | Example |
+|-----|---------|
+| `COLAB_VLLM_URL` | `https://YOUR_HOST.trycloudflare.com/v1` |
+| `COLAB_SPEECH_BASE_URL` | `https://YOUR_HOST.trycloudflare.com` (no `/v1`) |
+
+---
+
+## Local dev stack (Phase 2)
+
+1. **MongoDB** — `mongodb://localhost:27017` (dev `me-mex`, tests `test-me-mex` or per-xdist `test-me-mex-gw0`).
+2. **Colab** — [colab/RUNBOOK.md](./colab/RUNBOOK.md) tmux stack (vLLM + gateway + speech + tunnel).
+3. **Backend** — `uv run uvicorn main:app --app-dir backend --reload --port 8000`
+4. **LiveKit server (Docker, local SFU):**
+
+```bash
+docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
+  -e LIVEKIT_KEYS="devkey: secret" \
+  livekit/livekit-server --dev
+```
+
+Set in gitignored `backend/.env`: `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_API_KEY=devkey`, `LIVEKIT_API_SECRET=secret`, plus Colab URLs.
+
+5. **Agent worker** — `cd agent && uv sync && uv run python -m me_mex_agent.worker` (requires `uv sync --group phase2` at repo root for `livekit`).
+
+6. **Frontend** — `cd frontend && npm install && npm run dev` (`VITE_API_BASE_URL=http://127.0.0.1:8000`).
+
+**Verify:** `curl http://localhost:8000/api/livekit/token -X POST -H 'Content-Type: application/json' -d '{"room":"me-mex","identity":"dev"}'`
 
 ---
 

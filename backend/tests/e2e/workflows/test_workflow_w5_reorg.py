@@ -1,5 +1,4 @@
-from app.db import ToolContext
-from app.models import NodeKind, Edge, Node, new_id
+from app.models import Edge, Node, NodeKind, new_id
 
 
 def _crowded_hub(store, project_id: str) -> str:
@@ -25,9 +24,7 @@ def _crowded_hub(store, project_id: str) -> str:
             )
         )
         store.add_edge(
-            Edge(
-                _id=new_id("e"), source_id=hub_id, target_id=nid, project_id=project_id
-            )
+            Edge(_id=new_id("e"), source_id=hub_id, target_id=nid, project_id=project_id)
         )
     return hub_id
 

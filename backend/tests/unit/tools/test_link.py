@@ -1,7 +1,6 @@
 import pytest
-
 from app.db import ToolContext
-from app.models import NodeKind, Edge, Node, new_id
+from app.models import Node, NodeKind, new_id
 from app.tools import gist, link
 
 
@@ -16,9 +15,7 @@ def test_create_root_insight_edges(store, project):
         project_id=project.id,
     )
     store.upsert_node(hub)
-    out = link.create_root_insight_edges(
-        ctx, root_id=root["root_id"], target_ids=[hub.id]
-    )
+    out = link.create_root_insight_edges(ctx, root_id=root["root_id"], target_ids=[hub.id])
     assert len(out["edge_ids"]) == 1
 
 

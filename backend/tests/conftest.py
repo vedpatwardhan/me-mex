@@ -11,12 +11,15 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 os.environ.setdefault("TESTING", "1")
-os.environ.setdefault("DB_NAME", "test-me-mex")
+_xdist_worker = os.environ.get("PYTEST_XDIST_WORKER")
+if _xdist_worker:
+    os.environ["DB_NAME"] = f"test-me-mex-{_xdist_worker}"
+else:
+    os.environ.setdefault("DB_NAME", "test-me-mex")
 os.environ.setdefault("CHAT_LLM_MODE", "stub")
 os.environ.setdefault("DECISION_SCORER_MODE", "mock")
-from main import app  # noqa: E402
-import app.db.store as store_module  # noqa: E402
-from app.db.store import Store  # noqa: E402
+import app.db.store as store_module
+from app.db.store import Store
 from app.llm.chains import (
     AgentChains,
     get_chains,
@@ -25,6 +28,7 @@ from app.llm.chains import (
 )
 from app.services.decision_scorer import set_decision_scorer_override
 from langchain_core.runnables import RunnableLambda
+from main import app
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 

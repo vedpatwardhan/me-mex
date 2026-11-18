@@ -1,36 +1,63 @@
-"""Minimal LangGraph headless turn (Phase 1)."""
+"""LangGraph agent turn (Phase 1 headless + Phase 2 interactive primitives)."""
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from app.agents import workers
+from app.agents.context_preprocessor import (
+    apply_custom_fields_to_text,
+    block_graph_writes_without_scope,
+)
+from app.agents.jobs import job_from_worker_turn
 from app.db import ToolContext, get_store
 from app.services.checkpoints import JsonCheckpointStore
+
+_checkpointer = MemorySaver()
 
 
 class AgentState(TypedDict, total=False):
     text: str
+    effective_text: str
     context_json: dict
     project_id: str
     thread_id: str
     worker: str
     output: dict
+    jobs: Annotated[list[dict[str, Any]], operator.add]
+    scope_blocked: bool
 
 
-def _supervisor(state: AgentState) -> AgentState:
+def _preprocess(state: AgentState) -> AgentState:
     ctx = ToolContext(
         project_id=state["project_id"],
         thread_id=state["thread_id"],
         store=get_store(),
     )
     project = ctx.store.get_project(ctx.project_id)
-    worker = workers.route_intent(
-        state["text"], state.get("context_json") or {}, project
-    )
-    return {**state, "worker": worker}
+    effective = apply_custom_fields_to_text(state["text"], state.get("context_json") or {})
+    worker = workers.route_intent(effective, state.get("context_json") or {}, project)
+    context = state.get("context_json") or {}
+    fields = context.get("custom_fields") or {}
+    scope_blocked = block_graph_writes_without_scope(project.introduction, worker)
+    if fields.get("force_gist_commit") and worker == "gist":
+        scope_blocked = False
+    if scope_blocked:
+        worker = "conversation"
+    return {
+        **state,
+        "effective_text": effective,
+        "worker": worker,
+        "scope_blocked": scope_blocked,
+    }
+
+
+def _supervisor(state: AgentState) -> AgentState:
+    return state
 
 
 def _worker_node(state: AgentState) -> AgentState:
@@ -39,9 +66,16 @@ def _worker_node(state: AgentState) -> AgentState:
         thread_id=state["thread_id"],
         store=get_store(),
     )
-    text = state["text"]
+    text = state.get("effective_text") or state["text"]
     context = state.get("context_json") or {}
     w = state.get("worker", "conversation")
+    if state.get("scope_blocked"):
+        out = {
+            "reply": "Set project scope first (unmute / P1 onboarding) before graph writes.",
+            "graph_write": False,
+        }
+        return {**state, "output": out}
+
     if w == "gist":
         out = workers.gist_worker(ctx, text, context)
     elif w == "intradoc":
@@ -61,17 +95,36 @@ def _worker_node(state: AgentState) -> AgentState:
     return {**state, "output": out}
 
 
-def build_graph():
+def _workflow_observer(state: AgentState) -> AgentState:
+    out = state.get("output") or {}
+    w = state.get("worker", "conversation")
+    job = job_from_worker_turn(w, state.get("text", ""), out)
+    return {**state, "jobs": [job]}
+
+
+def build_graph(*, checkpointer=None):
     g = StateGraph(AgentState)
+    g.add_node("preprocess", _preprocess)
     g.add_node("supervisor", _supervisor)
     g.add_node("worker", _worker_node)
-    g.set_entry_point("supervisor")
+    g.add_node("observer", _workflow_observer)
+    g.set_entry_point("preprocess")
+    g.add_edge("preprocess", "supervisor")
     g.add_edge("supervisor", "worker")
-    g.add_edge("worker", END)
-    return g.compile()
+    g.add_edge("worker", "observer")
+    g.add_edge("observer", END)
+    cp = checkpointer if checkpointer is not None else _checkpointer
+    return g.compile(checkpointer=cp)
 
 
 _compiled = None
+
+
+def get_compiled_graph():
+    global _compiled
+    if _compiled is None:
+        _compiled = build_graph()
+    return _compiled
 
 
 def run_agent_turn(
@@ -83,27 +136,33 @@ def run_agent_turn(
     context_json: dict | None = None,
     checkpointer: JsonCheckpointStore | None = None,
 ) -> dict:
-    global _compiled
-    if _compiled is None:
-        _compiled = build_graph()
+    graph = get_compiled_graph()
     state: AgentState = {
         "text": text,
         "context_json": context_json or {},
         "project_id": project_id,
         "thread_id": thread_id,
+        "jobs": [],
     }
-    result = _compiled.invoke(state)
+    config = {"configurable": {"thread_id": thread_id}}
+    result = graph.invoke(state, config=config)
     out = result.get("output") or {}
+    jobs = result.get("jobs") or []
     if checkpointer:
         checkpointer.save(
             thread_id,
-            {"last_worker": result.get("worker"), "last_output": out},
+            {
+                "last_worker": result.get("worker"),
+                "last_output": out,
+                "jobs": jobs,
+            },
         )
     return {
         "worker": result.get("worker"),
         "reply": out.get("reply", ""),
         "graph_write": out.get("graph_write", False),
         "details": out,
+        "jobs": jobs,
     }
 
 
@@ -116,7 +175,7 @@ def resume_approval(
     action: str,
     context_json: dict | None = None,
 ) -> dict:
-    from app.tools import dock, gist, link, reorg, staging
+    from app.tools import gist, link, reorg, staging
 
     ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
     item = store.resolve_approval(approval_id, action)
@@ -129,18 +188,48 @@ def resume_approval(
         link.create_root_insight_edges(ctx, root_id=root_id, target_ids=targets)
         return {"status": "approved", "edges": targets}
     if item.approval_type == "intra_doc_staging":
-        root_id = (context_json or {}).get("custom_fields", {}).get(
+        root_id = (context_json or {}).get("custom_fields", {}).get("root_id") or payload.get(
             "root_id"
-        ) or payload.get("root_id")
+        )
         staging_key = payload.get("staging_key")
         if not root_id:
             bundle = store.get_staging(staging_key)
             root_id = bundle.root_id
         if not root_id:
             raise ValueError("root_id required to commit staging")
-        return staging.commit_intra_doc_graph(
-            ctx, staging_key=staging_key, root_id=root_id
-        )
+        return staging.commit_intra_doc_graph(ctx, staging_key=staging_key, root_id=root_id)
     if item.approval_type == "reorg":
         return reorg.apply_reorg_plan(ctx, proposal_id=payload["proposal_id"])
+    if item.approval_type == "gist_root":
+        gist.create_or_update_root_gist(
+            ctx,
+            title=payload.get("title", "Untitled"),
+            gist=payload.get("gist", ""),
+        )
+        return {"status": "approved", "approval_id": approval_id}
     return {"status": "approved", "approval_id": approval_id}
+
+
+async def astream_agent_turn(
+    *,
+    project_id: str,
+    thread_id: str,
+    text: str,
+    context_json: dict | None = None,
+):
+    """Yield dock SSE payloads from astream_events v3."""
+    from app.agents.streaming import event_to_dock_payload
+
+    graph = get_compiled_graph()
+    state: AgentState = {
+        "text": text,
+        "context_json": context_json or {},
+        "project_id": project_id,
+        "thread_id": thread_id,
+        "jobs": [],
+    }
+    config = {"configurable": {"thread_id": thread_id}}
+    async for ev in graph.astream_events(state, config=config, version="v3"):
+        payload = event_to_dock_payload(ev)
+        if payload:
+            yield payload

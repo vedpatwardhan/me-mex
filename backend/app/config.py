@@ -35,11 +35,14 @@ class Settings:
     def DB_NAME(self) -> str:
         return os.getenv("DB_NAME", "me-mex")
 
-    # Remote inference (Colab vLLM)
+    # Remote inference (Colab vLLM + speech on same tunnel host)
     COLAB_VLLM_URL: str = os.getenv("COLAB_VLLM_URL", "http://localhost:8000/v1")
-    LLM_MODEL_NAME: str = os.getenv(
-        "LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512"
-    )
+    COLAB_SPEECH_BASE_URL: str = os.getenv("COLAB_SPEECH_BASE_URL", "")
+    # Local LiveKit (Phase 2 voice)
+    LIVEKIT_URL: str = os.getenv("LIVEKIT_URL", "ws://localhost:7880")
+    LIVEKIT_API_KEY: str = os.getenv("LIVEKIT_API_KEY", "devkey")
+    LIVEKIT_API_SECRET: str = os.getenv("LIVEKIT_API_SECRET", "secret")
+    LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512")
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "180.0"))
     # stub | live — chat completions from worker agents
     CHAT_LLM_MODE: str = os.getenv("CHAT_LLM_MODE", "stub").lower()
@@ -48,33 +51,19 @@ class Settings:
 
     # Token / context budgets (passage packing + agent calls)
     LLM_MODEL_MAX_LEN: int = int(os.getenv("LLM_MODEL_MAX_LEN", "12288"))
-    LLM_COMPLETION_RESERVE_TOKENS: int = int(
-        os.getenv("LLM_COMPLETION_RESERVE_TOKENS", "2048")
-    )
-    LLM_PROMPT_OVERHEAD_TOKENS: int = int(
-        os.getenv("LLM_PROMPT_OVERHEAD_TOKENS", "4000")
-    )
-    LLM_PASSAGE_CHARS_PER_TOKEN: float = float(
-        os.getenv("LLM_PASSAGE_CHARS_PER_TOKEN", "3.0")
-    )
-    LLM_PASSAGE_SAFETY_FACTOR: float = float(
-        os.getenv("LLM_PASSAGE_SAFETY_FACTOR", "0.86")
-    )
+    LLM_COMPLETION_RESERVE_TOKENS: int = int(os.getenv("LLM_COMPLETION_RESERVE_TOKENS", "2048"))
+    LLM_PROMPT_OVERHEAD_TOKENS: int = int(os.getenv("LLM_PROMPT_OVERHEAD_TOKENS", "4000"))
+    LLM_PASSAGE_CHARS_PER_TOKEN: float = float(os.getenv("LLM_PASSAGE_CHARS_PER_TOKEN", "3.0"))
+    LLM_PASSAGE_SAFETY_FACTOR: float = float(os.getenv("LLM_PASSAGE_SAFETY_FACTOR", "0.86"))
     INGEST_EXTRACTION_SUMMARY_MAX_CHARS: int = int(
         os.getenv("INGEST_EXTRACTION_SUMMARY_MAX_CHARS", "2400")
     )
     INGEST_PASSAGE_MAX_CHARS: int | None = _optional_int("INGEST_PASSAGE_MAX_CHARS")
-    INGEST_PASSAGE_TARGET_MIN_CHARS: int = int(
-        os.getenv("INGEST_PASSAGE_TARGET_MIN_CHARS", "3000")
-    )
+    INGEST_PASSAGE_TARGET_MIN_CHARS: int = int(os.getenv("INGEST_PASSAGE_TARGET_MIN_CHARS", "3000"))
     LLM_COMPLETION_MAX_TOKENS: int = int(os.getenv("LLM_COMPLETION_MAX_TOKENS", "2048"))
     CONSOLIDATION_MAX_TOKENS: int = int(os.getenv("CONSOLIDATION_MAX_TOKENS", "3072"))
-    CHAT_COMPLETION_MAX_TOKENS: int = int(
-        os.getenv("CHAT_COMPLETION_MAX_TOKENS", "1024")
-    )
-    INGEST_EXTRACTION_CONCURRENCY: int = int(
-        os.getenv("INGEST_EXTRACTION_CONCURRENCY", "4")
-    )
+    CHAT_COMPLETION_MAX_TOKENS: int = int(os.getenv("CHAT_COMPLETION_MAX_TOKENS", "1024"))
+    INGEST_EXTRACTION_CONCURRENCY: int = int(os.getenv("INGEST_EXTRACTION_CONCURRENCY", "4"))
 
     # Graph traversal (RetrievalWorker BFS)
     MAX_TRAVERSAL_DEPTH: int = int(os.getenv("MAX_TRAVERSAL_DEPTH", "5"))

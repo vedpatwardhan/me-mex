@@ -1,0 +1,32 @@
+"""Deterministic turn preprocessing: custom_fields override STT text conflicts."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def apply_custom_fields_to_text(text: str, context_json: dict[str, Any] | None) -> str:
+    """Append authoritative custom field values when present (02 §3)."""
+    if not context_json:
+        return text
+    fields = context_json.get("custom_fields") or {}
+    if not isinstance(fields, dict) or not fields:
+        return text
+    parts = [text.strip()] if text and text.strip() else []
+    for key, value in fields.items():
+        if value is None or value == "":
+            continue
+        parts.append(f"{key}={value}")
+    return "\n".join(parts)
+
+
+def project_scope_complete(introduction: str | None) -> bool:
+    return bool((introduction or "").strip())
+
+
+def block_graph_writes_without_scope(introduction: str | None, worker: str) -> bool:
+    """True when write workers must be blocked until P1 scope saved (04 §7)."""
+    write_workers = {"gist", "intradoc", "link", "reorg"}
+    if worker not in write_workers:
+        return False
+    return not project_scope_complete(introduction)

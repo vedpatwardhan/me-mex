@@ -16,7 +16,5 @@ def test_staging_commit(store, project):
         ctx, staging_key=key["staging_key"], root_id=root["root_id"]
     )
     assert len(out["concept_ids"]) == 1
-    children = [
-        n for n in store.list_nodes(project.id) if n.node_kind == NodeKind.CONCEPT_I
-    ]
+    children = [n for n in store.list_nodes(project.id) if n.node_kind == NodeKind.CONCEPT_I]
     assert len(children) == 1

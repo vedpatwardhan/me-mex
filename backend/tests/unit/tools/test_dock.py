@@ -4,18 +4,14 @@ from app.tools import dock
 
 def test_enqueue_and_list_order(store, project):
     ctx = ToolContext(project_id=project.id, thread_id="d1", store=store)
-    a1 = dock.enqueue_pending_approval(
-        ctx, approval_type="placement", title="A", payload={"x": 1}
-    )
-    a2 = dock.enqueue_pending_approval(
-        ctx, approval_type="reorg", title="B", payload={"y": 2}
-    )
+    a1 = dock.enqueue_pending_approval(ctx, approval_type="placement", title="A", payload={"x": 1})
+    a2 = dock.enqueue_pending_approval(ctx, approval_type="reorg", title="B", payload={"y": 2})
     items = dock.list_pending_approvals(ctx)["items"]
     assert [i["id"] for i in items] == [a1, a2]
 
 
 def test_suggested_actions_crowded(store, project):
-    from app.models import NodeKind, Edge, Node, new_id
+    from app.models import Edge, Node, NodeKind, new_id
 
     ctx = ToolContext(project_id=project.id, thread_id="d1", store=store)
     hub = Node(

@@ -366,6 +366,20 @@ curl -sS -X POST "https://YOUR_SUBDOMAIN.trycloudflare.com/v1/decision/score" \
 
 Expect `relevance_probs` with keys `a` and `b`, probabilities summing ≈ 1.
 
+### Speech (Phase 2) — STT / TTS via same tunnel host
+
+`COLAB_SPEECH_BASE_URL=https://YOUR_SUBDOMAIN.trycloudflare.com` (no `/v1`).
+
+```bash
+# TTS smoke
+curl -sS -X POST "https://YOUR_SUBDOMAIN.trycloudflare.com/tts/synthesize" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Me-Mex speech smoke test.","voice":"af"}' \
+  -o /tmp/me-mex-tts.wav && file /tmp/me-mex-tts.wav
+```
+
+STT: `POST …/stt/transcribe` with multipart field `audio` (short `.wav`).
+
 ### Backend (Mac)
 
 ```bash

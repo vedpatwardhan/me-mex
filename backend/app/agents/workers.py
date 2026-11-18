@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.db import ToolContext, Store
 from app.config import settings
+from app.db import Store, ToolContext
 from app.llm import get_chains
 from app.services.decision_scorer import ScorerNode, get_decision_scorer
 from app.tools import dock, gist, link, project, reorg, staging
@@ -39,9 +39,7 @@ def route_intent(text: str, context: dict, project: Any) -> str:
     return result if isinstance(result, str) else result.worker
 
 
-def conversation_worker(
-    ctx: ToolContext, text: str, *, gist_draft: str | None = None
-) -> dict:
+def conversation_worker(ctx: ToolContext, text: str, *, gist_draft: str | None = None) -> dict:
     if gist_draft:
         return {"reply": gist_draft, "graph_write": False}
     proj = ctx.store.get_project(ctx.project_id)
@@ -62,9 +60,7 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
         if uri and out.get("root_id"):
             gist.attach_source_uri(ctx, root_id=out["root_id"], uri=str(uri))
         return {"reply": "ROOT gist saved.", "result": out, "graph_write": True}
-    draft = get_chains().gist_draft.invoke(
-        {"text": text, "project_scope": proj.introduction or ""}
-    )
+    draft = get_chains().gist_draft.invoke({"text": text, "project_scope": proj.introduction or ""})
     return conversation_worker(ctx, text, gist_draft=draft)
 
 
@@ -172,9 +168,7 @@ def reorg_recommend_worker(ctx: ToolContext) -> dict:
         proposal={
             "before": {"hub_id": hub.id},
             "after": {"split": True},
-            "moves": [
-                {"node_id": nid, "parent_id": hub.id, "score": s} for nid, s in ranked
-            ],
+            "moves": [{"node_id": nid, "parent_id": hub.id, "score": s} for nid, s in ranked],
             "scores": ranked,
         },
     )
@@ -194,9 +188,7 @@ def reorg_recommend_worker(ctx: ToolContext) -> dict:
 
 def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     fields = context.get("custom_fields") or {}
-    seed = (
-        fields.get("query_node_id") or (context.get("selected_node_ids") or [None])[0]
-    )
+    seed = fields.get("query_node_id") or (context.get("selected_node_ids") or [None])[0]
     if not seed:
         proj_seed = ctx.store.get_project(ctx.project_id)
         seed = proj_seed.genesis_node_id or None

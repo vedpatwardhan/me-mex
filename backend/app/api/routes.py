@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
-from app.agents.graph import resume_approval, run_agent_turn
+from app.agents.graph import astream_agent_turn, resume_approval, run_agent_turn
 from app.db import ToolContext, get_store
 from app.models import AgentResumeRequest, AgentTurnRequest
 from app.services.checkpoints import JsonCheckpointStore
@@ -50,12 +51,30 @@ def get_project(project_id: str):
     return p.model_dump(by_alias=True)
 
 
+@router.post("/agent/turn/stream")
+async def agent_turn_stream(body: AgentTurnRequest):
+    project_id = body.context_json.get("active_project_id") or body.context_json.get("project_id")
+    if not project_id:
+        raise HTTPException(400, "active_project_id required in context_json")
+
+    async def gen():
+        async for chunk in astream_agent_turn(
+            project_id=project_id,
+            thread_id=body.thread_id,
+            text=body.text,
+            context_json=body.context_json,
+        ):
+            import json
+
+            yield f"data: {json.dumps(chunk)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 @router.post("/agent/turn")
 def agent_turn(body: AgentTurnRequest):
     store = get_store()
-    project_id = body.context_json.get("active_project_id") or body.context_json.get(
-        "project_id"
-    )
+    project_id = body.context_json.get("active_project_id") or body.context_json.get("project_id")
     if not project_id:
         raise HTTPException(400, "active_project_id required in context_json")
     return run_agent_turn(
@@ -71,9 +90,7 @@ def agent_turn(body: AgentTurnRequest):
 @router.post("/agent/resume")
 def agent_resume(body: AgentResumeRequest):
     store = get_store()
-    project_id = body.context_json.get("active_project_id") or body.context_json.get(
-        "project_id"
-    )
+    project_id = body.context_json.get("active_project_id") or body.context_json.get("project_id")
     if not project_id:
         raise HTTPException(400, "active_project_id required")
     try:

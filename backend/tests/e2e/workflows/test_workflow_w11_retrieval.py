@@ -1,6 +1,4 @@
-from app.db import ToolContext
-from app.models import NodeKind, Edge, Node, new_id
-from app.tools import gist
+from app.models import Edge, Node, NodeKind, new_id
 
 
 def test_w11_retrieval_highlight(client, store, project_scoped):
@@ -21,9 +19,7 @@ def test_w11_retrieval_highlight(client, store, project_scoped):
         project_id=pid,
     )
     store.upsert_node(leaf)
-    store.add_edge(
-        Edge(_id=new_id("e"), source_id=seed.id, target_id=leaf.id, project_id=pid)
-    )
+    store.add_edge(Edge(_id=new_id("e"), source_id=seed.id, target_id=leaf.id, project_id=pid))
     r = client.post(
         "/api/agent/turn",
         json={
