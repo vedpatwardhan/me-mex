@@ -25,14 +25,14 @@ Your task:
    - Aggregate all originating `passage_indices` (integers) for each canonical concept.
 
 Return JSON format:
-{
+{{
   "doc_description": "Multi-sentence executive summary with enough detail to orient retrieval.",
   "doc_type": "paper",
   "concepts": [
-    {
+    {{
       "title": "Canonical Concept Title",
       "description": "Two to four sentences capturing merged technical content from all passages in this group.",
       "passage_indices": [1, 4]
-    }
+    }}
   ]
-}
+}}

@@ -11,7 +11,7 @@ Choose exactly one worker for the user's message. Workers:
 - project_scope — onboarding when project introduction is empty; scope Q&A
 
 Return JSON:
-{"worker": "conversation" | "gist" | "intradoc" | "link" | "reorg" | "retrieval" | "scratch" | "project_scope"}
+{{"worker": "conversation" | "gist" | "intradoc" | "link" | "reorg" | "retrieval" | "scratch" | "project_scope"}}
 
 Project scope text (may be empty):
 {{ project_scope }}

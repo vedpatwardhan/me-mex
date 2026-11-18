@@ -10,8 +10,8 @@ Your job is to thoroughly analyze the provided text alongside the user's intent 
 - In 'title' and 'description' fields, use single quotes ('...') or backticks (`...`) for internal terms, equations, or quotes; NEVER use unescaped double quotes inside JSON string values.
 
 Return JSON format:
-{
+{{
   "concepts": [
-    {"idx": 0, "title": "Specific Concept Title", "description": "Concise atomic markdown summary of the concept"}
+    {{"idx": 0, "title": "Specific Concept Title", "description": "Concise atomic markdown summary of the concept"}}
   ]
-}
+}}

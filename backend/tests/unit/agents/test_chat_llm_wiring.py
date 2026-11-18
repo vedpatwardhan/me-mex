@@ -1,6 +1,28 @@
 from app.agents.workers import route_intent
 from app.llm import get_chains
 from app.models import Project
+from app.prompts import _read_raw_prompt, load_prompt
+from langchain_core.prompts import ChatPromptTemplate
+
+
+def test_intradoc_prompt_json_examples_compatible_with_chat_template():
+    """JSON schema blocks use literal braces; LangChain f-string templates require doubling."""
+    _read_raw_prompt.cache_clear()
+    for name, human, kwargs in (
+        ("passage_concept_extraction", "{chunk_payload}", {"doc_title": "{doc_title}"}),
+        ("consolidate_concepts", "{reduce_payload}", {"doc_title": "{doc_title}"}),
+        (
+            "worker_route",
+            "{payload}",
+            {"project_scope": "{project_scope}"},
+        ),
+    ):
+        ChatPromptTemplate.from_messages(
+            [
+                ("system", load_prompt(name, **kwargs)),
+                ("human", human),
+            ]
+        )
 
 
 def test_route_uses_langchain_supervisor():
