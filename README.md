@@ -33,6 +33,7 @@ Canon: **[`docs/`](./docs/)** — [docs/README.md](./docs/README.md), [docs/09-p
 ```bash
 cd me-mex
 uv sync
+./scripts/install-git-hooks.sh   # optional: ruff format/check on every commit
 ```
 
 `backend/.env` (see `backend/.env.example`):
