@@ -50,9 +50,7 @@ def node_model_to_scorer_dict(node: Node) -> dict[str, Any]:
     )
 
 
-def logits_to_relevance_probs(
-    ids: list[str], logits: list[float]
-) -> dict[str, float]:
+def logits_to_relevance_probs(ids: list[str], logits: list[float]) -> dict[str, float]:
     """Softmax over frontier ids (mirrors gateway)."""
     if not ids:
         return {}

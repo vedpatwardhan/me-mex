@@ -15,7 +15,5 @@ def test_single_candidate():
 
 
 def test_numerical_stability_large_logits():
-    probs = logits_to_relevance_probs(
-        ["a", "b"], [1000.0, 1000.0 + math.log(2)]
-    )
+    probs = logits_to_relevance_probs(["a", "b"], [1000.0, 1000.0 + math.log(2)])
     assert abs(probs["b"] / probs["a"] - 2.0) < 0.01
