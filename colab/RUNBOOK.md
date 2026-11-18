@@ -160,9 +160,10 @@ mkdir -p logs
 some_long_running_command 2>&1 | tee -a logs/<name>.log
 ```
 
-**Follow logs** from a notebook cell or the tmux `logs` window:
+**Follow logs** from a notebook cell or the tmux `logs` window. Create empty placeholders first so `tail -F` does not error while gateway/tunnel have not started yet (`gateway.log` / `cloudflared.log` appear only after their `sleep` windows):
 
 ```bash
+touch logs/vllm.log logs/gateway.log logs/speech.log logs/cloudflared.log
 tail -F logs/vllm.log logs/gateway.log logs/speech.log logs/cloudflared.log
 ```
 
@@ -206,6 +207,7 @@ SESSION=me-mex-inference
 apt-get update -qq && apt-get install -y -qq tmux
 cd "$COLAB_DIR"
 mkdir -p logs
+touch logs/vllm.log logs/gateway.log logs/speech.log logs/cloudflared.log
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
 # Window: vllm
@@ -266,6 +268,7 @@ Use this if you want to start **gateway** only after `curl -s http://127.0.0.1:8
 ```bash
 apt-get update -qq && apt-get install -y -qq tmux
 cd /content/me-mex/colab && mkdir -p logs
+touch logs/vllm.log logs/gateway.log logs/speech.log logs/cloudflared.log
 tmux new -s me-mex-inference
 ```
 
@@ -275,7 +278,7 @@ Inside tmux:
 2. `Ctrl-b` `c` — new window; `Ctrl-b` `,` → rename to `speech`. Run **§3.2 (2a)** + `2>&1 | tee -a logs/speech.log`.
 3. `Ctrl-b` `c` → rename `gateway`. Run **§3.2 (2b)** + `2>&1 | tee -a logs/gateway.log`.
 4. `Ctrl-b` `c` → rename `tunnel`. Run **§3.2 (3)** + `2>&1 | tee -a logs/cloudflared.log`.
-5. `Ctrl-b` `c` → rename `logs`. Run: `tail -F logs/vllm.log logs/gateway.log logs/speech.log logs/cloudflared.log`.
+5. `Ctrl-b` `c` → rename `logs`. Run §3.3 `touch` + `tail -F` (or `tail -F` only if all four files already exist).
 
 #### 3.4d tmux controls (Colab terminal)
 

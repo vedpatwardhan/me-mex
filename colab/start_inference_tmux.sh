@@ -10,6 +10,7 @@ SESSION="${TMUX_SESSION:-me-mex-inference}"
 VLLM_VARIANT="${1:-reasoning}"
 
 mkdir -p "$LOG_DIR"
+touch "${LOG_DIR}/vllm.log" "${LOG_DIR}/speech.log" "${LOG_DIR}/gateway.log" "${LOG_DIR}/cloudflared.log"
 echo "Logs: ${LOG_DIR}/"
 
 if ! command -v tmux &>/dev/null; then
