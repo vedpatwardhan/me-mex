@@ -3,10 +3,16 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from app.agents.graph import astream_agent_turn, resume_approval, run_agent_turn
+from app.agents.graph import (
+    astream_agent_turn,
+    get_compiled_graph,
+    resume_approval,
+    run_agent_turn,
+)
 from app.db import ToolContext, get_store
 from app.models import AgentResumeRequest, AgentTurnRequest
 from app.services.checkpoints import JsonCheckpointStore
+from app.tools import dock as dock_tools
 from app.tools import reorg as reorg_tools
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -87,6 +93,23 @@ def agent_turn(body: AgentTurnRequest):
     )
 
 
+@router.get("/agent/approvals")
+def list_approvals(
+    project_id: str,
+    thread_id: str | None = None,
+):
+    store = get_store()
+    ctx = ToolContext(project_id=project_id, thread_id=thread_id or "ui", store=store)
+    return dock_tools.list_pending_approvals(ctx)
+
+
+@router.get("/agent/nudges")
+def list_nudges(project_id: str):
+    store = get_store()
+    ctx = ToolContext(project_id=project_id, thread_id="ui", store=store)
+    return dock_tools.get_suggested_next_actions(ctx)
+
+
 @router.post("/agent/resume")
 def agent_resume(body: AgentResumeRequest):
     store = get_store()
@@ -94,6 +117,30 @@ def agent_resume(body: AgentResumeRequest):
     if not project_id:
         raise HTTPException(400, "active_project_id required")
     try:
+        graph = get_compiled_graph()
+        config = {"configurable": {"thread_id": body.thread_id}}
+        snap = graph.get_state(config)
+        if snap.next:
+            from langgraph.types import Command
+
+            result = graph.invoke(
+                Command(
+                    resume={
+                        "action": body.action,
+                        "approval_id": body.approval_id,
+                    }
+                ),
+                config=config,
+            )
+            out = (result or {}).get("output") or {}
+            payload = {
+                "status": out.get("status", "resumed"),
+                "graph_write": out.get("graph_write", False),
+            }
+            for key in ("concept_ids", "edges", "approval_id", "root_id"):
+                if key in out:
+                    payload[key] = out[key]
+            return payload
         return resume_approval(
             store=store,
             project_id=project_id,

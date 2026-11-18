@@ -1,7 +1,5 @@
 import { create } from 'zustand';
 import { AgentThinkingState, ChatMessage, GraphEdge, GraphNode, NodeType, NodeTypeFilter, ProjectWorkspace } from '../types';
-import { voiceService } from '../services/voiceService';
-
 interface MemexState {
   activeProjectId: string;
   nodes: GraphNode[];

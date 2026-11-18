@@ -2,7 +2,7 @@
 
 > **Canon:** [00-vision-and-principles.md](./00-vision-and-principles.md) §8. **Decision usage:** [04-agent-orchestration.md](./04-agent-orchestration.md). **Retrieval analysis:** [../reports/2026-11-18-retrieval-methods.md](../reports/2026-11-18-retrieval-methods.md).
 
-v2 runs **four remote models** on one Colab **inference gateway**—**Ministral 3 8B** (vLLM chat/tools), **cross-encoder reranker** (decision routing), **Whisper-tiny**, **Kokoro**—behind a single HTTPS URL. **LangGraph agents**, LiveKit, MongoDB, and **checkpoint JSON** run **locally**; workers call Colab over HTTP. **No fine-tuning** is required to ship P2–P4 routing; bootstrap JSONL and live traces support **eval** and **optional** reranker fine-tune later.
+v2 runs **four remote models** on one Colab **inference gateway**—**Ministral 3 8B** (vLLM chat/tools), **cross-encoder reranker** (decision routing), **Whisper-tiny**, **edge-tts** (Colab Python 3.13)—behind a single HTTPS URL. **LangGraph agents**, LiveKit, MongoDB, and **checkpoint JSON** run **locally**; workers call Colab over HTTP. **No fine-tuning** is required to ship P2–P4 routing; bootstrap JSONL and live traces support **eval** and **optional** reranker fine-tune later.
 
 **Not shipped:** generative JSON or chat-LLM hops for decision routing; LoRA-on-Ministral decision adapter; untrained logprob-only routing ([09-phasing.md](./09-phasing.md)).
 
@@ -16,7 +16,7 @@ v2 runs **four remote models** on one Colab **inference gateway**—**Ministral 
 | Chat / agents LLM | `mistralai/Ministral-3-8B-Instruct-2512` via **vLLM** (`/v1`) | Required before interactive agents |
 | **Decision routing** | **Off-the-shelf cross-encoder reranker** on gateway (`POST /v1/decision/score`)—e.g. `BAAI/bge-reranker-base` | Same Colab stack as STT/TTS; **CPU**; no generative hop |
 | STT | **Whisper-tiny** (or tiny.en) | Colab speech sidecar (Phase 2 voice) |
-| TTS | **Kokoro** (~82M) | Colab speech sidecar |
+| TTS | **edge-tts** (Colab) | Colab speech sidecar (see `colab/speech_sidecar.py`) |
 | VAD | Silero or LiveKit | — |
 | Voice + agent | **LiveKit** + LangGraph | — |
 
@@ -126,7 +126,7 @@ LiveKit room
   → VAD
   → Whisper-tiny (STT)
   → LangGraph turn (text + context_json)
-  → Kokoro (TTS)
+  → edge-tts (TTS)
 ```
 
 Barge-in cancels **foreground** stream mid-utterance.
@@ -152,7 +152,7 @@ Barge-in cancels **foreground** stream mid-utterance.
   inference_gateway :7860  (public via cloudflared)
     ├── proxy /v1/*  →  vLLM :8000  (Ministral 3 8B, GPU)
     ├── POST /v1/decision/score  →  cross-encoder reranker (CPU)
-    └── proxy STT/TTS  →  speech_sidecar :7861 (Whisper + Kokoro, CPU)
+    └── proxy STT/TTS  →  speech_sidecar :7861 (Whisper + edge-tts, CPU)
 ```
 
 vLLM runs in a **separate process** on the GPU; CPU models do not compete for 8B VRAM.

@@ -468,6 +468,13 @@ Optional thresholds: `data/decision_training/eval_gate.json`.
 
 ---
 
-## 10. Phase 2 voice
+## 10. Phase 2 voice (local + Colab)
+
+| Step | Where |
+|------|--------|
+| STT/TTS weights | Colab `speech_sidecar` + tunnel (`COLAB_INFERENCE_BASE_URL` on Mac) |
+| WebRTC | Local LiveKit Docker `:7880` |
+| Bridge | `agent/me_mex_agent/worker.py` (mic → STT → graph → TTS) |
+| UI | Frontend `VoiceRail` + `RecommendationsDock` |
 
 Same tunnel host as `COLAB_INFERENCE_BASE_URL`. LiveKit stays local. Notebook §10.

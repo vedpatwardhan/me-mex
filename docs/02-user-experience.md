@@ -10,7 +10,7 @@ The UI supports **voice-first research** with a **single knowledge graph** (v1-s
 
 | Area | v2 behavior |
 |------|-------------|
-| Voice | **LiveKit** mute/unmute; Whisper-tiny STT; Kokoro TTS |
+| Voice | **LiveKit** mute/unmute; Colab Whisper-tiny STT; Colab edge-tts |
 | Canvas | **One graph** per project; **color + label** by node kind (gist ROOT, deep ROOT, immutable concepts, mutable knowledge, insight, note, **ToDo**) |
 | Right dock | **Always on** — latest turn + **recommendations** (nudges, **job status**, pending **write** approvals) |
 | Precision | **Custom fields** on voice rail every turn |

@@ -12,6 +12,8 @@ type Props = {
   latestUserText?: string;
   items?: DockItem[];
   projectScope?: string;
+  onApprove?: (id: string) => void;
+  onDismiss?: (id: string) => void;
 };
 
 export const RecommendationsDock: React.FC<Props> = ({
@@ -19,6 +21,8 @@ export const RecommendationsDock: React.FC<Props> = ({
   latestUserText = '',
   items = [],
   projectScope = '',
+  onApprove,
+  onDismiss,
 }) => (
   <aside className="w-80 shrink-0 border-l border-slate-800 bg-[#0c1018] p-3 flex flex-col gap-3 overflow-y-auto">
     <div className="text-xs uppercase tracking-wide text-slate-500">Recommendations dock</div>
@@ -46,6 +50,24 @@ export const RecommendationsDock: React.FC<Props> = ({
             >
               <span className="text-slate-500">{item.className}</span> {item.title}
               {item.detail ? <div className="text-slate-400">{item.detail}</div> : null}
+              {item.className === 'approval' && onApprove && onDismiss ? (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    className="rounded bg-emerald-700 px-2 py-0.5 text-white"
+                    onClick={() => onApprove(item.id)}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded bg-slate-700 px-2 py-0.5"
+                    onClick={() => onDismiss(item.id)}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              ) : null}
             </li>
           ))
         )}

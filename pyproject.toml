@@ -44,8 +44,8 @@ phase2 = [
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests/unit", "backend/tests/integration", "backend/tests/e2e"]
-pythonpath = ["backend"]
+testpaths = ["backend/tests/unit", "backend/tests/integration", "backend/tests/e2e", "agent/tests"]
+pythonpath = ["backend", "agent"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

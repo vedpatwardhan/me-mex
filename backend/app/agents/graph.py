@@ -95,6 +95,41 @@ def _worker_node(state: AgentState) -> AgentState:
     return {**state, "output": out}
 
 
+def _hitl_gate(state: AgentState) -> AgentState:
+    out = state.get("output") or {}
+    approval_id = out.get("approval_id")
+    if not approval_id:
+        return state
+    from langgraph.types import interrupt
+
+    decision = interrupt(
+        {
+            "type": "approval",
+            "approval_id": approval_id,
+            "title": out.get("reply") or "Pending approval",
+            "preview": out,
+        }
+    )
+    action = "dismiss"
+    if isinstance(decision, dict):
+        action = decision.get("action", "dismiss")
+    if action != "approve":
+        return {**state, "output": {**out, "graph_write": False, "status": "dismissed"}}
+    store = get_store()
+    result = resume_approval(
+        store=store,
+        project_id=state["project_id"],
+        thread_id=state["thread_id"],
+        approval_id=approval_id,
+        action="approve",
+        context_json=state.get("context_json"),
+    )
+    return {
+        **state,
+        "output": {**out, **result, "graph_write": True, "status": "approved"},
+    }
+
+
 def _workflow_observer(state: AgentState) -> AgentState:
     out = state.get("output") or {}
     w = state.get("worker", "conversation")
@@ -107,12 +142,14 @@ def build_graph(*, checkpointer=None):
     g.add_node("preprocess", _preprocess)
     g.add_node("supervisor", _supervisor)
     g.add_node("worker", _worker_node)
+    g.add_node("hitl_gate", _hitl_gate)
     g.add_node("observer", _workflow_observer)
     g.set_entry_point("preprocess")
     g.add_edge("preprocess", "supervisor")
     g.add_edge("supervisor", "worker")
     g.add_edge("worker", "observer")
-    g.add_edge("observer", END)
+    g.add_edge("observer", "hitl_gate")
+    g.add_edge("hitl_gate", END)
     cp = checkpointer if checkpointer is not None else _checkpointer
     return g.compile(checkpointer=cp)
 
@@ -145,20 +182,22 @@ def run_agent_turn(
         "jobs": [],
     }
     config = {"configurable": {"thread_id": thread_id}}
-    result = graph.invoke(state, config=config)
-    out = result.get("output") or {}
-    jobs = result.get("jobs") or []
+    graph.invoke(state, config=config)
+    snap = graph.get_state(config)
+    values = snap.values if snap and snap.values else {}
+    out = values.get("output") or {}
+    jobs = values.get("jobs") or []
     if checkpointer:
         checkpointer.save(
             thread_id,
             {
-                "last_worker": result.get("worker"),
+                "last_worker": values.get("worker"),
                 "last_output": out,
                 "jobs": jobs,
             },
         )
     return {
-        "worker": result.get("worker"),
+        "worker": values.get("worker"),
         "reply": out.get("reply", ""),
         "graph_write": out.get("graph_write", False),
         "details": out,
@@ -229,7 +268,19 @@ async def astream_agent_turn(
         "jobs": [],
     }
     config = {"configurable": {"thread_id": thread_id}}
-    async for ev in graph.astream_events(state, config=config, version="v3"):
+    event_iter = await graph.astream_events(state, config=config, version="v3")
+    async for ev in event_iter:
         payload = event_to_dock_payload(ev)
         if payload:
             yield payload
+    snap = await graph.aget_state(config)
+    values = snap.values if snap else {}
+    out = values.get("output") or {}
+    yield {
+        "type": "turn_end",
+        "worker": values.get("worker"),
+        "reply": out.get("reply", ""),
+        "graph_write": out.get("graph_write", False),
+        "details": out,
+        "jobs": values.get("jobs") or [],
+    }
