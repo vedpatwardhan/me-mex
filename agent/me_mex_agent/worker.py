@@ -21,7 +21,11 @@ except ImportError:  # pragma: no cover
     WorkerOptions = Any
     cli = None
 
-from me_mex_agent.audio_util import float32_to_pcm16, pcm16_mono_to_wav
+from me_mex_agent.audio_util import (
+    float32_to_pcm16,
+    pcm16_mono_to_wav,
+    should_end_utterance,
+)
 from me_mex_agent.speech_colab import speech_enabled, synthesize_wav, transcribe_wav
 from me_mex_agent.turn_bridge import post_resume, run_turn_with_reply
 
@@ -31,6 +35,7 @@ logging.basicConfig(level=logging.INFO)
 SILENCE_RMS = float(os.getenv("VOICE_SILENCE_RMS", "0.008"))
 MIN_UTTERANCE_MS = int(os.getenv("VOICE_MIN_UTTERANCE_MS", "400"))
 MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "20000"))
+END_SILENCE_MS = int(os.getenv("VOICE_END_SILENCE_MS", "1500"))
 
 
 @dataclass
@@ -123,11 +128,15 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
         return
     session.cancel_tts.set()
     async with session.turn_lock:
-        reply, events, turn_end = await run_turn_with_reply(
-            text=text,
-            thread_id=session.thread_id,
-            context_json=context,
-        )
+        try:
+            reply, events, turn_end = await run_turn_with_reply(
+                text=text,
+                thread_id=session.thread_id,
+                context_json=context,
+            )
+        except httpx.HTTPError:
+            _log.exception("voice_turn failed")
+            return
         await _forward_dock_events(room, events)
         if turn_end.get("details", {}).get("approval_id") or any(
             e.get("type") == "approval" for e in events
@@ -136,6 +145,8 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
                 json.dumps({"type": "awaiting_approval", "turn": turn_end}).encode(),
                 reliable=True,
             )
+        if reply.strip():
+            _log.info("voice_turn reply_len=%d", len(reply.strip()))
         if reply.strip() and speech_enabled():
             try:
                 wav = await synthesize_wav(reply)
@@ -147,6 +158,23 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
                 json.dumps({"type": "agent_reply", "text": reply}).encode(),
                 reliable=True,
             )
+
+
+def _schedule_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> None:
+    if session.turn_lock.locked():
+        _log.warning(
+            "turn in progress, utterance dropped: %r",
+            text.strip()[:120],
+        )
+        return
+
+    async def _guarded() -> None:
+        try:
+            await _run_voice_turn(room, session, text)
+        except Exception:  # noqa: BLE001
+            _log.exception("voice_turn failed")
+
+    asyncio.create_task(_guarded())
 
 
 async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> None:
@@ -176,14 +204,18 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
         )
         return
     if mtype == "agent_turn":
-        await _run_voice_turn(room, session, msg.get("text", ""))
+        _schedule_voice_turn(room, session, msg.get("text", ""))
         return
     if mtype == "speech_wav":
         raw = base64.b64decode(msg.get("data") or "")
         if raw:
-            result = await transcribe_wav(raw)
-            text = result.get("text") or ""
-            await _run_voice_turn(room, session, text)
+            try:
+                result = await transcribe_wav(raw)
+                text = (result.get("text") or "").strip()
+                if text:
+                    _schedule_voice_turn(room, session, text)
+            except httpx.HTTPError:
+                _log.exception("STT failed")
 
 
 async def _consume_audio_track(
@@ -219,9 +251,15 @@ async def _consume_audio_track(
         else:
             if buffer:
                 silent_ms += frame_ms
-        if speaking_ms >= MAX_UTTERANCE_MS or (
-            buffer and silent_ms > 600 and speaking_ms >= MIN_UTTERANCE_MS
+        if should_end_utterance(
+            speaking_ms=speaking_ms,
+            silent_ms=silent_ms,
+            buffer_nonempty=bool(buffer),
+            min_utterance_ms=MIN_UTTERANCE_MS,
+            max_utterance_ms=MAX_UTTERANCE_MS,
+            end_silence_ms=END_SILENCE_MS,
         ):
+            duration_s = len(buffer) / float(sample_rate) if sample_rate else 0.0
             pcm = float32_to_pcm16(buffer)
             wav = pcm16_mono_to_wav(pcm, sample_rate=sample_rate)
             buffer.clear()
@@ -232,9 +270,14 @@ async def _consume_audio_track(
             try:
                 result = await transcribe_wav(wav)
                 text = (result.get("text") or "").strip()
-                _log.info("STT utterance (%d bytes wav): %r", len(wav), text[:120])
+                _log.info(
+                    "STT utterance (%.2fs, %d bytes wav): %r",
+                    duration_s,
+                    len(wav),
+                    text[:120],
+                )
                 if text:
-                    await _run_voice_turn(room, session, text)
+                    _schedule_voice_turn(room, session, text)
             except httpx.HTTPError:
                 _log.exception("STT failed")
 

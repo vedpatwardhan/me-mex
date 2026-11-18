@@ -178,6 +178,19 @@ Set in gitignored `backend/.env`: `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_AP
 
 **Verify:** `curl http://localhost:8000/api/livekit/token -X POST -H 'Content-Type: application/json' -d '{"room":"me-mex","identity":"dev"}'`
 
+**Voice VAD tuning** (optional env on the agent worker): `VOICE_SILENCE_RMS`, `VOICE_MIN_UTTERANCE_MS`, `VOICE_END_SILENCE_MS` (default 1500), `VOICE_MAX_UTTERANCE_MS` — see [agent/.env.example](./agent/.env.example).
+
+**Voice E2E smoke** (one sentence, stay connected ~60s after you stop speaking):
+
+| Check | Where |
+|-------|--------|
+| `STT utterance (Xs, …)` with X ≥ ~2 and sensible text | `.dev-stack/logs/agent.log` |
+| `voice_turn reply_len=…` and no `voice_turn failed` / `TTS failed` | `agent.log` |
+| `POST /api/agent/turn/stream` with no trailing ASGI `ERROR` | `backend.log` |
+| `POST /stt/transcribe` 200 | Colab `speech.log` / `gateway.log` |
+| `POST /v1/chat/completions` 200 | Colab `gateway.log` / `vllm.log` |
+| `POST /tts/synthesize` 200 (if TTS enabled) | Colab `speech.log` / `gateway.log` |
+
 ---
 
 ## API
