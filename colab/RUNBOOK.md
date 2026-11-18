@@ -37,20 +37,34 @@ cd /content/me-mex/colab   # or your clone path
 pip install -q -r requirements-colab.txt
 pip uninstall -y torchaudio 2>/dev/null || true
 
-# Speech (Phase 2): kokoro → misaki[en] → spacy — preinstall spacy wheels (kokoro must not build spacy from source)
-python3 --version   # on 3.12+ PyPI only lists spacy 3.8.7+ for your interpreter
+python3 --version
+```
+
+**Speech (Phase 2)** — branch on Python:
+
+| Python | TTS on sidecar | Extra steps |
+|--------|----------------|-------------|
+| **3.10–3.12** | **Kokoro** (`kokoro>=0.9.4` on PyPI) | spacy wheels + espeak-ng before `requirements-colab-speech.txt` |
+| **3.13+** | **edge-tts** (Kokoro/misaki require `<3.13`) | `apt install ffmpeg` for mp3→wav |
+
+Python **3.10–3.12** (Kokoro):
+
+```bash
+apt-get -qq -y install espeak-ng
 pip install -q "spacy==3.8.18" "thinc>=8.3.12,<8.4" --only-binary=:all:
 pip install -q -r requirements-colab-speech.txt
 ```
 
-If `--only-binary` fails (no wheel for one transitive dep), install spacy without that flag once, then speech requirements:
+If `--only-binary` fails, drop it for the spacy line once, then reinstall speech requirements.
+
+Python **3.13+** (edge-tts fallback — no spacy/kokoro):
 
 ```bash
-pip install -q "spacy==3.8.18" "thinc>=8.3.12,<8.4"
+apt-get -qq -y install ffmpeg
 pip install -q -r requirements-colab-speech.txt
 ```
 
-Older pins like `spacy==3.8.4` or `3.7.5` **do not exist** for Colab’s current Python — pip will show only `3.8.7 … 3.8.18`.
+Confirm: `curl -s http://127.0.0.1:7861/health` should show `"tts":"edge"` (or `"kokoro"` on 3.12).
 
 Chat-only bring-up skips the speech block; gateway `/stt` `/tts` proxy will 502 until sidecar deps are installed.
 

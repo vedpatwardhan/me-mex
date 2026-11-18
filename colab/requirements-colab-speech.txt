@@ -1,7 +1,8 @@
-# Speech sidecar (CPU). Install ONLY after:
-#   pip install "spacy==3.8.18" "thinc>=8.3.12,<8.4" --only-binary=:all:
-# (kokoro → misaki[en] → spacy; on Colab Python 3.12+ only spacy 3.8.7+ exists on PyPI)
+# Speech sidecar (CPU). See RUNBOOK §2.1 — Python version matters:
+#   <3.13: kokoro (preinstall spacy wheels + espeak-ng)
+#   >=3.13: kokoro/misaki not on PyPI — edge-tts fallback (ffmpeg for mp3→wav)
 faster-whisper>=1.0.0
-kokoro>=0.9.4
 soundfile
 numpy
+kokoro>=0.9.4; python_version < "3.13"
+edge-tts>=6.1.0; python_version >= "3.13"
