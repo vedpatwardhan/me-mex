@@ -20,7 +20,18 @@ except ImportError:  # pragma: no cover
 
 
 BACKEND_URL = os.getenv("ME_MEX_BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
-SPEECH_BASE = os.getenv("COLAB_SPEECH_BASE_URL", "").rstrip("/")
+
+
+def _colab_speech_base() -> str:
+    raw = os.getenv("COLAB_INFERENCE_BASE_URL", "").strip().rstrip("/")
+    if not raw:
+        return ""
+    if raw.endswith("/v1"):
+        return raw[:-3].rstrip("/")
+    return raw
+
+
+SPEECH_BASE = _colab_speech_base()
 
 
 async def handle_data_message(payload: bytes, ctx: JobContext) -> None:

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 import httpx
-
 from app.config import settings
 
 
@@ -20,18 +19,13 @@ class ScorerNode:
 
 
 class DecisionScorerProtocol(Protocol):
-    def score(
-        self, query_node: ScorerNode, frontier: list[ScorerNode]
-    ) -> dict[str, float]:
-        ...
+    def score(self, query_node: ScorerNode, frontier: list[ScorerNode]) -> dict[str, float]: ...
 
 
 class MockDecisionScorer:
     """Uniform decay scores for tests — keys cover 100% of frontier."""
 
-    def score(
-        self, query_node: ScorerNode, frontier: list[ScorerNode]
-    ) -> dict[str, float]:
+    def score(self, query_node: ScorerNode, frontier: list[ScorerNode]) -> dict[str, float]:
         if not frontier:
             return {}
         base = 1.0 / len(frontier)
@@ -42,11 +36,9 @@ class HttpDecisionScorer:
     """POST to Colab gateway cross-encoder reranker (pytest -m vllm)."""
 
     def __init__(self, base_url: str | None = None):
-        self.base_url = (base_url or settings.COLAB_VLLM_URL).rstrip("/")
+        self.base_url = (base_url or settings.colab_vllm_api_base).rstrip("/")
 
-    def score(
-        self, query_node: ScorerNode, frontier: list[ScorerNode]
-    ) -> dict[str, float]:
+    def score(self, query_node: ScorerNode, frontier: list[ScorerNode]) -> dict[str, float]:
         payload = {
             "query_node": query_node.__dict__,
             "frontier": [n.__dict__ for n in frontier],

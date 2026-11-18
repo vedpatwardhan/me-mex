@@ -94,7 +94,7 @@ Import tooling: [08-migration-and-reuse.md](./08-migration-and-reuse.md).
 - **Input:**
   - **`query_node`** — `{ id, title, node_kind, gist?, description?, … }`
   - **`frontier[]`** — **all** nodes to score this step
-- **Transport:** `POST {COLAB_VLLM_BASE}/decision/score` (same public base URL as chat; see [colab/TOPOLOGY.md](../colab/TOPOLOGY.md))
+- **Transport:** `POST {COLAB_INFERENCE_BASE_URL}/v1/decision/score` (same gateway host as chat; see [colab/TOPOLOGY.md](../colab/TOPOLOGY.md))
 - **Server:** Cross-encoder forward on **query × each frontier** → logits → **softmax** → `relevance_probs`
 - **Output:** **one entry per frontier `id`** (normalized). **Must cover 100%** of input ids. Agent applies top‑k **after** scoring.
 - **Config (local):** `DECISION_SCORER_MODE=live|mock`; default HF id set on **gateway** env (e.g. `BGE_RERANKER_MODEL`)
@@ -157,7 +157,7 @@ Barge-in cancels **foreground** stream mid-utterance.
 
 vLLM runs in a **separate process** on the GPU; CPU models do not compete for 8B VRAM.
 
-**Implication:** Checkpoints and graph state are **local**. Colab restarts only require a new tunnel URL; reconnect `COLAB_VLLM_URL`.
+**Implication:** Checkpoints and graph state are **local**. Colab restarts only require a new tunnel URL; reconnect `COLAB_INFERENCE_BASE_URL`.
 
 ---
 

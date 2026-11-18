@@ -120,8 +120,7 @@ flowchart TB
 
 | Env | Example |
 |-----|---------|
-| `COLAB_VLLM_URL` | `https://YOUR_HOST.trycloudflare.com/v1` |
-| `COLAB_SPEECH_BASE_URL` | `https://YOUR_HOST.trycloudflare.com` (no `/v1`) |
+| `COLAB_INFERENCE_BASE_URL` | `https://YOUR_HOST.trycloudflare.com` (chat `/v1/…`, speech `/stt` `/tts` on same host) |
 
 ---
 

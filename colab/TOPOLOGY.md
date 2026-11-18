@@ -36,7 +36,7 @@ This document describes how **four remote capabilities** — chat LLM, **cross-e
               (BGE reranker loads inside gateway process, CPU)
 ```
 
-**Why one public port?** Your backend expects chat at `{COLAB_VLLM_URL}/chat/completions` where `COLAB_VLLM_URL` ends in `/v1`, and decision at `{COLAB_VLLM_URL}/decision/score` ([`HttpDecisionScorer`](../backend/app/services/decision_scorer.py)). A single **gateway** on `:7860` keeps **one** Cloudflare URL for everything.
+**Why one public port?** Your backend sets `COLAB_INFERENCE_BASE_URL` to the tunnel host and calls `{base}/v1/chat/completions` and `{base}/v1/decision/score` ([`HttpDecisionScorer`](../backend/app/services/decision_scorer.py)). Speech uses the same `{base}/stt/*` and `/tts/*`. A single **gateway** on `:7860` keeps **one** Cloudflare URL for everything.
 
 **VRAM:** Only vLLM uses the L4 GPU. Reranker, Whisper, and edge-tts stay on **CPU**.
 
@@ -46,9 +46,9 @@ This document describes how **four remote capabilities** — chat LLM, **cross-e
 
 | Local component | Remote call | Env (backend / worker) |
 |-----------------|-------------|----------------------|
-| LangChain chat (`llm_gateway`) | `POST …/v1/chat/completions` (SSE stream) | `COLAB_VLLM_URL`, `CHAT_LLM_MODE=live` |
+| LangChain chat (`llm_gateway`) | `POST …/v1/chat/completions` (SSE stream) | `COLAB_INFERENCE_BASE_URL`, `CHAT_LLM_MODE=live` |
 | `HttpDecisionScorer` | `POST …/v1/decision/score` | `DECISION_SCORER_MODE=live` |
-| LiveKit worker STT (Phase 2) | `POST …/stt/transcribe` | `COLAB_SPEECH_BASE_URL` (no `/v1` suffix) |
+| LiveKit worker STT (Phase 2) | `POST …/stt/transcribe` | `COLAB_INFERENCE_BASE_URL` |
 | LiveKit worker TTS (Phase 2) | `POST …/tts/synthesize` | same |
 
 ---
@@ -66,7 +66,7 @@ This document describes how **four remote capabilities** — chat LLM, **cross-e
 ## Local `.env` (inference)
 
 ```bash
-COLAB_VLLM_URL=https://YOUR_SUBDOMAIN.trycloudflare.com/v1
+COLAB_INFERENCE_BASE_URL=https://YOUR_SUBDOMAIN.trycloudflare.com
 CHAT_LLM_MODE=live
 DECISION_SCORER_MODE=live
 LLM_MODEL_NAME=mistralai/Ministral-3-8B-Instruct-2512

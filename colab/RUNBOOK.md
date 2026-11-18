@@ -10,9 +10,9 @@ Bring up **remote inference** for Me-Mex v2 on a Colab GPU VM: **Ministral chat 
 
 | Capability | Colab process | Path (via tunnel) | Local env |
 |------------|---------------|-------------------|-----------|
-| **Chat / tools** | vLLM `:8000` (GPU) | `POST …/v1/chat/completions` | `COLAB_VLLM_URL`, `CHAT_LLM_MODE=live` |
+| **Chat / tools** | vLLM `:8000` (GPU) | `POST …/v1/chat/completions` | `COLAB_INFERENCE_BASE_URL`, `CHAT_LLM_MODE=live` |
 | **Decision routing** | Gateway CPU (cross-encoder) | `POST …/v1/decision/score` | `DECISION_SCORER_MODE=live` |
-| **STT / TTS** (Phase 2) | `speech_sidecar` `:7861` | `POST …/stt/*`, `…/tts/*` | `COLAB_SPEECH_BASE_URL` (no `/v1`) |
+| **STT / TTS** (Phase 2) | `speech_sidecar` `:7861` | `POST …/stt/*`, `…/tts/*` | same `COLAB_INFERENCE_BASE_URL` |
 
 **Public entrypoint:** `inference_gateway` on **`:7860`**. Point cloudflared here — not at vLLM `:8000`.
 
@@ -152,7 +152,7 @@ chmod +x cloudflared
 
 Copy the printed `https://….trycloudflare.com` URL → Mac:
 
-`COLAB_VLLM_URL=https://….trycloudflare.com/v1`
+`COLAB_INFERENCE_BASE_URL=https://….trycloudflare.com`
 
 Optional: [notebook §8](me_mex_inference_stack.ipynb) installs the binary under `/usr/local/bin/cloudflared`; either path is fine.
 
@@ -280,7 +280,7 @@ After detach (`Ctrl-b` then `d`), re-attach anytime:
 tmux attach -t me-mex-inference
 ```
 
-Copy the tunnel URL from the **`tunnel`** window or `logs/cloudflared.log` → Mac `COLAB_VLLM_URL=…/v1` (§4).
+Copy the tunnel URL from the **`tunnel`** window or `logs/cloudflared.log` → Mac `COLAB_INFERENCE_BASE_URL=…` (§4).
 
 #### 3.4c Spin up tmux — interactive (five windows by hand)
 
@@ -341,20 +341,17 @@ Paste the tunnel hostname into local config (§4).
 ## 4. Local `.env`
 
 ```env
-COLAB_VLLM_URL=https://YOUR_SUBDOMAIN.trycloudflare.com/v1
+COLAB_INFERENCE_BASE_URL=https://YOUR_SUBDOMAIN.trycloudflare.com
 CHAT_LLM_MODE=live
 DECISION_SCORER_MODE=live
 LLM_MODEL_NAME=mistralai/Ministral-3-8B-Reasoning-2512
 LLM_TIMEOUT=180
-
-# Phase 2 voice (same host, no /v1):
-# COLAB_SPEECH_BASE_URL=https://YOUR_SUBDOMAIN.trycloudflare.com
 ```
 
-`COLAB_VLLM_URL` **must end with `/v1`**. Backend uses:
+Set **only the tunnel origin** (no `/v1`). The backend appends paths:
 
-- `{COLAB_VLLM_URL}/chat/completions`
-- `{COLAB_VLLM_URL}/decision/score`
+- `{base}/v1/chat/completions`, `{base}/v1/decision/score`
+- `{base}/stt/*`, `{base}/tts/*` (Phase 2 voice)
 
 `LLM_MODEL_NAME` must match the weights vLLM is serving.
 
@@ -387,8 +384,6 @@ curl -sS -X POST "https://YOUR_SUBDOMAIN.trycloudflare.com/v1/decision/score" \
 Expect `relevance_probs` with keys `a` and `b`, probabilities summing ≈ 1.
 
 ### Speech (Phase 2) — STT / TTS via same tunnel host
-
-`COLAB_SPEECH_BASE_URL=https://YOUR_SUBDOMAIN.trycloudflare.com` (no `/v1`).
 
 ```bash
 # TTS smoke
@@ -435,7 +430,7 @@ Optional thresholds: `data/decision_training/eval_gate.json`.
 
 - [ ] vLLM healthy on Colab `8000`
 - [ ] Gateway `/health` shows reranker model
-- [ ] Tunnel URL in `COLAB_VLLM_URL` (with `/v1`)
+- [ ] Tunnel URL in `COLAB_INFERENCE_BASE_URL` (no `/v1` suffix)
 - [ ] `pytest -m vllm` (decision integration) green
 - [ ] (Optional) `eval_decision_model.py --live` + saved report
 - [ ] (Optional) full `uv run pytest` with Mongo
@@ -447,7 +442,7 @@ Optional thresholds: `data/decision_training/eval_gate.json`.
 | Symptom | Fix |
 |---------|-----|
 | 404 on `/v1/decision/score` | Tunnel must target gateway **`:7860`**, not vLLM `:8000` |
-| Decision fails, chat works | `COLAB_VLLM_URL` must include `/v1` |
+| Decision fails, chat works | Set `COLAB_INFERENCE_BASE_URL` to gateway host (backend adds `/v1`) |
 | vLLM OOM | Lower `--max-model-len`, reduce `--gpu-memory-utilization`, or FP8 weights |
 | Slow first decision | BGE download; warm with `/health` |
 | Uniform probs + `warning` in JSON | Read `logs/gateway.log`; HF access; Colab CPU RAM |
@@ -475,4 +470,4 @@ Optional thresholds: `data/decision_training/eval_gate.json`.
 
 ## 10. Phase 2 voice
 
-Same tunnel host; set `COLAB_SPEECH_BASE_URL` without `/v1`. LiveKit stays local. Notebook §10.
+Same tunnel host as `COLAB_INFERENCE_BASE_URL`. LiveKit stays local. Notebook §10.

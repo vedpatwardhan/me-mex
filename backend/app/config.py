@@ -3,6 +3,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from app.colab_urls import (
+    colab_inference_base_url,
+    colab_inference_configured,
+    colab_vllm_api_base,
+)
+
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BACKEND_DIR.parent
 
@@ -35,9 +41,19 @@ class Settings:
     def DB_NAME(self) -> str:
         return os.getenv("DB_NAME", "me-mex")
 
-    # Remote inference (Colab vLLM + speech on same tunnel host)
-    COLAB_VLLM_URL: str = os.getenv("COLAB_VLLM_URL", "http://localhost:8000/v1")
-    COLAB_SPEECH_BASE_URL: str = os.getenv("COLAB_SPEECH_BASE_URL", "")
+    # Remote inference — one gateway host; code appends /v1 or /stt|/tts paths
+    @property
+    def COLAB_INFERENCE_BASE_URL(self) -> str:
+        return colab_inference_base_url()
+
+    @property
+    def colab_inference_configured(self) -> bool:
+        return colab_inference_configured()
+
+    @property
+    def colab_vllm_api_base(self) -> str:
+        return colab_vllm_api_base()
+
     # Local LiveKit (Phase 2 voice)
     LIVEKIT_URL: str = os.getenv("LIVEKIT_URL", "ws://localhost:7880")
     LIVEKIT_API_KEY: str = os.getenv("LIVEKIT_API_KEY", "devkey")
