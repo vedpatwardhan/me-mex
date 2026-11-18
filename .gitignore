@@ -18,6 +18,7 @@ __pycache__/
 *$py.class
 .pytest_cache/
 .ruff_cache/
+colab/logs/*.log
 .mypy_cache/
 
 # Logs
