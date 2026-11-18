@@ -4,7 +4,7 @@ Unified HTTP entry for cloudflared → local Me-Mex backend.
 
 Exposes:
   - /v1/*                    → vLLM OpenAI API (chat, models, …)
-  - POST /v1/decision/score  → LoRA relevance batch (DecisionScorer contract)
+  - POST /v1/decision/score  → cross-encoder reranker (DecisionScorer contract)
 
 Optionally proxies /stt/* and /tts/* to speech_sidecar when SPEECH_URL is set.
 
@@ -16,7 +16,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
@@ -25,17 +24,12 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 _COLAB = Path(__file__).resolve().parent
 if str(_COLAB) not in sys.path:
     sys.path.insert(0, str(_COLAB))
-from decision_prompt import build_decision_prompt, parse_relevance_probs  # noqa: E402
+from reranker_service import reranker_model_name, score_batch  # noqa: E402
 
 VLLM_BASE = os.getenv("VLLM_BASE", "http://127.0.0.1:8000/v1").rstrip("/")
 SPEECH_BASE = os.getenv("SPEECH_BASE", "http://127.0.0.1:7861").rstrip("/")
-DEFAULT_CHAT_MODEL = os.getenv(
-    "LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Instruct-2512"
-)
-DEFAULT_LORA_ID = os.getenv("LORA_ADAPTER_ID", "decision-lora")
-DECISION_MAX_NEW_TOKENS = int(os.getenv("DECISION_MAX_NEW_TOKENS", "1024"))
 
-app = FastAPI(title="Me-Mex inference gateway", version="0.1.0")
+app = FastAPI(title="Me-Mex inference gateway", version="0.2.0")
 
 _client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
 
@@ -47,7 +41,12 @@ async def _shutdown() -> None:
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "vllm": VLLM_BASE, "speech": SPEECH_BASE}
+    return {
+        "status": "ok",
+        "vllm": VLLM_BASE,
+        "speech": SPEECH_BASE,
+        "reranker_model": reranker_model_name(),
+    }
 
 
 async def _proxy_vllm(request: Request, path: str) -> Response:
@@ -88,36 +87,20 @@ async def vllm_proxy(path: str, request: Request) -> Response:
 
 async def decision_score(request: Request) -> JSONResponse:
     """
-    Body: { query_node, frontier[], adapter_id? } → { relevance_probs }.
+    Body: { query_node, frontier[] } → { relevance_probs }.
 
-    Uses vLLM chat completion with LoRA when adapter_id is set.
+    Cross-encoder softmax over frontier (no vLLM / no LoRA).
     """
     body = await request.json()
     query = body.get("query_node") or {}
     frontier = body.get("frontier") or []
-    adapter_id = body.get("adapter_id") or DEFAULT_LORA_ID
     if not frontier:
         return JSONResponse({"relevance_probs": {}})
 
     frontier_ids = {str(n["id"]) for n in frontier}
-    prompt = build_decision_prompt(query, frontier)
-    payload: dict[str, Any] = {
-        "model": DEFAULT_CHAT_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "max_tokens": DECISION_MAX_NEW_TOKENS,
-    }
-    # vLLM OpenAI-compatible LoRA: model name = adapter id when enable-lora is on
-    if adapter_id:
-        payload["model"] = adapter_id
-
     try:
-        resp = await _client.post(f"{VLLM_BASE}/chat/completions", json=payload)
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        probs = parse_relevance_probs(content, frontier_ids)
+        probs = score_batch(query, frontier)
     except Exception as exc:
-        # Uniform fallback so smoke tests can run before LoRA is calibrated
         n = len(frontier)
         uniform = 1.0 / n
         probs = {fid: uniform for fid in frontier_ids}

@@ -13,9 +13,11 @@ The monolithic v1 stack (orchestrator ingest, `/api/chat`) is preserved only on 
 | Workflow-driven writes + explicit approve | URL → auto ingest + link + reorg |
 | Deterministic tools + LangGraph workers | v1 `ExecutiveOrchestrator` |
 | Headless REST + pytest (`/api/*`) | LiveKit dock UI (Phase 2+) |
-| Agents call `get_chains().invoke` / `get_decision_scorer()` (stub in CI) | **LoRA train + deploy on Colab** (`pytest -m vllm` for exit gate) |
+| Agents call `get_chains().invoke` / `get_decision_scorer()` (mock in CI) | **Colab four-model stack** for prod routing (`pytest -m vllm` gateway smoke) |
 
 Canon: **[`docs/`](./docs/)** — [docs/README.md](./docs/README.md), [docs/09-phasing.md](./docs/09-phasing.md), [docs/11-testing.md](./docs/11-testing.md).
+
+**Decision routing (spec):** off-the-shelf **cross-encoder reranker** on the Colab **inference gateway** (`POST /v1/decision/score`)—not LoRA on Ministral. See [docs/05-models-and-runtime.md](./docs/05-models-and-runtime.md).
 
 ---
 
@@ -43,7 +45,7 @@ DB_NAME=me-mex
 ```bash
 uv run uvicorn main:app --app-dir backend --host 0.0.0.0 --port 8000 --reload
 uv run pytest   # default excludes -m vllm (see backend/pytest.ini)
-# Bootstrap decision JSONL (Colab LoRA prep):
+# Optional: bootstrap JSONL for reranker eval / future fine-tune
 cd backend && uv run python -m app.bootstrap.notes_to_jsonl
 cd backend && uv run python -m app.bootstrap.split_train_eval data/decision_training/robotics/bootstrap.jsonl --out-dir data/decision_training/robotics
 ```
@@ -74,7 +76,7 @@ me-mex/
       services/         # llm_gateway, decision_scorer, checkpoints, …
     tests/              # unit, integration, e2e
   frontend/             # legacy UI until Phase 2
-  colab/
+  colab/                # gateway, vLLM, speech, training scripts
 ```
 
 ---
@@ -85,10 +87,13 @@ All agent and graph endpoints live under **`/api/*`** (`/api/projects`, `/api/ag
 
 ---
 
-## Decision bootstrap
+## Decision bootstrap and Colab
 
-[docs/05-models-and-runtime.md](./docs/05-models-and-runtime.md), `app/bootstrap/`, `backend/data/decision_training/README.md`, [colab/RUNBOOK.md](./colab/RUNBOOK.md), [colab/TOPOLOGY.md](./colab/TOPOLOGY.md), [colab/me_mex_inference_stack.ipynb](./colab/me_mex_inference_stack.ipynb).
+- **Spec:** [docs/05-models-and-runtime.md](./docs/05-models-and-runtime.md), [reports/2026-11-18-retrieval-methods.md](./reports/2026-11-18-retrieval-methods.md)
+- **JSONL:** `app/bootstrap/`, [backend/data/decision_training/README.md](./backend/data/decision_training/README.md)
+- **Colab:** [colab/TOPOLOGY.md](./colab/TOPOLOGY.md), [colab/RUNBOOK.md](./colab/RUNBOOK.md), [colab/me_mex_inference_stack.ipynb](./colab/me_mex_inference_stack.ipynb)
 
 ```bash
 uv run python backend/scripts/eval_decision_model.py --dry-run
+# With gateway up: DECISION_SCORER_MODE=live uv run python backend/scripts/eval_decision_model.py --live
 ```

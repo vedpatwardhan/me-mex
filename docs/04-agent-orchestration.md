@@ -15,7 +15,7 @@ LangGraph orchestrates **worker agents** (LLM + decision model) and **determinis
 | Graph DB | **MongoDB** via **deterministic tools only** |
 | Checkpointer | LangGraph session state—**plain JSON on disk** (per `thread_id`); **not** Mongo knowledge collections ([§12.2](./04-agent-orchestration.md#122-persistence-thread_id--checkpointer)) |
 | Conversation | Supervisor / Conversation agent—**no write tools** unless routed |
-| Retrieval / placement / reorg hops | **LoRA DecisionScorer**: `query_node` + full `frontier` relevance vector; agent top‑k ([05 §3](./05-models-and-runtime.md#31-purpose--relevance-over-a-candidate-batch-replaces-v1-subgraph_expansion)) |
+| Retrieval / placement / reorg hops | **Gateway reranker DecisionScorer**: `query_node` + full `frontier` relevance vector; agent top‑k ([05 §3](./05-models-and-runtime.md#31-purpose--relevance-over-a-candidate-batch-replaces-v1-subgraph_expansion)) |
 | Tools | **Deterministic only**—no LLM, no DecisionScorer, no embedder calls inside tool code ([§6](#6-deterministic-tools)) |
 | Interactive runtime | **`astream_events` (v3)**, checkpointer + **`thread_id`**, **foreground/background context switch**, HITL only where graph writes need OK ([§12](#12-langgraph--langchain-runtime-interactive-agent)) |
 
@@ -98,7 +98,7 @@ See [02-user-experience.md](./02-user-experience.md).
 
 **Forbidden:** a tool that internally calls Ministral, consolidation prompts, DecisionScorer, or embeddings. If v1 code mixed those, **split**: model steps stay in the **agent node**; persistence in **tools**.
 
-**DecisionScorer** (**LoRA**—[05 §3](./05-models-and-runtime.md#3-decision-model--lora-from-bootstrap-notes)): `(query_node, frontier[])` → **relevance probabilities for every frontier node** (replaces v1 generative **subgraph_expansion** hop). Agent applies **top‑k** after scoring. Same vLLM host; not a LangChain tool.
+**DecisionScorer** (cross-encoder—[05 §3](./05-models-and-runtime.md#3-decision-routing--cross-encoder-reranker)): `(query_node, frontier[])` → **relevance probabilities for every frontier node** via **`POST …/decision/score`** on the Colab gateway (replaces v1 generative **subgraph_expansion** hop). Agent applies **top‑k** after scoring. **HttpDecisionScorer** from workers; not a LangChain tool; not inside deterministic tools.
 
 ### 5.1 Worker agents (model work → tools)
 
@@ -111,7 +111,7 @@ See [02-user-experience.md](./02-user-experience.md).
 | **LinkPlaceWorker** | `query_node` = `ROOT`; frontier = hub/`INSIGHT` shortlist; full prob vector → dock | `enqueue_pending_approval`, `create_root_insight_edges` on approve |
 | **ReorgRecommendWorker** | `query_node` = mutable node in question; frontier = relocation/split targets; full probs | `write_reorg_proposal`, `preview_reorg_diff`, `enqueue_pending_approval` |
 | **ReorgApplyWorker** | None (plan already approved) | `apply_reorg_plan`, `split_section`, `relocate_under_parent`, … |
-| **RetrievalWorker** | Bounded **BFS**: each hop `DecisionScorer(query, frontier_neighbors)` → expand **top‑k**; then agent summary | `highlight_nodes`, `query_nodes_by_embedding`, `open_passages` |
+| **RetrievalWorker** | **Seed:** Genesis (or selected node). Bounded **BFS**: each hop `DecisionScorer(query, frontier_neighbors)` with **title + description** text → expand **top‑k**; then Ministral summary | `highlight_nodes`, `query_nodes_by_embedding`, `open_passages` |
 | **ProjectScopeWorker** | Onboarding dialogue, scope draft text | `update_project_scope` |
 
 Intra-doc **extract** is **not** a tool named `stage_intra_doc_concepts`; the **IntraDocWorker agent** runs the LLM pipeline, then **`upsert_staging_bundle`** + **`enqueue_pending_approval`** (“Review / commit intra-doc graph”).
@@ -245,7 +245,7 @@ Plain-language persist commands map here; non-trivial diffs use `interrupt(respo
 
 ## 11. Observability
 
-- Append-only **`decision_traces`** (live + bootstrap) for LoRA — [07-performance-and-observability.md](./07-performance-and-observability.md).
+- Append-only **`decision_traces`** (live + bootstrap) for eval and optional reranker fine-tune — [07-performance-and-observability.md](./07-performance-and-observability.md).
 - Tool-call log per session `thread_id`.
 - LangSmith / OTEL optional.
 

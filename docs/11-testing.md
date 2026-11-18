@@ -11,7 +11,7 @@ v1 pytest suites live on git tag **`v1`** only. On `main`, `backend/tests/{unit,
 | Layer | Scope | External deps | Runs in CI default? |
 |-------|--------|---------------|---------------------|
 | **Unit** | Single function/module: tools, guards, parsers, dock queue, checkpoint I/O, pure graph helpers | None (in-memory Mongo mock or `mongomock` / testcontainers opt-in) | **Yes — required** |
-| **Integration** | Agent subgraph + real Mongo test DB + mocked LLM **or** fixture responses; DecisionScorer **real LoRA** on marked suite | MongoDB test instance; optional `vllm` marker | **Yes** (mocked LLM); **nightly / manual** (`pytest -m vllm`) for Colab |
+| **Integration** | Agent subgraph + real Mongo test DB + mocked LLM **or** fixture responses; DecisionScorer **live gateway reranker** on marked suite | MongoDB test instance; optional `vllm` marker | **Yes** (mocked LLM); **nightly / manual** (`pytest -m vllm`) for Colab |
 | **End-to-end (API)** | REST `thread_id` full turns: supervisor → worker → tools → Mongo; no browser | Mongo + headless LangGraph | **Yes** |
 | **End-to-end (product)** | Voice/UI: LiveKit, dock streams, canvas actions (W12), project switch | Local stack + optional Playwright | **Phase 2+**; CI smoke subset |
 
@@ -34,7 +34,7 @@ me-mex/
         checkpoints/             # JSON round-trip
       integration/
         agents/                  # per worker: Conversation, Gist, IntraDoc, …
-        decision/                # DecisionScorer + LoRA (vllm marker)
+        decision/                # DecisionScorer + gateway (vllm marker)
         langgraph/               # interrupt/resume, jobs ledger, park/resume
       e2e/
         workflows/               # one file per 06 workflow (P0, P1, W2–W12)
@@ -101,7 +101,7 @@ me-mex/
 |-----------|--------|
 | Bootstrap parser | Unit: robotics three files → JSONL rows; held-out split reproducible |
 | DecisionScorer | Integration `-m vllm`: output keys = 100% frontier ids |
-| LoRA eval | Script/test: ranking metric on held-out ≥ gate in [00 §9](./00-vision-and-principles.md) |
+| Reranker eval | Script/test: ranking metric on held-out bootstrap (optional gate) [00 §9](./00-vision-and-principles.md) |
 | Checkpoint JSON | Unit: save/load `thread_id`, resume after interrupt |
 
 ---
@@ -143,7 +143,7 @@ Every workflow row **must** have at least one **e2e** test (REST Phase 1; + voic
 
 | Marker | Meaning |
 |--------|---------|
-| `vllm` | Needs live Colab vLLM + LoRA |
+| `vllm` | Needs live Colab gateway (vLLM chat + `decision/score` reranker) |
 | `mongodb` | Needs real Mongo (testcontainers or local `me_mex_test`) |
 | `livekit` | Phase 2 worker + room |
 | `slow` | Long intra-doc extract |
@@ -174,7 +174,7 @@ Do **not** treat a phase as complete if any workflow in [§4](#4-workflow-test-m
 
 | Phase | Testing exit |
 |-------|----------------|
-| **1** | All tools unit-tested; W2–W4, W7, W3 commit, W6, W9, W11a e2e REST; anti-pattern suite green; LoRA eval gate; integration agents with mock LLM |
+| **1** | All tools unit-tested; W2–W4, W7, W3 commit, W6, W9, W11a e2e REST; anti-pattern suite green; bootstrap reranker eval / gateway smoke; integration agents with mock LLM |
 | **2** | All workflows e2e including P1, W8, W12; LiveKit smoke; dock stream assertions; frontend tests for dock/canvas |
 | **3** | Import pipeline tests; imported graph obeys [03](./03-graph-and-memory.md) invariants |
 | **4** | `decision_traces` append tests on accept/correct |

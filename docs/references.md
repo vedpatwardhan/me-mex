@@ -40,7 +40,18 @@ Other projects replicate this pattern in isolated workspaces.
 
 ---
 
-## 4. External integration references
+## 4. Retrieval and decision routing
+
+| Path / topic | Description |
+|--------------|-------------|
+| [../reports/2026-11-18-retrieval-methods.md](../reports/2026-11-18-retrieval-methods.md) | v2 analysis: bi-encoder, sparse, ColBERT, cross-encoder, decision heads |
+| [BAAI/bge-reranker-base](https://huggingface.co/BAAI/bge-reranker-base) | Default off-the-shelf cross-encoder (gateway CPU) |
+| [BAAI/bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) | Higher-quality reranker alternative |
+| [colab/TOPOLOGY.md](../colab/TOPOLOGY.md) | Four-model Colab gateway layout |
+
+---
+
+## 5. External integration references
 
 | Topic | Pointer |
 |-------|---------|
@@ -57,6 +68,6 @@ Other projects replicate this pattern in isolated workspaces.
 
 ---
 
-## 5. Spec index
+## 6. Spec index
 
 Full document map: [README.md](./README.md).

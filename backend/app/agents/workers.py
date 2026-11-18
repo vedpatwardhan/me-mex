@@ -5,12 +5,23 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.db import ToolContext
+from app.db import ToolContext, Store
 from app.config import settings
 from app.llm import get_chains
 from app.services.decision_scorer import ScorerNode, get_decision_scorer
 from app.tools import dock, gist, link, project, reorg, staging
 from app.tools import fetch as fetch_tool
+
+
+def _scorer_node(store: Store, node_id: str) -> ScorerNode:
+    node = store.get_node(node_id)
+    return ScorerNode(
+        id=node.id,
+        title=node.title,
+        node_kind=node.node_kind.value,
+        gist=node.description or "",
+        description=node.description or "",
+    )
 
 
 def route_intent(text: str, context: dict, project: Any) -> str:
@@ -101,9 +112,14 @@ def link_place_worker(ctx: ToolContext, context: dict) -> dict:
         return {"reply": "Need root_id in custom_fields.", "graph_write": False}
     nodes = ctx.store.list_nodes(ctx.project_id)
     frontier = [n for n in nodes if n.id != root_id][:10]
-    query = ScorerNode(id=root_id, title=root_id, node_kind="ROOT")
+    query = _scorer_node(ctx.store, root_id)
     front = [
-        ScorerNode(id=n.id, title=n.title, node_kind=n.node_kind.value)
+        ScorerNode(
+            id=n.id,
+            title=n.title,
+            node_kind=n.node_kind.value,
+            description=n.description or "",
+        )
         for n in frontier
     ]
     probs = get_decision_scorer().score(query, front)
@@ -132,14 +148,19 @@ def reorg_recommend_worker(ctx: ToolContext) -> dict:
         return {"reply": "Hub has no neighbors to score.", "graph_write": False}
     by_id = {n.id: n for n in nodes}
     query = ScorerNode(
-        id=hub.id, title=hub.title, node_kind=hub.node_kind.value, gist=hub.description
+        id=hub.id,
+        title=hub.title,
+        node_kind=hub.node_kind.value,
+        gist=hub.description or "",
+        description=hub.description or "",
     )
     front = [
         ScorerNode(
             id=nid,
             title=by_id[nid].title,
             node_kind=by_id[nid].node_kind.value,
-            gist=by_id[nid].description,
+            gist=by_id[nid].description or "",
+            description=by_id[nid].description or "",
         )
         for nid in neighbor_ids
         if nid in by_id
@@ -177,8 +198,8 @@ def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
         fields.get("query_node_id") or (context.get("selected_node_ids") or [None])[0]
     )
     if not seed:
-        nodes = ctx.store.list_nodes(ctx.project_id)
-        seed = nodes[0].id if nodes else None
+        proj_seed = ctx.store.get_project(ctx.project_id)
+        seed = proj_seed.genesis_node_id or None
     if not seed:
         return {"reply": "Graph empty.", "graph_write": False}
 
@@ -194,10 +215,8 @@ def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
         neighbor_ids = [n for n in ctx.store.neighbors(current) if n not in visited]
         if not neighbor_ids:
             break
-        query = ScorerNode(id=current, title=current, node_kind="CONCEPT_M")
-        front = [
-            ScorerNode(id=nid, title=nid, node_kind="CONCEPT_M") for nid in neighbor_ids
-        ]
+        query = _scorer_node(ctx.store, current)
+        front = [_scorer_node(ctx.store, nid) for nid in neighbor_ids]
         probs = scorer.score(query, front)
         hop = sorted(probs.items(), key=lambda x: x[1], reverse=True)[:top_k]
         for nid, _ in hop:

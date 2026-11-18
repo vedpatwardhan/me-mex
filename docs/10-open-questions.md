@@ -33,7 +33,7 @@
 | # | Status |
 |---|--------|
 | M1 | **Resolved** — [§6](#6-resolved-decisions-locked) |
-| M2 | **Open** — One global LoRA adapter vs per-project LoRA on shared Ministral base |
+| M2 | **Open** — One global reranker checkpoint vs per-project fine-tune on gateway |
 | M3 | **Resolved** — [§6](#6-resolved-decisions-locked) |
 | M4 | **Resolved** — [§6](#6-resolved-decisions-locked) |
 
@@ -56,7 +56,7 @@
 | Pipecat-first voice | **LiveKit** |
 | Clean-slate SQLite dual-graph | **MongoDB** knowledge graph |
 | 5-day greenfield | Phased v2 per [09-phasing.md](./09-phasing.md) |
-| LoRA deferred (no Day-1 data) | **Bootstrap from notes** + live traces + **LoRA in v2** |
+| LoRA deferred (no Day-1 data) | **Off-the-shelf reranker** + bootstrap for **eval**; optional fine-tune from traces |
 | 27 tools one supervisor | **Composable tools** + workers, HITL |
 | Scrollback / no mute browsing | **Latest-message panel** + mute + graph-first |
 
@@ -89,9 +89,11 @@ Add new open items inline in §1–4 as implementation discovers gaps.
 
 | ID | Decision |
 |----|----------|
-| **M1 STT/TTS + GPU** | **Colab:** Ministral 3 8B + LoRA on **vLLM only** (remote). **Local:** LangGraph agents, LiveKit, Mongo, checkpoint JSON, UI. **STT/TTS** default **local** (MacBook Air M2); may colocate on Colab only if needed—avoid extra GPU VMs. |
-| **M3 Bootstrap dataset** | Build LoRA JSONL by **joining all three tier files**: `overall_insights` structure + **`deeper_read_notes`** gists/ROOT identity (+ `select_papers` where needed) → synthetic `query_node` / `frontier` / **`label_relevance`**—not an isolated “parenthetical parser” problem. Implementation may use rules + alignment; goal is **trainable relevance batches**. |
+| **M1 STT/TTS + GPU** | **Colab (one VM):** **inference gateway** — Ministral 3 8B **vLLM** (GPU), **cross-encoder reranker** + Whisper + Kokoro (**CPU**). **Local:** LangGraph agents, LiveKit, Mongo, checkpoint JSON, UI. Single public URL for chat, `decision/score`, STT/TTS. |
+| **M3 Bootstrap dataset** | Build decision JSONL by **joining tier files** (`overall_insights`, `deeper_read_notes`, …) → `query_node` / `frontier` / **`label_relevance`** for **eval** and optional reranker fine-tune—not an isolated “parenthetical parser” problem. |
 | **M4 Placement UX** | **Suggest-only** for v2 focus—ranked candidates in dock; **no** auto-propose edge diff above threshold; revisit visual “factory” later. |
+
+**Pivot (2026-11-18):** Production routing = **cross-encoder on gateway**; **LoRA-on-Ministral decision** and **generative JSON decision hops** superseded. See [05-models-and-runtime.md](./05-models-and-runtime.md), [reports/2026-11-18-retrieval-methods.md](../reports/2026-11-18-retrieval-methods.md).
 
 ### Product / graph
 

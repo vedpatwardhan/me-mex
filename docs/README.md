@@ -13,7 +13,7 @@ This folder is the **source of truth** for the rebuild after git tag **`v1`**. *
 | [02-user-experience.md](./02-user-experience.md) | Voice rail, default recommendations dock, unified color-coded graph |
 | [03-graph-and-memory.md](./03-graph-and-memory.md) | Three tiers, MongoDB model, ROOT-only insights, staging |
 | [04-agent-orchestration.md](./04-agent-orchestration.md) | LangGraph runtime (streaming, interrupts, jobs), agents + deterministic tools |
-| [05-models-and-runtime.md](./05-models-and-runtime.md) | Ministral, LoRA decision (notes bootstrap), Whisper-tiny, Kokoro |
+| [05-models-and-runtime.md](./05-models-and-runtime.md) | Colab gateway — Ministral, cross-encoder reranker, Whisper, Kokoro; notes bootstrap for eval |
 | [06-workflows.md](./06-workflows.md) | End-to-end user workflows and anti-patterns |
 | [07-performance-and-observability.md](./07-performance-and-observability.md) | Latency, tracing, decision datasets |
 | [08-migration-and-reuse.md](./08-migration-and-reuse.md) | Optional v1 reuse (spec wins) + markdown import |
@@ -41,5 +41,5 @@ This folder is the **source of truth** for the rebuild after git tag **`v1`**. *
 |------|--------|
 | Vision & platform | **Aligned** — [00](./00-vision-and-principles.md) |
 | Graph, agents, UX, workflows | **Aligned** — no `domain_mode`; P0/P1 scope onboarding |
-| Phase 1 backend | **Done on `main`** — headless `/api/*`, tools, tests; Phase 2 = voice + dock |
+| Phase 1 backend | **Done on `main`** — headless `/api/*`, tools, tests; decision canon = **gateway reranker** (spec 2026-11-18); Phase 2 = voice + dock |
 | Voice / dock / canvas | **Phase 2+** — [02](./02-user-experience.md) |

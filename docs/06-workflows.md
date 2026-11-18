@@ -163,8 +163,8 @@ Link + *“Summarize”* → dock text only; may feed into W2 gist thread withou
 
 ### W11a — You ask (primary)
 
-1. *“What relates to X?”* / question while nodes selected.
-2. **RetrievalWorker:** bounded BFS, **DecisionScorer** each hop (`query_node`, full frontier probs) → **top‑k** expand → **`highlight_nodes`** + short answer in dock.
+1. *“What relates to X?”* / question while nodes selected. **Seed:** **Genesis** by default; or `query_node_id` / canvas selection when set.
+2. **RetrievalWorker:** bounded BFS from seed, **DecisionScorer** (gateway reranker) each hop (`query_node`, full frontier probs) → **top‑k** expand → **`highlight_nodes`** + short answer in dock.
 3. **No** recommendation required.
 
 ### W11b — ToDo relevance (optional recommendation)

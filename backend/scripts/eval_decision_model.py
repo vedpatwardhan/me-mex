@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate DecisionScorer against val JSONL — mock by default, --live for Colab LoRA."""
+"""Evaluate DecisionScorer against val JSONL — mock by default, --live for Colab gateway reranker."""
 
 from __future__ import annotations
 

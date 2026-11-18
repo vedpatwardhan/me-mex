@@ -61,7 +61,7 @@ Existing projects load if schema changes are backward-compatible defaults.
 | v1 path | v2 approach |
 |---------|-------------|
 | `app/agents/orchestrator.py` | LangGraph supervisor + composable tools |
-| `app/agents/graph_navigator.py` `subgraph_expansion` | **RetrievalWorker** + LoRA **query/frontier relevance** (full prob vector, agent top‑k) + `highlight_nodes` |
+| `app/agents/graph_navigator.py` `subgraph_expansion` | **RetrievalWorker** + gateway **reranker** query/frontier relevance (full prob vector, agent top‑k) + `highlight_nodes` |
 | Auto `reorganize_overclustered_nodes` / `SPLIT_CONCEPT` | **Do not execute v1 engine.** **ReorgRecommendWorker** (DecisionScorer) + user-approved `apply_reorg_plan` |
 | `POST /api/chat` + scrollback SSE | LiveKit + recommendations dock; REST `thread_id` |
 | Browser Whisper → text box | Whisper-tiny in agent worker |

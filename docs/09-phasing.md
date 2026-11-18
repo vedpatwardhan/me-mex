@@ -11,18 +11,18 @@ Unresolved build choices: [10-open-questions.md](./10-open-questions.md) (gating
 ```
 Phase 0  Spec aligned (00–11) + coverage matrix maintained in this file
     ↓
-Phase 1  Mongo schema + all deterministic tools + headless agents + LoRA bootstrap/deploy
+Phase 1  Mongo schema + all deterministic tools + headless agents + gateway reranker + bootstrap JSONL
     ↓
 Phase 2  LangGraph interactive runtime + LiveKit + full UX shell + all workflows voice/panel
     ↓
 Phase 3  Markdown import to graph + multi-project seed + decision dataset refresh
     ↓
-Phase 4  Live decision traces + adapter refresh + observability completion + UX polish
+Phase 4  Live decision traces + optional reranker refresh + observability completion + UX polish
     ↓
 Phase 5  Hardening (load scenarios, v1 fence, soak)
 ```
 
-**Invariants throughout:** no implicit graph ingest; no autonomous overnight co-scientist; MongoDB; **LoRA decision routing** (no logprob MVP); Whisper-tiny; Kokoro; LiveKit; recommendations **initiate** guided flows—**no** silent graph writes ([06 §0](./06-workflows.md#0-how-recommendations-work-all-workflows)); v1 reuse **only when aligned** ([08](./08-migration-and-reuse.md) reuse doctrine).
+**Invariants throughout:** no implicit graph ingest; no autonomous overnight co-scientist; MongoDB; **cross-encoder decision routing via Colab gateway** (no generative LLM hops; no LoRA decision MVP); Whisper-tiny; Kokoro; LiveKit; recommendations **initiate** guided flows—**no** silent graph writes ([06 §0](./06-workflows.md#0-how-recommendations-work-all-workflows)); v1 reuse **only when aligned** ([08](./08-migration-and-reuse.md) reuse doctrine).
 
 ---
 
@@ -33,7 +33,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | Source | Topic | Primary phase | Notes |
 |--------|--------|---------------|--------|
 | [00](./00-vision-and-principles.md) §1–7 | Vision, tiers, principles | P0 canon | Build rules in all phases |
-| [00](./00-vision-and-principles.md) §8 | Platform stack (committed) | P1–P2 | LoRA P1; voice P2 |
+| [00](./00-vision-and-principles.md) §8 | Platform stack (committed) | P1–P2 | Reranker + gateway P1; voice P2 |
 | [00](./00-vision-and-principles.md) §9 | Success criteria | P1–P5 | [§3](#3-success-criteria-00-9--phases) |
 | [01](./01-v1-baseline.md) | v1 reference / gaps | — | Tag `v1` only; informs [08](./08-migration-and-reuse.md) |
 | [02](./02-user-experience.md) §2–3 | Layout, voice rail, P0 API entry | P2 | Minimal project API stub P1 for pytest |
@@ -48,7 +48,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | [04](./04-agent-orchestration.md) §7–8 | P0/P1 lifecycle, routing table | P2 | P0 API P1 stub |
 | [04](./04-agent-orchestration.md) §10–11 | API boundaries, observability hooks | P1 REST; P2 LiveKit | Traces P4 |
 | [04](./04-agent-orchestration.md) §12 | LangGraph runtime (stream, jobs, park) | P2 | Required for voice UX |
-| [05](./05-models-and-runtime.md) §1–3 | Stack, DecisionScorer, bootstrap | P1 LoRA; P2 inference | |
+| [05](./05-models-and-runtime.md) §1–3 | Stack, DecisionScorer, bootstrap | P1 gateway reranker; P2 inference | |
 | [05](./05-models-and-runtime.md) §4 | Embeddings | P1 retrieval tests; P2 agent | |
 | [05](./05-models-and-runtime.md) §5–6 | Speech, Colab topology | P2 | M1 hosting [10](./10-open-questions.md) |
 | [05](./05-models-and-runtime.md) §7–8 | Latency targets, trace schema | P1 eval; P4 live append | |
@@ -70,12 +70,12 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | Short thread → commit (paper + concepts + edges) | P2 (W7) |
 | Catalog at scale (many gist ROOTs, no auto extract/reorg) | P1 gist tools + P2 voice |
 | Deep read one paper through staging | P1 commit path + P2 W3 all paths |
-| Placement “where does this fit?” + you wire ROOT | P1 LoRA + P2 LinkPlace HITL |
+| Placement “where does this fit?” + you wire ROOT | P1 reranker + P2 LinkPlace HITL |
 | Insights tree via approved reorg diff | P1 preview + P2 W5 |
-| Retrieval highlighted subgraph, bounded hops | P1 LoRA + P2 RetrievalWorker |
+| Retrieval highlighted subgraph, bounded hops | P1 reranker + P2 RetrievalWorker |
 | Voice + canvas + recommendations dock | P2 |
 | Multi-project isolated graphs + switch | P2 switcher + P5 soak |
-| Decision quality — LoRA held-out eval before ship | P1 exit gate |
+| Decision quality — bootstrap eval / gateway smoke (optional gate) | P1 exit |
 
 ---
 
@@ -90,7 +90,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | **W3a** Deep read after long paper thread | [06 W3a](./06-workflows.md#w3a--recommended-after-long-paper-thread) | Staging + commit under ROOT | Dock deep-read nudge | — |
 | **W3b** Deep read existing gist ROOT | [06 W3b](./06-workflows.md#w3b--existing-gist-root-on-canvas) | Same staging keyed `root_id` | Selection + `custom_fields.root_id` | — |
 | **W3c** Direct URL deep read | [06 W3c](./06-workflows.md#w3c--direct-deep-read-url--command) | fetch + staging | Voice + fields | — |
-| **W4a** Link recommendation after new node | [06 W4](./06-workflows.md#4-w4--connect--link-nodes) | LinkPlace + LoRA + approve edges | Dock placement approval | — |
+| **W4a** Link recommendation after new node | [06 W4](./06-workflows.md#4-w4--connect--link-nodes) | LinkPlace + reranker + approve edges | Dock placement approval | — |
 | **W4b** Manual link | [06 W4b](./06-workflows.md#w4b--manual-agent-may-not-have-suggested-it) | `create_root_insight_edges` | Voice + selection context | — |
 | **W5** Reorganization | [06 W5](./06-workflows.md#5-w5--reorganization) | preview + apply with interrupt | ReorgRecommend + crowded-hub nudge | — |
 | **W6** Note / ToDo capture | [06 W6](./06-workflows.md#6-w6--capture-note--todo) | `create_note`, `create_todo` | Voice | — |
@@ -115,10 +115,10 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | **Conversation** | W2/W9 REST | Voice inquiry, fetch, passages |
 | **GistWorker** | Gist/attach/note/todo tools | W2 commit + W6 |
 | **IntraDocWorker** | Extract harness → staging → commit | W3 + dock staging row + job progress |
-| **LinkPlaceWorker** | LoRA + placement enqueue | W4 + dock approval |
+| **LinkPlaceWorker** | Reranker + placement enqueue | W4 + dock approval |
 | **ReorgRecommendWorker** | Proposal + preview | W5 + crowded hub nudge |
 | **ReorgApplyWorker** | `apply_reorg_plan` after approve | Same |
-| **RetrievalWorker** | BFS + LoRA + highlight | W11a |
+| **RetrievalWorker** | BFS + reranker + highlight | W11a |
 | **ProjectScopeWorker** | — | P1 onboarding |
 
 ### 5.2 Deterministic tools ([04 §6](./04-agent-orchestration.md#6-deterministic-tools))
@@ -168,12 +168,12 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | Ministral 3 8B on Colab vLLM (chat + tools) | P1 for IntraDoc harness; P2 production agent path |
 | Bootstrap parser → `decision_training/<project>/*.jsonl` | P1 |
 | Held-out eval on `query_node` + full `frontier` labels | P1 **exit gate** |
-| Train + deploy LoRA (`--enable-lora`); DecisionScorer API | P1 |
+| Gateway `decision/score` (cross-encoder); four-model Colab stack | P1 |
 | ContextPreprocessor project scope in prompts | P2 (after P1 `update_project_scope`) |
-| Embeddings in agents (`query_nodes_by_embedding`, frontier prep) | P1 tests; P2 workers |
+| Embeddings in agents (`query_nodes_by_embedding`) | Optional P3+; stub OK through P2 |
 | Whisper-tiny + Kokoro + VAD; LiveKit same `thread_id` | P2 |
 | Speech barge-in cancels in-flight TTS / unsafe writes | P2 + P5 scenario |
-| Colab topology (LLM + LoRA + optional STT sidecar) | P2; M1 in [10](./10-open-questions.md) |
+| Colab topology (LLM + reranker + STT/TTS gateway) | P2; M1 in [10](./10-open-questions.md) |
 | Decision trace schema writes (bootstrap) | P1 |
 | Live append `decision_traces/` on accept/correct | P4 |
 | Latency targets [05 §7](./05-models-and-runtime.md#7-latency-targets) | P2 measure; P5 load table |
@@ -185,8 +185,8 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | Item | When |
 |------|------|
 | Composable tools / talk-first (no unrequested chains) | P1 design; enforced P5 |
-| LoRA hops <250 ms p95 target | P2 measure; P5 [07 §6](./07-performance-and-observability.md#6-load--acceptance-scenarios) |
-| vLLM prefix cache (decision batches) | P2 |
+| Rerank hops (RTT + batch) &lt;250 ms p95 target | P2 measure; P5 [07 §6](./07-performance-and-observability.md#6-load--acceptance-scenarios) |
+| Gateway batching / connection reuse for decision hops | P2 |
 | Staging cache (`root_id` + content hash) | P2+ |
 | Recommendations refresh on graph commit only | P2 |
 | Per-tool latency | P2+ |
@@ -216,9 +216,9 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 
 ---
 
-## Phase 1 — Graph tools + decision bootstrap (LoRA)
+## Phase 1 — Graph tools + decision bootstrap (reranker)
 
-**Goal:** Headless graph API, **all** deterministic tools, agent harness without LiveKit, **deployed LoRA** before voice depends on routing.
+**Goal:** Headless graph API, **all** deterministic tools, agent harness without LiveKit, **gateway cross-encoder** `decision/score` before voice depends on routing.
 
 ### Graph & API
 
@@ -230,7 +230,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 ### Agents (headless)
 
 - Harness: Supervisor routes to Conversation, GistWorker, IntraDocWorker, LinkPlaceWorker, ReorgRecommend/ReorgApply, RetrievalWorker.
-- IntraDocWorker: real or fixture LLM for extract tests; DecisionScorer **real LoRA** on integration path.
+- IntraDocWorker: real or fixture LLM for extract tests; DecisionScorer **live gateway reranker** on integration path (`-m vllm`).
 - Mock/score-only unit tests for tools; no LLM inside tools.
 
 ### Workflows (automated)
@@ -240,19 +240,19 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 
 ### Decision (required exit)
 
-- Parser: robotics three-tier notes → JSONL [05 §3](./05-models-and-runtime.md#3-decision-model--lora-from-bootstrap-notes), [08 §5](./08-migration-and-reuse.md#5-markdown-import-robotics--other-projects).
+- Parser: robotics notes → JSONL [05 §3](./05-models-and-runtime.md#3-decision-routing--cross-encoder-reranker), [08 §5](./08-migration-and-reuse.md#5-markdown-import-robotics--other-projects).
 - Held-out **`query_node` + `frontier` → `label_relevance`** full vectors.
-- Train LoRA on Ministral 3 8B; mount Colab vLLM `--enable-lora`.
-- Document eval metrics on held-out robotics labels [00 §9](./00-vision-and-principles.md#9-success-criteria-personal-research).
+- Deploy gateway **`decision/score`** (cross-encoder; e.g. BGE reranker on CPU).
+- Document eval metrics on held-out robotics labels via `eval_decision_model.py` [00 §9](./00-vision-and-principles.md#9-success-criteria-personal-research).
 
 ### Observability (partial)
 
 - `backend/data/decision_training/` populated.
 - Per-tool latency baseline; LLMTracer on extract path [07 §3](./07-performance-and-observability.md#3-instrumentation-required).
 
-**Testing ([11 §7](./11-testing.md#7-phase-gates-testing)):** `tests/unit/tools/*` for every [04 §6](./04-agent-orchestration.md#6-deterministic-tools) tool; `tests/e2e/workflows` for W2–W4, W7, W3, W6, W9, W11a; `tests/e2e/anti_patterns`; integration agents (mock LLM); `-m vllm` LoRA eval for Phase 1 exit.
+**Testing ([11 §7](./11-testing.md#7-phase-gates-testing)):** `tests/unit/tools/*` for every [04 §6](./04-agent-orchestration.md#6-deterministic-tools) tool; `tests/e2e/workflows` for W2–W4, W7, W3, W6, W9, W11a; `tests/e2e/anti_patterns`; integration agents (mock LLM); `-m vllm` gateway smoke (chat + `decision/score`) for Phase 1 exit.
 
-**Exit:** Gist ROOT, deep-read commit, placement suggest, reorg preview via agents + **LoRA**; all [§5.2](#52-deterministic-tools-04-6) tools pass pytest; decision quality gate passed; [11](./11-testing.md) Phase 1 gate green.
+**Exit:** Gist ROOT, deep-read commit, placement suggest, reorg preview via agents + **live reranker**; all [§5.2](#52-deterministic-tools-04-6) tools pass pytest; bootstrap eval documented; [11](./11-testing.md) Phase 1 gate green.
 
 ---
 
@@ -281,7 +281,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 
 ### Models
 
-- LinkPlaceWorker, RetrievalWorker, ReorgRecommendWorker: **LoRA DecisionScorer** required (no stub in prod).
+- LinkPlaceWorker, RetrievalWorker, ReorgRecommendWorker: **HttpDecisionScorer** (gateway reranker) required (no stub in prod).
 - ContextPreprocessor injects scope when `introduction` set [04 §7](./04-agent-orchestration.md#7-project-lifecycle-create-vs-scope).
 
 ### Performance (initial)
@@ -300,22 +300,22 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 
 - Import pipelines [08 §5](./08-migration-and-reuse.md#5-markdown-import-robotics--other-projects): `deeper_read_notes` → ROOT+gist; `select_papers` → intra-doc where applicable; `overall_insights` → hubs + insights + ROOT cites.
 - Parallel refresh `decision_training/<project>/*.jsonl` [05 §8](./05-models-and-runtime.md#8-decision-trace-schema-training--eval).
-- Optional retrain / per-project LoRA [10 M2](./10-open-questions.md#3-models-and-runtime).
+- Optional fine-tune / per-project reranker [10 M2](./10-open-questions.md#3-models-and-runtime).
 - Parser open items [10 M3](./10-open-questions.md#3-models-and-runtime).
 
 **Exit:** Imported graph obeys [03](./03-graph-and-memory.md) tier rules; dataset size and eval documented per imported project.
 
 ---
 
-## Phase 4 — Live traces, adapter refresh, polish
+## Phase 4 — Live traces, reranker refresh, polish
 
-**Goal:** Continuous decision-model improvement + UX completeness without weakening HITL.
+**Goal:** Continuous routing improvement + UX completeness without weakening HITL.
 
-- Append **live** `decision_traces/` on user accept/correct (placement, retrieval expand, reorg choices) [05 §3.2 step 4](./05-models-and-runtime.md#32-delivery-order-v2--no-logprob-mvp).
-- Adapter refresh cadence (manual or scripted retrain).
+- Append **live** `decision_traces/` on user accept/correct (placement, retrieval expand, reorg choices) [05 §3.2](./05-models-and-runtime.md#32-delivery-order-v2--no-fine-tune-gate-for-p2p4).
+- Optional reranker fine-tune cadence (manual or scripted).
 - Complete [07 §3](./07-performance-and-observability.md#3-instrumentation-required) signals not yet wired: interrupt analytics, full token accounting review, OTEL/LangSmith where replacing LLMTracer.
 - Canvas **color legend** polish; dock UX (done strip, tool trace expand) [02](./02-user-experience.md).
-- Optional nudge impression logging; **LoRA** data = `decision_traces` only [03 §10](./03-graph-and-memory.md#10-nudges-vs-training-traces).
+- Optional nudge impression logging; **`decision_traces`** for optional reranker training [03 §10](./03-graph-and-memory.md#10-nudges-vs-training-traces).
 
 **Exit:** Live traces feeding retrain pipeline; suggestions remain **HITL** for all graph writes.
 
@@ -343,7 +343,8 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | Global Master Chat scrollback as workspace | **Replaced** by recommendations dock | P2 |
 | Auto `reorganize_overclustered_nodes` on ingest | **Forbidden**; ReorgRecommendWorker + approve only | P1–P2 |
 | Implicit graph writes from summary chat | **Forbidden** | P1 tests; P2 UX |
-| Logprob-only decision routing | **Not shipped** — LoRA bootstrap | P1 gate |
+| Generative JSON / chat-LLM decision hops | **Not shipped** — gateway reranker | P1 |
+| Logprob-only / LoRA-on-Ministral decision | **Superseded** (2026-11-18) | — |
 | Port v1 modules that contradict spec | **Skip** per [08](./08-migration-and-reuse.md) reuse doctrine | All phases |
 
 ---
@@ -379,7 +380,7 @@ Reuse is **never required**. When useful and spec-aligned:
 | ID | Status | Blocks or shapes |
 |----|--------|------------------|
 | **U4** | Open | Pinned vs freeform custom fields UX |
-| **M2** | Open | Global vs per-project LoRA → P3 retrain |
+| **M2** | Open | Global vs per-project reranker checkpoint → P3/P4 |
 | **P2** | Deferred | Non-robotics import importers |
 
 Close remaining items in [10](./10-open-questions.md) → update this section and affected phase bullets.

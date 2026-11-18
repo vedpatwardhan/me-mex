@@ -16,6 +16,7 @@ class ScorerNode:
     title: str
     node_kind: str
     gist: str = ""
+    description: str = ""
 
 
 class DecisionScorerProtocol(Protocol):
@@ -38,11 +39,10 @@ class MockDecisionScorer:
 
 
 class HttpDecisionScorer:
-    """POST to Colab vLLM LoRA adapter (optional manual -m vllm)."""
+    """POST to Colab gateway cross-encoder reranker (pytest -m vllm)."""
 
-    def __init__(self, base_url: str | None = None, adapter_id: str | None = None):
+    def __init__(self, base_url: str | None = None):
         self.base_url = (base_url or settings.COLAB_VLLM_URL).rstrip("/")
-        self.adapter_id = adapter_id or settings.LORA_ADAPTER_ID
 
     def score(
         self, query_node: ScorerNode, frontier: list[ScorerNode]
@@ -50,7 +50,6 @@ class HttpDecisionScorer:
         payload = {
             "query_node": query_node.__dict__,
             "frontier": [n.__dict__ for n in frontier],
-            "adapter_id": self.adapter_id,
         }
         with httpx.Client(timeout=60.0) as client:
             r = client.post(f"{self.base_url}/decision/score", json=payload)

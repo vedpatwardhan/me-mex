@@ -59,7 +59,7 @@ Full technical detail: checkout git tag **`v1`** (`docs/ARCHITECTURE.md` on that
 | Passage packing, consolidation prompts | **Port** behind **intra-document graph** tool only |
 | `app/db.py` Mongo models | **Keep** — graph DB is MongoDB in v2 |
 | `graph_navigator.py` traversal ideas | **Replace** autoregressive hops with decision scorer + HITL |
-| `reorganize_overclustered_nodes` + `SPLIT_CONCEPT` engine | **Do not port execution** — too slow (heavy generative LLM). v2 **reorg** = **decision-model recommendations** (node/section/orphan classification) + approved **topology apply** only |
+| `reorganize_overclustered_nodes` + `SPLIT_CONCEPT` engine | **Do not port execution** — too slow (heavy generative LLM). v2 **reorg** = **reranker recommendations** (frontier relevance) + approved **topology apply** only |
 | `orchestrator.py` intent routing | **Replace** with LangGraph supervisor + explicit tools |
 | SSE chat stream, scrollback UI | **Replace** with LiveKit + default recommendations dock |
 | Browser Whisper | **Replace** with Whisper-tiny in agent pipeline |

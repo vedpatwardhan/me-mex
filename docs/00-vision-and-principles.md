@@ -64,7 +64,7 @@ v2 keeps a **graph and agents**, but optimizes for:
 2. **Talk first, persist on command**—summaries and Q&A without automatic graph mutation.
 3. **Voice-first interaction** (LiveKit) with **voice rail + default recommendations dock** (latest reply + nudges + **every pending approval**), not a full chat history wall.
 4. **Explicit graph edits** (nodes, edges, placement, todos) with approval on risky changes.
-5. **Faster retrieval** via a **LoRA decision adapter** that scores **relevance of every BFS frontier node** w.r.t. the current **query concept**—replacing v1 **per-hop generative `subgraph_expansion`**. Trained from **legacy notes** + traces first, then live expands. [05-models-and-runtime.md](./05-models-and-runtime.md).
+5. **Faster retrieval** via a **cross-encoder reranker** (Colab gateway) that scores **relevance of every BFS frontier node** w.r.t. the current **query concept**—replacing v1 **per-hop generative `subgraph_expansion`**. Off-the-shelf weights first; **legacy notes** JSONL for eval and optional fine-tune later. [05-models-and-runtime.md](./05-models-and-runtime.md).
 
 ---
 
@@ -208,13 +208,13 @@ Plain-language **persist** commands map to tools; non-trivial changes show a **d
 
 6. **Immutable evidence stays sacred** — Intra-document concepts and source roots are write-once; synthesis lives in mutable structure.
 
-7. **Insights maintenance is assisted, not automatic** — Crowded sections: **decision model** scores relevance of frontier targets w.r.t. query nodes; agent shows **recommendations** and a diff—you approve before any apply. **No** v1 `SPLIT_CONCEPT` / `reorganize_overclustered_nodes` token cascade.
+7. **Insights maintenance is assisted, not automatic** — Crowded sections: **gateway reranker** scores relevance of frontier targets w.r.t. query nodes; agent shows **recommendations** and a diff—you approve before any apply. **No** v1 `SPLIT_CONCEPT` / `reorganize_overclustered_nodes` token cascade.
 
 8. **Speed where it matters** — **One relevance vector per hop** over the full frontier (then agent top‑k expand); heavy LLM only for deep extract and synthesis you request—not v1-style generative BFS text per hop.
 
 9. **Observable agent runs** — LangGraph **checkpoints**, **`jobs` ledger**, `tasks`/custom streams, and tool logs so you always know what each ask is doing and what awaits approval.
 
-10. **Decision model is in scope for v2** — Placement and traversal use a **LoRA adapter** on Ministral 3 8B from **day one**: bootstrap labels from curated markdown, **train/eval before** interactive placement ships, deploy on Colab vLLM alongside chat—same commitment level as Whisper-tiny and Kokoro. Live traces refine the adapter over time. See [05-models-and-runtime.md](./05-models-and-runtime.md).
+10. **Decision routing is in scope for v2** — Placement and traversal use an **off-the-shelf cross-encoder reranker** on the **Colab gateway** from **day one** (no fine-tune required for P2–P4). Bootstrap labels from curated markdown support **eval**; live traces may **refine** a fine-tuned reranker later. Chat stays on **Ministral 3 8B** vLLM. See [05-models-and-runtime.md](./05-models-and-runtime.md).
 
 11. **Evolve v1 backend when useful** — **MongoDB** for graph storage; **optional** reuse of v1 parsers, passages, and consolidation **only where** they fit composable tools and **deep-read mode**—never port v1 behavior that contradicts this spec. See [08-migration-and-reuse.md](./08-migration-and-reuse.md).
 
@@ -226,7 +226,7 @@ Plain-language **persist** commands map to tools; non-trivial changes show a **d
 |-------|--------|
 | **Graph DB** | **MongoDB** (evolve v1 collections; no SQLite clean-slate) |
 | **Chat / tools LLM** | **Ministral 3 8B** on Colab **vLLM** |
-| **Decision model** | **LoRA adapter** (Ministral 3 8B) from **notes bootstrap** + live traces — **no logprob MVP** |
+| **Decision routing** | **Cross-encoder reranker** on Colab gateway (`decision/score`); notes bootstrap + live traces for **eval / optional fine-tune** |
 | **Voice STT** | **Whisper-tiny** |
 | **Voice TTS** | **Kokoro** |
 | **Real-time voice** | **LiveKit** agent + LangGraph |
@@ -234,7 +234,7 @@ Plain-language **persist** commands map to tools; non-trivial changes show a **d
 
 **Product invariants (not negotiable for v2):** no **implicit graph ingest** from chat; no **overnight autonomous co-scientist** that mutates the graph without you. Graph changes require **explicit commands** or **approved** diffs.
 
-**Phasing (same release family):** **notes → JSONL → LoRA train/eval → deploy** before voice placement/highlight rely on DecisionScorer; then interactive graph + voice on the full stack. **Every spec topic** maps to a phase in [09-phasing.md](./09-phasing.md) (coverage matrices + workflow/tool checklists).
+**Phasing (same release family):** **gateway reranker + notes → JSONL → eval baseline** before voice placement/highlight rely on DecisionScorer; then interactive graph + voice on the full stack. **Every spec topic** maps to a phase in [09-phasing.md](./09-phasing.md) (coverage matrices + workflow/tool checklists).
 
 ---
 
@@ -249,7 +249,7 @@ Plain-language **persist** commands map to tools; non-trivial changes show a **d
 - **Retrieval** — highlighted subgraph quickly, not opaque long agent chains.
 - **Voice + canvas** — single color-coded graph; **recommendations dock** for latest reply + nudges (not scrollback chat).
 - **Multi-project** — e.g. robotics vs another PI, isolated graphs, clean switching.
-- **Decision quality** — **LoRA** meets held-out **relevance-ranking** eval (`query_node` + full `frontier` → labeled relevant ids) from notes / v1 traces before retrieval and suggest paths ship.
+- **Decision quality** — **Reranker** (gateway or same weights) meets held-out **relevance-ranking** eval (`query_node` + full `frontier` → labeled relevant ids) from notes where a gate is set; P2–P4 may ship on **wired scorer + spot check** if threshold TBD.
 
 ---
 
@@ -258,7 +258,7 @@ Plain-language **persist** commands map to tools; non-trivial changes show a **d
 | Document | Topic |
 |----------|--------|
 | [02-user-experience.md](./02-user-experience.md) | Voice rail, recommendations dock, unified color-coded canvas |
-| [05-models-and-runtime.md](./05-models-and-runtime.md) | Ministral, decision bootstrap from notes, speech stack |
+| [05-models-and-runtime.md](./05-models-and-runtime.md) | Colab gateway — Ministral, reranker, speech; notes bootstrap for eval |
 | [08-migration-and-reuse.md](./08-migration-and-reuse.md) | What to port from tag `v1` |
 | [10-open-questions.md](./10-open-questions.md) | Open product and architecture decisions |
 | [11-testing.md](./11-testing.md) | Unit, integration, e2e, CI gates |

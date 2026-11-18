@@ -215,4 +215,4 @@ Raw `context_json` edit; syncs with voice rail **custom fields**.
 | TTS | **Kokoro** |
 | LLM | **Ministral 3 8B** on Colab **vLLM** |
 
-**Agents local;** LLM/LoRA on Colab vLLM. STT/TTS default local—[10 M1](./10-open-questions.md#6-resolved-decisions-locked), [05 §6](./05-models-and-runtime.md#6-runtime-topology-local-agents--colab-models).
+**Agents local;** Ministral + reranker + STT/TTS on Colab **gateway**—[10 M1](./10-open-questions.md#6-resolved-decisions-locked), [05 §6](./05-models-and-runtime.md#6-runtime-topology-local-agents--colab-model-server).

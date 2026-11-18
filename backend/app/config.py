@@ -41,11 +41,9 @@ class Settings:
         "LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512"
     )
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "180.0"))
-    LORA_ADAPTER_ID: str = os.getenv("LORA_ADAPTER_ID", "decision-lora")
-
     # stub | live — chat completions from worker agents
     CHAT_LLM_MODE: str = os.getenv("CHAT_LLM_MODE", "stub").lower()
-    # mock | live — LoRA DecisionScorer HTTP
+    # mock | live — gateway reranker POST /decision/score
     DECISION_SCORER_MODE: str = os.getenv("DECISION_SCORER_MODE", "mock").lower()
 
     # Token / context budgets (passage packing + agent calls)

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-SFT fine-tune LoRA on Ministral 3 8B Instruct for decision relevance JSON.
+DEPRECATED — superseded by cross-encoder reranker on inference_gateway (05 §3).
+
+Legacy: SFT fine-tune LoRA on Ministral 3 8B Instruct for decision relevance JSON.
 
 Usage (Colab, after uploading train.jsonl / val.jsonl):
 

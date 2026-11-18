@@ -40,9 +40,9 @@ DECISION_SCORER_MODE=live uv run python scripts/eval_decision_model.py --val dat
 
 Set `accuracy_top1_min` in [`eval_gate.json`](eval_gate.json) after baselines.
 
-## Colab LoRA
+## Colab gateway reranker
 
-Upload `train.jsonl` / `val.jsonl`. Train: [`colab/train_decision_lora.py`](../../colab/train_decision_lora.py). Deploy: [`colab/RUNBOOK.md`](../../colab/RUNBOOK.md).
+Routing uses **BGE cross-encoder** on [`colab/inference_gateway.py`](../../colab/inference_gateway.py) (`POST /v1/decision/score`). JSONL is for **eval** and optional future fine-tune. Deploy: [`colab/RUNBOOK.md`](../../colab/RUNBOOK.md), [`colab/TOPOLOGY.md`](../../colab/TOPOLOGY.md).
 
 Live gate:
 
