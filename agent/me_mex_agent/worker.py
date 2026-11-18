@@ -26,6 +26,7 @@ from me_mex_agent.speech_colab import speech_enabled, synthesize_wav, transcribe
 from me_mex_agent.turn_bridge import post_resume, run_turn_with_reply
 
 _log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 SILENCE_RMS = float(os.getenv("VOICE_SILENCE_RMS", "0.008"))
 MIN_UTTERANCE_MS = int(os.getenv("VOICE_MIN_UTTERANCE_MS", "400"))
@@ -158,6 +159,12 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
         if msg.get("thread_id"):
             session.thread_id = msg["thread_id"]
         session.muted = bool(msg.get("muted", session.muted))
+        _log.info(
+            "context_update muted=%s project=%s thread=%s",
+            session.muted,
+            session.context_json.get("active_project_id"),
+            session.thread_id,
+        )
         return
     if mtype in ("approve", "cancel"):
         action = "approve" if mtype == "approve" else "dismiss"
@@ -225,30 +232,57 @@ async def _consume_audio_track(
             try:
                 result = await transcribe_wav(wav)
                 text = (result.get("text") or "").strip()
+                _log.info("STT utterance (%d bytes wav): %r", len(wav), text[:120])
                 if text:
                     await _run_voice_turn(room, session, text)
             except httpx.HTTPError:
                 _log.exception("STT failed")
 
 
+def _start_audio_consumer(
+    track: rtc.Track,
+    room: rtc.Room,
+    session: RoomSession,
+    participant: rtc.RemoteParticipant,
+) -> None:
+    _log.info("consuming audio track from %s", participant.identity)
+    # context_update can race agent join; a published user mic means an active voice session.
+    session.muted = False
+    asyncio.create_task(_consume_audio_track(track, room, session))
+
+
+def _attach_existing_audio(room: rtc.Room, session: RoomSession) -> None:
+    for participant in room.remote_participants.values():
+        for pub in participant.track_publications.values():
+            if pub.track and pub.kind == rtc.TrackKind.KIND_AUDIO:
+                _start_audio_consumer(pub.track, room, session, participant)
+
+
 async def entrypoint(ctx: JobContext) -> None:
     if rtc is None:
         raise RuntimeError("livekit-agents not installed")
     room = ctx.room
-    await ctx.connect()
     session = RoomSession()
 
     @room.on("data_received")
-    def _on_data(data: rtc.DataPacket) -> None:
-        asyncio.create_task(_handle_data(data.data, room, session))
+    def _on_data(packet: rtc.DataPacket) -> None:
+        asyncio.create_task(_handle_data(packet.data, room, session))
 
     @room.on("track_subscribed")
-    def _on_track(track: rtc.Track, _pub: rtc.TrackPublication, participant: rtc.RemoteParticipant):
+    def _on_track(
+        track: rtc.Track,
+        _pub: rtc.TrackPublication,
+        participant: rtc.RemoteParticipant,
+    ) -> None:
         if track.kind != rtc.TrackKind.KIND_AUDIO:
             return
         if participant.identity == room.local_participant.identity:
             return
-        asyncio.create_task(_consume_audio_track(track, room, session))
+        _start_audio_consumer(track, room, session, participant)
+
+    await ctx.connect()
+    _log.info("agent joined room %s", room.name)
+    _attach_existing_audio(room, session)
 
 
 def main() -> None:

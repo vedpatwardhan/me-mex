@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
@@ -10,13 +12,70 @@ from app.agents.graph import (
     run_agent_turn,
 )
 from app.db import ToolContext, get_store
-from app.models import AgentResumeRequest, AgentTurnRequest
+from app.models import AgentResumeRequest, AgentTurnRequest, NodeKind
 from app.services.checkpoints import JsonCheckpointStore
 from app.tools import dock as dock_tools
 from app.tools import reorg as reorg_tools
 
 router = APIRouter(prefix="/api", tags=["api"])
 _checkpoints = JsonCheckpointStore()
+
+
+def _ts_iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=UTC).isoformat()
+
+
+def _project_to_workspace(doc: dict) -> dict:
+    ts = doc.get("created_at", 0)
+    return {
+        "id": doc["_id"],
+        "name": doc.get("name", ""),
+        "description": doc.get("introduction") or doc.get("description", ""),
+        "node_ids": doc.get("node_ids") or [],
+        "edge_ids": doc.get("edge_ids") or [],
+        "created_at": _ts_iso(ts) if ts else datetime.now(tz=UTC).isoformat(),
+    }
+
+
+def _node_to_frontend(n) -> dict:
+    d = n.model_dump(by_alias=True)
+    d["id"] = n.id
+    d["node_type"] = "ROOT" if n.node_kind == NodeKind.ROOT else "concept"
+    d["project_ids"] = [n.project_id]
+    d["created_at"] = _ts_iso(n.created_at)
+    d["updated_at"] = _ts_iso(n.updated_at)
+    if n.node_kind == NodeKind.CONCEPT_I:
+        d["is_immutable"] = True
+    return d
+
+
+def _edge_to_frontend(e) -> dict:
+    return {
+        "id": e.id,
+        "source": e.source_id,
+        "target": e.target_id,
+        "source_node_id": e.source_id,
+        "target_node_id": e.target_id,
+        "weight": 1.0,
+        "project_ids": [e.project_id],
+        "created_at": _ts_iso(e.created_at),
+    }
+
+
+@router.get("/projects")
+def list_projects():
+    store = get_store()
+    return [_project_to_workspace(doc) for doc in store.list_projects()]
+
+
+@router.get("/graph")
+def get_project_graph(project_id: str = Query(..., min_length=1)):
+    if project_id == "global":
+        return {"nodes": [], "edges": []}
+    store = get_store()
+    nodes = [_node_to_frontend(n) for n in store.list_nodes(project_id)]
+    edges = [_edge_to_frontend(e) for e in store.list_edges(project_id)]
+    return {"nodes": nodes, "edges": edges}
 
 
 @router.post("/projects")

@@ -25,6 +25,8 @@ dependencies = [
     "networkx>=3.1",
     "rustworkx>=0.14.0",
     "fastmcp>=0.1.0",
+    "livekit>=0.17.0",
+    "livekit-agents>=0.12.0",
 ]
 
 [dependency-groups]
@@ -34,10 +36,6 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "ruff>=0.6.0",
     "pre-commit>=4.0.0",
-]
-phase2 = [
-    "livekit>=0.17.0",
-    "livekit-agents>=0.12.0",
 ]
 
 [tool.uv]
@@ -50,12 +48,12 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = "-v --tb=short"
+addopts = "-n 2 --dist=loadgroup -v --tb=short -m \"not vllm and not livekit and not slow\""
 markers = [
     "vllm: requires live Colab vLLM + LoRA",
     "mongodb: requires MongoDB",
     "slow: long-running tests",
-    "livekit: Phase 2 LiveKit worker",
+    "livekit: LiveKit token/worker smokes (excluded from default CI)",
 ]
 
 [tool.ruff]

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { VoiceContext } from '../services/voiceSession';
 import { VoiceSession } from '../services/voiceSession';
@@ -21,7 +21,13 @@ export const VoiceRail: React.FC<Props> = ({
   const [muted, setMuted] = useState(true);
   const [state, setState] = useState<VoiceSessionState>('Muted');
   const [customFields, setCustomFields] = useState('arxiv_id=\nroot_id=');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const sessionRef = useRef<VoiceSession | null>(null);
+  const togglingRef = useRef(false);
+  const setVoiceStateRef = useRef(setState);
+  useEffect(() => {
+    setVoiceStateRef.current = setState;
+  });
 
   const threadId = useMemo(
     () => `voice-${projectId || 'default'}`,
@@ -38,28 +44,50 @@ export const VoiceRail: React.FC<Props> = ({
 
   const ensureSession = () => {
     if (!sessionRef.current) {
-      sessionRef.current = new VoiceSession(setState);
+      sessionRef.current = new VoiceSession((s) => setVoiceStateRef.current(s));
     }
     return sessionRef.current;
   };
 
+  const live = !muted && state === 'Listening';
+
   const toggleMute = async () => {
+    if (togglingRef.current) return;
+    togglingRef.current = true;
     const nextMuted = !muted;
-    setMuted(nextMuted);
-    onMuteToggle?.(nextMuted);
     const session = ensureSession();
-    const ctx = buildContext();
-    ctx.muted = nextMuted;
+    const ctx = { ...buildContext(), muted: nextMuted };
     onContext?.(ctx);
-    if (!session.room && !nextMuted) {
-      await session.connect(`user-${projectId || 'me'}`);
-    }
-    if (session.room) {
-      await session.setMuted(nextMuted, ctx);
-      await session.publishContext(ctx);
-    }
-    if (nextMuted) {
+    setVoiceError(null);
+    try {
+      if (!nextMuted) {
+        setState('Thinking');
+        if (!session.isReady()) {
+          await session.connect(`user-${projectId || 'me'}-${Date.now()}`);
+        }
+        if (!session.isReady()) {
+          throw new Error('Could not join LiveKit room');
+        }
+        await session.setMuted(false, ctx);
+        setState('Listening');
+        setMuted(false);
+        onMuteToggle?.(false);
+      } else {
+        await session.setMuted(true, ctx);
+        await session.disconnect();
+        setState('Muted');
+        setMuted(true);
+        onMuteToggle?.(true);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Voice connection failed';
+      setVoiceError(message);
+      setState('Muted');
+      setMuted(true);
+      onMuteToggle?.(true);
       await session.disconnect();
+    } finally {
+      togglingRef.current = false;
     }
   };
 
@@ -69,12 +97,27 @@ export const VoiceRail: React.FC<Props> = ({
       <div className="text-sm text-slate-300">Project: {projectId || '—'}</div>
       <button
         type="button"
+        disabled={state === 'Thinking'}
         onClick={() => void toggleMute()}
-        className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white"
+        className={`rounded-md px-3 py-2 text-sm font-medium text-white ${
+          live ? 'bg-emerald-700 hover:bg-emerald-600' : 'bg-indigo-600 hover:bg-indigo-500'
+        } disabled:opacity-60`}
       >
-        {muted ? 'Unmute to begin (P1)' : 'Mute (W8)'}
+        {state === 'Thinking'
+          ? 'Connecting…'
+          : live
+            ? 'Listening — click to end'
+            : 'Start voice session'}
       </button>
-      <div className="text-xs text-slate-400">State: {state}</div>
+      <div className="text-xs text-slate-400">
+        Status: {state}
+        {live ? ' · mic on' : muted ? ' · mic off' : ''}
+      </div>
+      {voiceError ? (
+        <div className="text-xs text-rose-400 break-words" role="alert">
+          {voiceError}
+        </div>
+      ) : null}
       <label className="text-xs text-slate-500">Custom fields</label>
       <textarea
         className="h-28 w-full rounded border border-slate-700 bg-slate-900 p-2 text-xs text-slate-200"
@@ -83,7 +126,8 @@ export const VoiceRail: React.FC<Props> = ({
           setCustomFields(e.target.value);
           const ctx = buildContext();
           onContext?.(ctx);
-          void ensureSession().publishContext(ctx);
+          const s = ensureSession();
+          if (s.isReady()) void s.publishContext(ctx);
         }}
         spellCheck={false}
       />

@@ -55,7 +55,7 @@ class Settings:
         return colab_vllm_api_base()
 
     # Local LiveKit (Phase 2 voice)
-    LIVEKIT_URL: str = os.getenv("LIVEKIT_URL", "ws://localhost:7880")
+    LIVEKIT_URL: str = os.getenv("LIVEKIT_URL", "ws://127.0.0.1:7880")
     LIVEKIT_API_KEY: str = os.getenv("LIVEKIT_API_KEY", "devkey")
     LIVEKIT_API_SECRET: str = os.getenv("LIVEKIT_API_SECRET", "secret")
     LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512")

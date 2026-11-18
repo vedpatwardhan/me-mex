@@ -24,5 +24,24 @@ export async function fetchLiveKitToken(
   if (!res.ok) {
     throw new Error(`LiveKit token failed: ${res.status}`);
   }
-  return res.json();
+  const body = await res.json();
+  return { ...body, url: normalizeTokenLiveKitUrl(body.url) };
+}
+
+/** Match loopback host to the page (localhost vs 127.0.0.1). */
+function normalizeTokenLiveKitUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const pageHost = window.location.hostname;
+    if (
+      (u.hostname === 'localhost' || u.hostname === '127.0.0.1') &&
+      (pageHost === 'localhost' || pageHost === '127.0.0.1') &&
+      u.hostname !== pageHost
+    ) {
+      u.hostname = pageHost;
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
 }

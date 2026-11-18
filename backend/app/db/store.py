@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from pymongo import MongoClient
 
 from app.config import settings
 from app.errors import ImmutableNodeViolation, NotFoundError
 from app.models import (
-    NodeKind,
-    PendingApproval,
-    StagingBundle,
     Edge,
     Node,
+    NodeKind,
+    PendingApproval,
     Project,
+    StagingBundle,
     new_id,
 )
 
@@ -28,11 +28,11 @@ MUTABLE_KINDS = {NodeKind.CONCEPT_M, NodeKind.INSIGHT, NodeKind.NOTE, NodeKind.T
 class ToolContext:
     project_id: str
     thread_id: str = "default"
-    store: "Store" = None  # type: ignore[assignment]
+    store: Store = None  # type: ignore[assignment]
 
 
 class Store:
-    def __init__(self, db_name: Optional[str] = None):
+    def __init__(self, db_name: str | None = None):
         self._client = MongoClient(settings.MONGO_URI, serverSelectionTimeoutMS=2000)
         self._db = self._client[db_name or settings.DB_NAME]
 
@@ -41,7 +41,7 @@ class Store:
 
     # --- projects ---
 
-    def create_project(self, name: str, project_id: Optional[str] = None) -> Project:
+    def create_project(self, name: str, project_id: str | None = None) -> Project:
         pid = project_id or new_id("proj")
         genesis_id = f"genesis_{pid}"
         project = Project(
@@ -78,6 +78,9 @@ class Store:
             created_at=doc.get("created_at", time.time()),
         )
 
+    def list_projects(self) -> list[dict[str, Any]]:
+        return list(self._db.projects.find().sort("created_at", 1))
+
     def update_project_scope(self, project_id: str, introduction: str) -> None:
         self._db.projects.update_one(
             {"_id": project_id},
@@ -107,13 +110,9 @@ class Store:
         if not force and self._is_immutable(node):
             raise ImmutableNodeViolation(f"Cannot delete {node_id}")
         self._db.nodes.delete_one({"_id": node_id})
-        self._db.edges.delete_many(
-            {"$or": [{"source_id": node_id}, {"target_id": node_id}]}
-        )
+        self._db.edges.delete_many({"$or": [{"source_id": node_id}, {"target_id": node_id}]})
 
-    def list_nodes(
-        self, project_id: str, kinds: Optional[list[NodeKind]] = None
-    ) -> list[Node]:
+    def list_nodes(self, project_id: str, kinds: list[NodeKind] | None = None) -> list[Node]:
         query: dict[str, Any] = {"project_ids": project_id}
         docs = self._db.nodes.find(query)
         nodes = [Node.from_mongo(d) for d in docs]
@@ -142,7 +141,22 @@ class Store:
     def remove_edge(self, edge_id: str) -> None:
         self._db.edges.delete_one({"_id": edge_id})
 
-    def find_edge(self, source_id: str, target_id: str) -> Optional[Edge]:
+    def list_edges(self, project_id: str) -> list[Edge]:
+        out: list[Edge] = []
+        for doc in self._db.edges.find({"project_ids": project_id}):
+            out.append(
+                Edge(
+                    _id=doc["_id"],
+                    source_id=doc["source_id"],
+                    target_id=doc["target_id"],
+                    note=doc.get("note") or doc.get("description", ""),
+                    project_id=project_id,
+                    created_at=doc.get("created_at", time.time()),
+                )
+            )
+        return out
+
+    def find_edge(self, source_id: str, target_id: str) -> Edge | None:
         doc = self._db.edges.find_one(
             {
                 "$or": [
@@ -163,12 +177,8 @@ class Store:
 
     def neighbors(self, node_id: str) -> list[str]:
         ids: set[str] = set()
-        for doc in self._db.edges.find(
-            {"$or": [{"source_id": node_id}, {"target_id": node_id}]}
-        ):
-            other = (
-                doc["target_id"] if doc["source_id"] == node_id else doc["source_id"]
-            )
+        for doc in self._db.edges.find({"$or": [{"source_id": node_id}, {"target_id": node_id}]}):
+            other = doc["target_id"] if doc["source_id"] == node_id else doc["source_id"]
             ids.add(other)
         return list(ids)
 
@@ -177,9 +187,7 @@ class Store:
 
     # --- passages ---
 
-    def upsert_passage(
-        self, passage_id: str, doc_id: str, text: str, index: int = 0
-    ) -> None:
+    def upsert_passage(self, passage_id: str, doc_id: str, text: str, index: int = 0) -> None:
         self._db.passages.replace_one(
             {"_id": passage_id},
             {
@@ -217,15 +225,12 @@ class Store:
         self._db.pending_approvals.insert_one(item.model_dump(by_alias=True))
         return item.id
 
-    def list_pending(
-        self, project_id: str, thread_id: Optional[str] = None
-    ) -> list[PendingApproval]:
+    def list_pending(self, project_id: str, thread_id: str | None = None) -> list[PendingApproval]:
         q: dict[str, Any] = {"project_id": project_id, "status": "pending"}
         if thread_id:
             q["thread_id"] = thread_id
         return [
-            PendingApproval(**d)
-            for d in self._db.pending_approvals.find(q).sort("created_at", 1)
+            PendingApproval(**d) for d in self._db.pending_approvals.find(q).sort("created_at", 1)
         ]
 
     def resolve_approval(self, approval_id: str, action: str) -> PendingApproval:
@@ -233,9 +238,7 @@ class Store:
         if not doc:
             raise NotFoundError(approval_id)
         status = "approved" if action == "approve" else "dismissed"
-        self._db.pending_approvals.update_one(
-            {"_id": approval_id}, {"$set": {"status": status}}
-        )
+        self._db.pending_approvals.update_one({"_id": approval_id}, {"$set": {"status": status}})
         doc["status"] = status
         return PendingApproval(**doc)
 
@@ -253,10 +256,10 @@ class Store:
         return doc.get("node_ids", []) if doc else []
 
 
-_store: Optional[Store] = None
+_store: Store | None = None
 
 
-def get_store(db_name: Optional[str] = None) -> Store:
+def get_store(db_name: str | None = None) -> Store:
     global _store
     if db_name is not None:
         return Store(db_name=db_name)

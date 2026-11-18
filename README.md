@@ -45,7 +45,6 @@ DB_NAME=me-mex
 
 ```bash
 uv run uvicorn main:app --app-dir backend --host 0.0.0.0 --port 8000 --reload
-uv run pytest   # default excludes -m vllm (see backend/pytest.ini)
 # Optional: bootstrap JSONL for reranker eval / future fine-tune
 cd backend && uv run python -m app.bootstrap.notes_to_jsonl
 cd backend && uv run python -m app.bootstrap.split_train_eval data/decision_training/robotics/bootstrap.jsonl --out-dir data/decision_training/robotics
@@ -59,6 +58,38 @@ curl -X POST http://localhost:8000/api/agent/turn \
   -H 'Content-Type: application/json' \
   -d '{"text":"hello","thread_id":"t1","context_json":{"active_project_id":"<project_id>"}}'
 ```
+
+---
+
+## Testing
+
+Requires **MongoDB** on `localhost:27017` (tests use `test-me-mex` via `backend/.env.test`). Set **`COLAB_INFERENCE_BASE_URL`** in `backend/.env.test` (committed placeholder) or `backend/.env` before live gateway smoke.
+
+From repo root (`me-mex/`):
+
+```bash
+# Default CI gate — unit + integration + e2e + agent unit (no Colab, no LiveKit)
+uv run pytest
+
+# Live Colab gateway — reranker POST /v1/decision/score (reads .env.test when TESTING=1)
+DECISION_SCORER_MODE=live uv run pytest backend/tests/integration/decision -m vllm -n 0
+
+# Optional: chat/score eval script (see backend/data/decision_training/README.md)
+DECISION_SCORER_MODE=live uv run python backend/scripts/eval_decision_model.py --live
+
+# Frontend (dock / voice helpers)
+cd frontend && npm install && npm test
+```
+
+Manual tunnel smoke (replace with your `trycloudflare` host):
+
+```bash
+curl -sS "https://YOUR_HOST.trycloudflare.com/health"
+curl -sS -X POST "https://YOUR_HOST.trycloudflare.com/tts/synthesize" \
+  -H 'Content-Type: application/json' -d '{"text":"ok"}' -o /tmp/tts.wav
+```
+
+Marker details: [docs/11-testing.md](./docs/11-testing.md), `backend/pytest.ini`.
 
 ---
 
@@ -139,7 +170,7 @@ docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
 
 Set in gitignored `backend/.env`: `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_API_KEY=devkey`, `LIVEKIT_API_SECRET=secret`, plus Colab URLs.
 
-5. **Agent worker** — from repo root `uv sync --group phase2`; then `cd agent && uv sync && COLAB_INFERENCE_BASE_URL=https://YOUR_TUNNEL uv run python -m me_mex_agent.worker`
+5. **Agent worker** — `uv sync` at repo root; then `cd agent && uv sync && COLAB_INFERENCE_BASE_URL=https://YOUR_TUNNEL uv run python -m me_mex_agent.worker`
 
 6. **Frontend** — `cd frontend && npm install && npm run dev` (`VITE_API_BASE_URL=http://127.0.0.1:8000`).
 

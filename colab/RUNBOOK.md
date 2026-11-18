@@ -395,6 +395,13 @@ curl -sS -X POST "https://YOUR_SUBDOMAIN.trycloudflare.com/tts/synthesize" \
 
 STT: `POST …/stt/transcribe` with multipart field `audio` (short `.wav`).
 
+If `speech.log` shows `TypeError: open() got an unexpected keyword argument 'metadata_errors'`, upgrade PyAV and restart the sidecar:
+
+```bash
+pip install -U 'av>=12.0.0'
+# restart uvicorn speech_sidecar on :7861
+```
+
 ### Backend (Mac)
 
 ```bash

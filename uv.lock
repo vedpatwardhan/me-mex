@@ -2132,6 +2132,8 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langchain-text-splitters" },
     { name = "langgraph" },
+    { name = "livekit" },
+    { name = "livekit-agents" },
     { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "networkx", version = "3.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "openai" },
@@ -2154,10 +2156,6 @@ dev = [
     { name = "pytest-xdist" },
     { name = "ruff" },
 ]
-phase2 = [
-    { name = "livekit" },
-    { name = "livekit-agents" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -2170,6 +2168,8 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=0.2.0" },
     { name = "langchain-text-splitters", specifier = ">=0.3.0" },
     { name = "langgraph", specifier = ">=0.2.0" },
+    { name = "livekit", specifier = ">=0.17.0" },
+    { name = "livekit-agents", specifier = ">=0.12.0" },
     { name = "networkx", specifier = ">=3.1" },
     { name = "openai", specifier = ">=1.20.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -2190,10 +2190,6 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "pytest-xdist", specifier = ">=3.5.0" },
     { name = "ruff", specifier = ">=0.6.0" },
-]
-phase2 = [
-    { name = "livekit", specifier = ">=0.17.0" },
-    { name = "livekit-agents", specifier = ">=0.12.0" },
 ]
 
 [[package]]

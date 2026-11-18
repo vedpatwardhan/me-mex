@@ -21,6 +21,9 @@ __pycache__/
 colab/logs/*.log
 .mypy_cache/
 
+# Local dev stack (scripts/dev-stack.sh)
+.dev-stack/
+
 # Logs
 *.log
 backend/logs/
