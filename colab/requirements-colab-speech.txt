@@ -1,6 +1,6 @@
 # Speech sidecar (CPU). Install ONLY after:
-#   pip install "spacy==3.8.4" "thinc>=8.3.4,<8.4" --only-binary=:all:
-# (kokoro → misaki[en] → spacy; source builds fail on Colab)
+#   pip install "spacy==3.8.18" "thinc>=8.3.12,<8.4" --only-binary=:all:
+# (kokoro → misaki[en] → spacy; on Colab Python 3.12+ only spacy 3.8.7+ exists on PyPI)
 faster-whisper>=1.0.0
 kokoro>=0.9.4
 soundfile

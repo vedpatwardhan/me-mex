@@ -37,17 +37,20 @@ cd /content/me-mex/colab   # or your clone path
 pip install -q -r requirements-colab.txt
 pip uninstall -y torchaudio 2>/dev/null || true
 
-# Speech (Phase 2): kokoro → misaki[en] → spacy — install spacy from WHEELS only (never build from source)
-pip install -q "spacy==3.8.4" "thinc>=8.3.4,<8.4" --only-binary=:all:
+# Speech (Phase 2): kokoro → misaki[en] → spacy — preinstall spacy wheels (kokoro must not build spacy from source)
+python3 --version   # on 3.12+ PyPI only lists spacy 3.8.7+ for your interpreter
+pip install -q "spacy==3.8.18" "thinc>=8.3.12,<8.4" --only-binary=:all:
 pip install -q -r requirements-colab-speech.txt
 ```
 
-If `spacy` still fails, check Python version (`python3 --version`; use **3.10 or 3.11** runtime if on 3.12 with no wheel). Fallback:
+If `--only-binary` fails (no wheel for one transitive dep), install spacy without that flag once, then speech requirements:
 
 ```bash
-pip install -q "spacy==3.7.5" --only-binary=:all:
+pip install -q "spacy==3.8.18" "thinc>=8.3.12,<8.4"
 pip install -q -r requirements-colab-speech.txt
 ```
+
+Older pins like `spacy==3.8.4` or `3.7.5` **do not exist** for Colab’s current Python — pip will show only `3.8.7 … 3.8.18`.
 
 Chat-only bring-up skips the speech block; gateway `/stt` `/tts` proxy will 502 until sidecar deps are installed.
 
