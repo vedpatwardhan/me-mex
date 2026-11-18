@@ -168,36 +168,125 @@ tail -F logs/vllm.log logs/gateway.log logs/speech.log logs/cloudflared.log
 
 Download for offline debugging: Colab **Files** pane → `colab/logs/` → right-click → download. When reporting issues, attach the relevant `.log` snippets (startup through first error).
 
-### 3.4 Recommended: **tmux** (one Colab terminal, four windows)
+### 3.4 Recommended: **tmux** (one Colab terminal, five windows)
 
 Colab does **not** provide multiple terminal tabs. Use **tmux** so each process has its own window and **tee** writes `logs/*.log`.
 
-**One-time setup** (notebook cell or terminal):
-
-```bash
-apt-get update -qq && apt-get install -y -qq tmux
-cd /content/me-mex/colab
-chmod +x start_inference_tmux.sh
-./start_inference_tmux.sh reasoning   # wraps §3.2 commands + tee
-```
-
-The helper script [start_inference_tmux.sh](./start_inference_tmux.sh) creates session **`me-mex-inference`** with windows:
+Session name: **`me-mex-inference`**
 
 | Window | Starts | Log file |
 |--------|--------|----------|
 | `vllm` | vLLM on `:8000` | `logs/vllm.log` |
 | `speech` | speech sidecar `:7861` | `logs/speech.log` |
-| `gateway` | waits ~90s, then gateway `:7860` | `logs/gateway.log` |
-| `tunnel` | waits ~120s, then cloudflared → `:7860` | `logs/cloudflared.log` |
+| `gateway` | after ~90s, gateway `:7860` | `logs/gateway.log` |
+| `tunnel` | after ~120s, cloudflared → `:7860` | `logs/cloudflared.log` |
 | `logs` | `tail -F` on all four logs | — |
 
-**Attach** from Colab’s terminal: `tmux attach -t me-mex-inference`  
-**Detach** (leave processes running): `Ctrl-b` then `d`  
-**Switch window:** `Ctrl-b` then `w` (pick `vllm`, `gateway`, …) or `Ctrl-b n` / `p`
+#### 3.4a Fast path — helper script
 
-Copy the tunnel URL from **`logs/cloudflared.log`** or the `tunnel` window → Mac `COLAB_VLLM_URL=…/v1` (§4).
+```bash
+apt-get update -qq && apt-get install -y -qq tmux
+cd /content/me-mex/colab
+chmod +x start_inference_tmux.sh
+./start_inference_tmux.sh reasoning
+tmux attach -t me-mex-inference
+```
 
-**Manual tmux:** create session `tmux new -s me-mex-inference`, one window per process; paste **§3.2** commands with `2>&1 | tee -a logs/<file>.log`.
+Same as [start_inference_tmux.sh](./start_inference_tmux.sh) (optional `./start_inference_tmux.sh instruct` for Instruct weights).
+
+#### 3.4b Spin up tmux — full command block (no script)
+
+Paste into **one** Colab terminal or a notebook `%%bash` cell. Set `COLAB_DIR` if your repo is not under `/content/me-mex/colab`.
+
+```bash
+set -e
+COLAB_DIR=/content/me-mex/colab
+SESSION=me-mex-inference
+
+apt-get update -qq && apt-get install -y -qq tmux
+cd "$COLAB_DIR"
+mkdir -p logs
+tmux kill-session -t "$SESSION" 2>/dev/null || true
+
+# Window: vllm
+tmux new-session -d -s "$SESSION" -n vllm
+tmux send-keys -t "${SESSION}:vllm" \
+  "cd ${COLAB_DIR} && vllm serve mistralai/Ministral-3-8B-Reasoning-2512 \
+    --host 127.0.0.1 --port 8000 \
+    --tokenizer-mode mistral --config-format mistral --load-format mistral \
+    --enable-auto-tool-choice --tool-call-parser mistral --reasoning-parser mistral \
+    --max-model-len 12288 --max-num-seqs 8 --max-num-batched-tokens 8192 \
+    --gpu-memory-utilization 0.95 --enable-prefix-caching \
+    2>&1 | tee -a logs/vllm.log" C-m
+
+# Window: speech
+tmux new-window -t "$SESSION" -n speech
+tmux send-keys -t "${SESSION}:speech" \
+  "cd ${COLAB_DIR} && uvicorn speech_sidecar:app --host 127.0.0.1 --port 7861 \
+    2>&1 | tee -a logs/speech.log" C-m
+
+# Window: gateway (waits for vLLM load)
+tmux new-window -t "$SESSION" -n gateway
+tmux send-keys -t "${SESSION}:gateway" \
+  "sleep 90 && cd ${COLAB_DIR} && \
+    export VLLM_BASE=http://127.0.0.1:8000/v1 SPEECH_BASE=http://127.0.0.1:7861 \
+    BGE_RERANKER_MODEL=BAAI/bge-reranker-base \
+    LLM_MODEL_NAME=mistralai/Ministral-3-8B-Reasoning-2512 && \
+    uvicorn inference_gateway:app --host 0.0.0.0 --port 7860 \
+    2>&1 | tee -a logs/gateway.log" C-m
+
+# Window: tunnel (waits for gateway)
+tmux new-window -t "$SESSION" -n tunnel
+tmux send-keys -t "${SESSION}:tunnel" \
+  "sleep 120 && cd ${COLAB_DIR} && \
+    (test -x ./cloudflared || (curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared && chmod +x cloudflared)) && \
+    ./cloudflared tunnel --url http://127.0.0.1:7860 --http-host-header \"127.0.0.1:7860\" \
+    2>&1 | tee -a logs/cloudflared.log" C-m
+
+# Window: tail logs
+tmux new-window -t "$SESSION" -n logs
+tmux send-keys -t "${SESSION}:logs" \
+  "cd ${COLAB_DIR} && tail -F logs/vllm.log logs/gateway.log logs/speech.log logs/cloudflared.log" C-m
+
+tmux attach -t "$SESSION"
+```
+
+After detach (`Ctrl-b` then `d`), re-attach anytime:
+
+```bash
+tmux attach -t me-mex-inference
+```
+
+Copy the tunnel URL from the **`tunnel`** window or `logs/cloudflared.log` → Mac `COLAB_VLLM_URL=…/v1` (§4).
+
+#### 3.4c Spin up tmux — interactive (five windows by hand)
+
+Use this if you want to start **gateway** only after `curl -s http://127.0.0.1:8000/v1/models` succeeds (skip fixed `sleep`).
+
+```bash
+apt-get update -qq && apt-get install -y -qq tmux
+cd /content/me-mex/colab && mkdir -p logs
+tmux new -s me-mex-inference
+```
+
+Inside tmux:
+
+1. **Window 0** — paste **§3.2 (1) vLLM** and append: `2>&1 | tee -a logs/vllm.log`. Wait until models load (or run `curl` from another Colab cell).
+2. `Ctrl-b` `c` — new window; `Ctrl-b` `,` → rename to `speech`. Run **§3.2 (2a)** + `2>&1 | tee -a logs/speech.log`.
+3. `Ctrl-b` `c` → rename `gateway`. Run **§3.2 (2b)** + `2>&1 | tee -a logs/gateway.log`.
+4. `Ctrl-b` `c` → rename `tunnel`. Run **§3.2 (3)** + `2>&1 | tee -a logs/cloudflared.log`.
+5. `Ctrl-b` `c` → rename `logs`. Run: `tail -F logs/vllm.log logs/gateway.log logs/speech.log logs/cloudflared.log`.
+
+#### 3.4d tmux controls (Colab terminal)
+
+| Keys | Action |
+|------|--------|
+| `Ctrl-b` `d` | Detach (servers keep running) |
+| `tmux attach -t me-mex-inference` | Re-attach |
+| `Ctrl-b` `w` | Pick window by name |
+| `Ctrl-b` `n` / `p` | Next / previous window |
+| `Ctrl-b` `|` | Split pane (optional) |
+| `tmux kill-session -t me-mex-inference` | Stop all windows in session |
 
 ### 3.5 Alternative: notebook cells (background + logs)
 
