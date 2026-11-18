@@ -187,6 +187,7 @@ Session name: **`me-mex-inference`**
 
 ```bash
 apt-get update -qq && apt-get install -y -qq tmux
+unset TMUX
 cd /content/me-mex/colab
 chmod +x start_inference_tmux.sh
 ./start_inference_tmux.sh reasoning
