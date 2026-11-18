@@ -11,8 +11,4 @@ python-multipart
 sentence-transformers
 torch
 
-# Speech CPU sidecar (§6)
-faster-whisper
-kokoro
-soundfile
-numpy
+# Speech (Kokoro + Whisper): use requirements-colab-speech.txt (install spacy wheel first — see RUNBOOK §2)

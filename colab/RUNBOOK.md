@@ -26,6 +26,31 @@ Bring up **remote inference** for Me-Mex v2 on a Colab GPU VM: **Ministral chat 
 
 **Mac:** `uv sync`; `backend/.env` from [`.env.example`](../backend/.env.example). Mongo only if you run full pytest/e2e — not required for gateway smoke alone.
 
+### 2.1 Pip install (Colab)
+
+From `colab/` on the VM:
+
+```bash
+cd /content/me-mex/colab   # or your clone path
+
+# Core: vLLM + gateway reranker
+pip install -q -r requirements-colab.txt
+pip uninstall -y torchaudio 2>/dev/null || true
+
+# Speech (Phase 2): kokoro → misaki[en] → spacy — install spacy from WHEELS only (never build from source)
+pip install -q "spacy==3.8.4" "thinc>=8.3.4,<8.4" --only-binary=:all:
+pip install -q -r requirements-colab-speech.txt
+```
+
+If `spacy` still fails, check Python version (`python3 --version`; use **3.10 or 3.11** runtime if on 3.12 with no wheel). Fallback:
+
+```bash
+pip install -q "spacy==3.7.5" --only-binary=:all:
+pip install -q -r requirements-colab-speech.txt
+```
+
+Chat-only bring-up skips the speech block; gateway `/stt` `/tts` proxy will 502 until sidecar deps are installed.
+
 ---
 
 ## 3. Colab bring-up — processes, not “two commands”
@@ -445,7 +470,8 @@ Optional thresholds: `data/decision_training/eval_gate.json`.
 | [reranker_service.py](./reranker_service.py) | Cross-encoder scoring |
 | [scoring_text.py](./scoring_text.py) | Pair text formatting |
 | [speech_sidecar.py](./speech_sidecar.py) | Whisper + Kokoro |
-| [requirements-colab.txt](./requirements-colab.txt) | Notebook pip pins |
+| [requirements-colab.txt](./requirements-colab.txt) | Core pip pins (vLLM, gateway) |
+| [requirements-colab-speech.txt](./requirements-colab-speech.txt) | Speech sidecar (after spacy wheel install) |
 | [TOPOLOGY.md](./TOPOLOGY.md) | Architecture diagram |
 | [start_inference_tmux.sh](./start_inference_tmux.sh) | tmux session + `logs/*.log` via `tee` |
 | `logs/` | Runtime log directory on Colab (gitignored `*.log`) |
