@@ -135,8 +135,8 @@ start_agent() {
     log "WARN: COLAB_INFERENCE_BASE_URL unset — voice STT/TTS will fail until Colab gateway is reachable"
   fi
   (
-    cd "${ROOT}/agent"
-    uv sync --quiet 2>/dev/null || uv sync
+    cd "${ROOT}"
+    export PYTHONPATH="${ROOT}/backend:${ROOT}/agent${PYTHONPATH:+:${PYTHONPATH}}"
     exec uv run python -m me_mex_agent.worker dev
   ) >>"${LOG_DIR}/agent.log" 2>&1 &
   echo "agent=$!" >>"${PID_FILE}"

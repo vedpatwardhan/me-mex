@@ -13,6 +13,7 @@ frontend/dist-ssr/
 frontend/.vite/
 
 # Python Bytecode & Caches
+*.egg-info/
 __pycache__/
 *.py[cod]
 *$py.class

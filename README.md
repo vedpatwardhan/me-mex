@@ -170,7 +170,7 @@ docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
 
 Set in gitignored `backend/.env`: `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_API_KEY=devkey`, `LIVEKIT_API_SECRET=secret`, plus Colab URLs.
 
-5. **Agent worker** — `uv sync` at repo root; then `cd agent && uv sync && COLAB_INFERENCE_BASE_URL=https://YOUR_TUNNEL uv run python -m me_mex_agent.worker`
+5. **Agent worker** — from repo root (same venv as backend): `PYTHONPATH=backend:agent uv run python -m me_mex_agent.worker dev` (or `./scripts/dev-stack.sh`)
 
 6. **Frontend** — `cd frontend && npm install && npm run dev` (`VITE_API_BASE_URL=http://127.0.0.1:8000`).
 
