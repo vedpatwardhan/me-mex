@@ -1,9 +1,10 @@
-import os
-import re
 import json
+import re
 import time
+from collections.abc import Callable
+from typing import Any, TypeVar
+
 import httpx
-from typing import List, Dict, Any, Optional, Type, TypeVar, Callable
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
@@ -15,8 +16,6 @@ from app.services.llm_tracer import llm_tracer
 
 _log = logging.getLogger(__name__)
 
-# Configuration for vLLM Server on Colab / Remote
-COLAB_VLLM_URL = settings.COLAB_VLLM_URL
 MODEL_NAME = settings.LLM_MODEL_NAME
 
 # Official Reasoning System Prompt Template for Ministral-3B-Reasoning
@@ -32,17 +31,17 @@ Here, provide a self-contained response without any emojis."""
 
 EMOJI_PATTERN = re.compile(
     "["
-    "\U0001F600-\U0001F64F"  # emoticons
-    "\U0001F300-\U0001F5FF"  # misc symbols & pictographs
-    "\U0001F680-\U0001F6FF"  # transport & map symbols
-    "\U0001F700-\U0001F77F"  # alchemical symbols
-    "\U0001F780-\U0001F7FF"  # geometric shapes extended
-    "\U0001F800-\U0001F8FF"  # supplemental arrows-c
-    "\U0001F900-\U0001F9FF"  # supplemental symbols and pictographs
-    "\U0001FA00-\U0001FA6F"  # chess symbols
-    "\U0001FA70-\U0001FAFF"  # symbols and pictographs extended-a
-    "\U00002600-\U000026FF"  # misc symbols
-    "\U00002700-\U000027BF"  # dingbats
+    "\U0001f600-\U0001f64f"  # emoticons
+    "\U0001f300-\U0001f5ff"  # misc symbols & pictographs
+    "\U0001f680-\U0001f6ff"  # transport & map symbols
+    "\U0001f700-\U0001f77f"  # alchemical symbols
+    "\U0001f780-\U0001f7ff"  # geometric shapes extended
+    "\U0001f800-\U0001f8ff"  # supplemental arrows-c
+    "\U0001f900-\U0001f9ff"  # supplemental symbols and pictographs
+    "\U0001fa00-\U0001fa6f"  # chess symbols
+    "\U0001fa70-\U0001faff"  # symbols and pictographs extended-a
+    "\U00002600-\U000026ff"  # misc symbols
+    "\U00002700-\U000027bf"  # dingbats
     "]+",
     flags=re.UNICODE,
 )
@@ -60,11 +59,11 @@ class LLMGateway:
 
     def __init__(
         self,
-        base_url: str = COLAB_VLLM_URL,
+        base_url: str | None = None,
         model: str = MODEL_NAME,
         timeout: float = settings.LLM_TIMEOUT,
     ):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or settings.colab_vllm_api_base).rstrip("/")
         self.model = model
         headers = {
             "ngrok-skip-browser-warning": "true",
@@ -82,9 +81,7 @@ class LLMGateway:
             limits=limits,
         )
 
-    def prepare_reasoning_messages(
-        self, messages: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    def prepare_reasoning_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Ensures the reasoning system prompt with [THINK] tags is present in message history."""
         has_system = any(m.get("role") == "system" for m in messages)
         formatted_messages = []
@@ -99,14 +96,9 @@ class LLMGateway:
         for m in messages:
             if m.get("role") == "system":
                 existing_content = m.get("content", "")
-                if (
-                    isinstance(existing_content, str)
-                    and "[THINK]" not in existing_content
-                ):
+                if isinstance(existing_content, str) and "[THINK]" not in existing_content:
                     combined_content = f"{OFFICIAL_REASONING_SYSTEM_PROMPT}\n\nAdditional Instructions:\n{existing_content}"
-                    formatted_messages.append(
-                        {"role": "system", "content": combined_content}
-                    )
+                    formatted_messages.append({"role": "system", "content": combined_content})
                 else:
                     formatted_messages.append(m)
             else:
@@ -114,7 +106,7 @@ class LLMGateway:
 
         return formatted_messages
 
-    def parse_reasoning_output(self, content: str) -> Dict[str, str]:
+    def parse_reasoning_output(self, content: str) -> dict[str, str]:
         """Parses output into reasoning thoughts ([THINK] block) and clean final response."""
         pattern = r"\[THINK\](.*?)\[/THINK\]"
         match = re.search(pattern, content, re.DOTALL)
@@ -142,19 +134,19 @@ class LLMGateway:
                 timeout=5.0,
             )
             return resp_post.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False
 
     def generate_chat_completion(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         temperature: float = 0.7,
         max_tokens: int = 8192,
         top_p: float = 0.95,
-        response_format: Optional[Dict[str, Any]] = None,
-        guided_json: Optional[Dict[str, Any]] = None,
+        response_format: dict[str, Any] | None = None,
+        guided_json: dict[str, Any] | None = None,
         enable_reasoning: bool = True,
-        caller: Optional[str] = None,
+        caller: str | None = None,
         trace: bool = True,
     ) -> str:
         """Call vLLM OpenAI-compatible endpoint with optional reasoning prompt formatting & structured output decoding."""
@@ -164,7 +156,7 @@ class LLMGateway:
             self.prepare_reasoning_messages(messages) if enable_reasoning else messages
         )
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": formatted_messages,
             "temperature": temperature,
@@ -181,8 +173,8 @@ class LLMGateway:
             # This continuously streams bytes across Cloudflare / reverse proxy tunnels, preventing
             # the Cloudflare Error 524 (100-second idle socket timeout) on large generations.
             payload["stream"] = True
-            collected_chunks: List[str] = []
-            collected_reasoning: List[str] = []
+            collected_chunks: list[str] = []
+            collected_reasoning: list[str] = []
 
             with self.client.stream("POST", url, json=payload) as resp:
                 if resp.status_code != 200:
@@ -206,9 +198,7 @@ class LLMGateway:
                             c_piece = delta.get("content")
                             if c_piece:
                                 collected_chunks.append(c_piece)
-                            r_piece = delta.get("reasoning_content") or delta.get(
-                                "reasoning"
-                            )
+                            r_piece = delta.get("reasoning_content") or delta.get("reasoning")
                             if r_piece:
                                 collected_reasoning.append(r_piece)
                         except json.JSONDecodeError:
@@ -251,7 +241,7 @@ class LLMGateway:
                 )
 
             return final_text
-        except Exception as e:
+        except (httpx.HTTPError, ConnectionError, OSError) as e:
             elapsed = time.perf_counter() - start_time
             if trace:
                 llm_tracer.log_call(
@@ -265,18 +255,18 @@ class LLMGateway:
                     error=str(e),
                 )
             _log.error("LLMGateway request failed: %s", e)
-            raise ConnectionError(f"vLLM Server unreachable or error ({e})")
+            raise ConnectionError(f"vLLM Server unreachable or error ({e})") from e
 
     def generate_structured_completion(
         self,
-        messages: List[Dict[str, Any]],
-        response_model: Type[T],
+        messages: list[dict[str, Any]],
+        response_model: type[T],
         temperature: float = 0.1,
         max_tokens: int = 4096,
         max_retries: int = 2,
         enable_reasoning: bool = False,
-        caller: Optional[str] = None,
-        payload_mutator: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+        caller: str | None = None,
+        payload_mutator: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> T:
         """Invokes LLM with strict JSON Schema constraints and validates output against response_model.
 
@@ -296,7 +286,7 @@ class LLMGateway:
 
         last_error = None
         raw_res = None
-        attempt_messages: List[Dict[str, Any]] = list(messages)
+        attempt_messages: list[dict[str, Any]] = list(messages)
         for attempt in range(1, max_retries + 1):
             try:
                 raw_res = self.generate_chat_completion(
@@ -329,7 +319,7 @@ class LLMGateway:
                     status="SUCCESS",
                 )
                 return validated_model
-            except Exception as e:
+            except (ValueError, ConnectionError, httpx.HTTPError, json.JSONDecodeError) as e:
                 last_error = e
                 if attempt < max_retries:
                     print(
@@ -370,12 +360,12 @@ class LLMGateway:
 
     async def stream_chat_completion(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
         top_p: float = 0.95,
         enable_reasoning: bool = False,
-        caller: Optional[str] = None,
+        caller: str | None = None,
     ):
         """Asynchronously stream response tokens from vLLM, yielding clean sanitized deltas."""
         start_time = time.perf_counter()
@@ -405,33 +395,35 @@ class LLMGateway:
         collected_tokens = []
         try:
             stream_timeout = max(60.0, float(settings.LLM_TIMEOUT))
-            async with httpx.AsyncClient(
-                timeout=stream_timeout, headers=headers, trust_env=False
-            ) as client:
-                async with client.stream("POST", url, json=payload) as response:
-                    if response.status_code != 200:
-                        error_text = await response.aread()
-                        raise ConnectionError(
-                            f"vLLM stream error {response.status_code}: {error_text.decode('utf-8', errors='ignore')}"
-                        )
+            async with (
+                httpx.AsyncClient(
+                    timeout=stream_timeout, headers=headers, trust_env=False
+                ) as client,
+                client.stream("POST", url, json=payload) as response,
+            ):
+                if response.status_code != 200:
+                    error_text = await response.aread()
+                    raise ConnectionError(
+                        f"vLLM stream error {response.status_code}: {error_text.decode('utf-8', errors='ignore')}"
+                    )
 
-                    async for line in response.aiter_lines():
-                        line = line.strip()
-                        if not line or line == "data: [DONE]":
-                            continue
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-                            try:
-                                chunk = json.loads(data_str)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    sanitized = strip_emojis(content)
-                                    if sanitized:
-                                        collected_tokens.append(sanitized)
-                                        yield sanitized
-                            except json.JSONDecodeError:
-                                pass
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line or line == "data: [DONE]":
+                        continue
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                sanitized = strip_emojis(content)
+                                if sanitized:
+                                    collected_tokens.append(sanitized)
+                                    yield sanitized
+                        except json.JSONDecodeError:
+                            pass
 
             elapsed = time.perf_counter() - start_time
             full_response = "".join(collected_tokens)
@@ -446,7 +438,7 @@ class LLMGateway:
                 response_parsed=full_response,
                 status="SUCCESS",
             )
-        except Exception as e:
+        except (httpx.HTTPError, ConnectionError, OSError) as e:
             elapsed = time.perf_counter() - start_time
             llm_tracer.log_call(
                 caller=caller,
