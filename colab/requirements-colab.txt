@@ -16,10 +16,3 @@ faster-whisper
 kokoro
 soundfile
 numpy
-
-# Legacy LoRA JSON training (optional — see train_decision_lora.py DEPRECATED)
-# peft
-# datasets
-# accelerate
-# bitsandbytes
-# trl

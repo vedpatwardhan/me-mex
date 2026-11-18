@@ -97,4 +97,4 @@ DECISION_SCORER_MODE=live uv run pytest tests/integration/decision -m vllm
 | [inference_gateway.py](./inference_gateway.py) | Public HTTP surface |
 | [reranker_service.py](./reranker_service.py) | Cross-encoder batch scoring |
 | [speech_sidecar.py](./speech_sidecar.py) | CPU Whisper + Kokoro |
-| [RUNBOOK.md](./RUNBOOK.md) | Verify + eval steps |
+| [RUNBOOK.md](./RUNBOOK.md) | **Primary operator guide** (bring-up, verify, optional eval) |
