@@ -37,34 +37,12 @@ cd /content/me-mex/colab   # or your clone path
 pip install -q -r requirements-colab.txt
 pip uninstall -y torchaudio 2>/dev/null || true
 
-python3 --version
-```
-
-**Speech (Phase 2)** — branch on Python:
-
-| Python | TTS on sidecar | Extra steps |
-|--------|----------------|-------------|
-| **3.10–3.12** | **Kokoro** (`kokoro>=0.9.4` on PyPI) | spacy wheels + espeak-ng before `requirements-colab-speech.txt` |
-| **3.13+** | **edge-tts** (Kokoro/misaki require `<3.13`) | `apt install ffmpeg` for mp3→wav |
-
-Python **3.10–3.12** (Kokoro):
-
-```bash
-apt-get -qq -y install espeak-ng
-pip install -q "spacy==3.8.18" "thinc>=8.3.12,<8.4" --only-binary=:all:
-pip install -q -r requirements-colab-speech.txt
-```
-
-If `--only-binary` fails, drop it for the spacy line once, then reinstall speech requirements.
-
-Python **3.13+** (edge-tts fallback — no spacy/kokoro):
-
-```bash
+# Speech (Phase 2): Whisper STT + edge-tts (ffmpeg for mp3→wav)
 apt-get -qq -y install ffmpeg
 pip install -q -r requirements-colab-speech.txt
 ```
 
-Confirm: `curl -s http://127.0.0.1:7861/health` should show `"tts":"edge"` (or `"kokoro"` on 3.12).
+`curl -s http://127.0.0.1:7861/health` should show `"tts":"edge"`.
 
 Chat-only bring-up skips the speech block; gateway `/stt` `/tts` proxy will 502 until sidecar deps are installed.
 
@@ -86,7 +64,7 @@ On Colab you need **several long-running processes** on the same VM. They are **
 
 | # | Process | Port | Role |
 |---|---------|------|------|
-| **4** | **speech_sidecar** | `7861` (localhost) | Whisper + Kokoro on CPU |
+| **4** | **speech_sidecar** | `7861` (localhost) | Whisper + edge-tts on CPU |
 
 “Four models” in the product spec = **chat (vLLM) + reranker (in gateway) + STT + TTS** — but **reranker is not a separate daemon**; only vLLM, gateway, speech (optional), and cloudflared are separate processes.
 
@@ -186,7 +164,7 @@ Every long-running process should append to **`colab/logs/`** on the Colab VM (n
 |----------|---------|------------------|
 | `logs/vllm.log` | vLLM `:8000` | Model load, OOM, request errors |
 | `logs/gateway.log` | `inference_gateway` `:7860` | Uvicorn access log, reranker load, proxy errors to vLLM/speech |
-| `logs/speech.log` | `speech_sidecar` `:7861` | Whisper/Kokoro load (Phase 2) |
+| `logs/speech.log` | `speech_sidecar` `:7861` | Whisper / edge-tts (Phase 2) |
 | `logs/cloudflared.log` | cloudflared | **Public HTTPS URL** (`trycloudflare.com`), tunnel errors |
 
 Create the directory once per session:
@@ -486,9 +464,9 @@ Optional thresholds: `data/decision_training/eval_gate.json`.
 | [inference_gateway.py](./inference_gateway.py) | vLLM proxy, `/v1/decision/score`, speech proxy |
 | [reranker_service.py](./reranker_service.py) | Cross-encoder scoring |
 | [scoring_text.py](./scoring_text.py) | Pair text formatting |
-| [speech_sidecar.py](./speech_sidecar.py) | Whisper + Kokoro |
+| [speech_sidecar.py](./speech_sidecar.py) | Whisper + edge-tts |
 | [requirements-colab.txt](./requirements-colab.txt) | Core pip pins (vLLM, gateway) |
-| [requirements-colab-speech.txt](./requirements-colab-speech.txt) | Speech sidecar (after spacy wheel install) |
+| [requirements-colab-speech.txt](./requirements-colab-speech.txt) | Speech sidecar pip pins |
 | [TOPOLOGY.md](./TOPOLOGY.md) | Architecture diagram |
 | [start_inference_tmux.sh](./start_inference_tmux.sh) | tmux session + `logs/*.log` via `tee` |
 | `logs/` | Runtime log directory on Colab (gitignored `*.log`) |

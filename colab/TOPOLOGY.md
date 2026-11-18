@@ -31,14 +31,14 @@ This document describes how **four remote capabilities** — chat LLM, **cross-e
               ┌───────────▼───┐   ┌─────▼─────────────┐
               │ vLLM  :8000   │   │ speech_sidecar    │
               │ GPU (L4)      │   │ :7861 CPU         │
-              │ Ministral 8B  │   │ Whisper + Kokoro  │
+              │ Ministral 8B  │   │ Whisper + edge-tts│
               └───────────────┘   └───────────────────┘
               (BGE reranker loads inside gateway process, CPU)
 ```
 
 **Why one public port?** Your backend expects chat at `{COLAB_VLLM_URL}/chat/completions` where `COLAB_VLLM_URL` ends in `/v1`, and decision at `{COLAB_VLLM_URL}/decision/score` ([`HttpDecisionScorer`](../backend/app/services/decision_scorer.py)). A single **gateway** on `:7860` keeps **one** Cloudflare URL for everything.
 
-**VRAM:** Only vLLM uses the L4 GPU. Reranker, Whisper, and Kokoro stay on **CPU**.
+**VRAM:** Only vLLM uses the L4 GPU. Reranker, Whisper, and edge-tts stay on **CPU**.
 
 ---
 
@@ -96,5 +96,5 @@ DECISION_SCORER_MODE=live uv run pytest tests/integration/decision -m vllm
 | [me_mex_inference_stack.ipynb](./me_mex_inference_stack.ipynb) | Operator notebook |
 | [inference_gateway.py](./inference_gateway.py) | Public HTTP surface |
 | [reranker_service.py](./reranker_service.py) | Cross-encoder batch scoring |
-| [speech_sidecar.py](./speech_sidecar.py) | CPU Whisper + Kokoro |
+| [speech_sidecar.py](./speech_sidecar.py) | CPU Whisper + edge-tts |
 | [RUNBOOK.md](./RUNBOOK.md) | **Primary operator guide** (bring-up, verify, optional eval) |

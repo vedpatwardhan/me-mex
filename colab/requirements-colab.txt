@@ -11,4 +11,4 @@ python-multipart
 sentence-transformers
 torch
 
-# Speech (Kokoro + Whisper): use requirements-colab-speech.txt (install spacy wheel first — see RUNBOOK §2)
+# Speech (Whisper + edge-tts): requirements-colab-speech.txt + ffmpeg — RUNBOOK §2.1
