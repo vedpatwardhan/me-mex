@@ -9,7 +9,11 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 
-export const RightDrawer: React.FC = () => {
+type Props = {
+  onGraphChange?: () => void;
+};
+
+export const RightDrawer: React.FC<Props> = ({ onGraphChange }) => {
   const {
     selectedNodeId,
     setSelectedNodeId,
@@ -185,6 +189,7 @@ export const RightDrawer: React.FC = () => {
                   onClick={async () => {
                     setIsDeleting(true);
                     await deleteNode(selectedNode.id);
+                    onGraphChange?.();
                     setIsDeleting(false);
                     setConfirmDelete(false);
                   }}

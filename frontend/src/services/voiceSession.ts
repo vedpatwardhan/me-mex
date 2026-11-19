@@ -32,11 +32,20 @@ export function normalizeLiveKitUrl(url: string): string {
 export class VoiceSession {
   room: Room | null = null;
   private onState?: (s: VoiceSessionState) => void;
+  private onDockEvent?: (ev: Record<string, unknown>) => void;
   private connectPromise: Promise<void> | null = null;
   private liveContext: VoiceContext | null = null;
 
-  constructor(onState?: (s: VoiceSessionState) => void) {
+  constructor(
+    onState?: (s: VoiceSessionState) => void,
+    onDockEvent?: (ev: Record<string, unknown>) => void,
+  ) {
     this.onState = onState;
+    this.onDockEvent = onDockEvent;
+  }
+
+  setDockEventHandler(handler?: (ev: Record<string, unknown>) => void) {
+    this.onDockEvent = handler;
   }
 
   private emit(state: VoiceSessionState) {
@@ -101,8 +110,12 @@ export class VoiceSession {
     });
     room.on(RoomEvent.DataReceived, (payload) => {
       try {
-        const msg = JSON.parse(new TextDecoder().decode(payload));
-        if (msg.type === 'agent_reply') {
+        const msg = JSON.parse(new TextDecoder().decode(payload)) as Record<string, unknown>;
+        const dockTypes = new Set(['dock_event', 'dock_events', 'turn_end', 'turn_start']);
+        if (dockTypes.has(String(msg.type))) {
+          this.onDockEvent?.(msg);
+        }
+        if (msg.type === 'agent_reply' || msg.type === 'turn_end') {
           this.emit('Speaking');
         }
         if (msg.type === 'awaiting_approval') {
@@ -184,6 +197,25 @@ export class VoiceSession {
   async publishContext(ctx: VoiceContext): Promise<void> {
     if (!this.room || !this.isReady()) return;
     await this.publishContextUpdate(ctx, ctx.muted);
+  }
+
+  async sendAgentTurn(text: string, ctx: VoiceContext) {
+    if (!this.room || !this.isReady()) return;
+    await this.room.localParticipant.publishData(
+      new TextEncoder().encode(
+        JSON.stringify({
+          type: 'agent_turn',
+          text,
+          context_json: {
+            active_project_id: ctx.active_project_id,
+            muted: ctx.muted,
+            custom_fields: ctx.custom_fields,
+            selected_node_ids: ctx.selected_node_ids,
+          },
+        }),
+      ),
+      { reliable: true },
+    );
   }
 
   async sendApproval(approvalId: string, action: 'approve' | 'cancel', ctx: VoiceContext) {

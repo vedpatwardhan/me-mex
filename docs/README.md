@@ -42,4 +42,4 @@ This folder is the **source of truth** for the rebuild after git tag **`v1`**. *
 | Vision & platform | **Aligned** — [00](./00-vision-and-principles.md) |
 | Graph, agents, UX, workflows | **Aligned** — no `domain_mode`; P0/P1 scope onboarding |
 | Phase 1 backend | **Done on `main`** — headless `/api/*`, tools, tests; decision canon = **gateway reranker** (spec 2026-11-18); Phase 2 = voice + dock |
-| Voice / dock / canvas | **Phase 2+** — [02](./02-user-experience.md) |
+| Voice / dock / canvas | **Phase 2 in progress** — LiveKit + dock stream on `main`; exit gate [11 §7](./11-testing.md) |

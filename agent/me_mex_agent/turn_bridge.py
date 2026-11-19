@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -74,6 +74,7 @@ async def run_turn_with_reply(
     text: str,
     thread_id: str,
     context_json: dict[str, Any],
+    on_chunk: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
     """Consume SSE; return (reply_text, stream_events, turn_end)."""
     tokens: list[str] = []
@@ -81,6 +82,8 @@ async def run_turn_with_reply(
     turn_end: dict[str, Any] = {}
     async for chunk in stream_turn(text=text, thread_id=thread_id, context_json=context_json):
         events.append(chunk)
+        if on_chunk is not None:
+            await on_chunk(chunk)
         if chunk.get("type") == "token":
             tokens.append(chunk.get("content") or "")
         if chunk.get("type") == "turn_end":

@@ -45,6 +45,7 @@ class RoomSession:
     muted: bool = True
     turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     cancel_tts: asyncio.Event = field(default_factory=asyncio.Event)
+    cancel_turn: asyncio.Event = field(default_factory=asyncio.Event)
     tts_source: Any = None
     tts_track: Any = None
 
@@ -110,6 +111,13 @@ async def _play_wav(room: rtc.Room, session: RoomSession, wav: bytes) -> None:
         await session.tts_source.capture_frame(frame)
 
 
+async def _publish_dock_event(room: rtc.Room, chunk: dict[str, Any]) -> None:
+    await room.local_participant.publish_data(
+        json.dumps({"type": "dock_event", "event": chunk}).encode("utf-8"),
+        reliable=True,
+    )
+
+
 async def _forward_dock_events(room: rtc.Room, events: list[dict[str, Any]]) -> None:
     if not events:
         return
@@ -117,8 +125,17 @@ async def _forward_dock_events(room: rtc.Room, events: list[dict[str, Any]]) -> 
     await room.local_participant.publish_data(payload, reliable=True)
 
 
+def _should_run_turn(session: RoomSession, text: str) -> bool:
+    fields = (session.context_json or {}).get("custom_fields") or {}
+    if fields.get("intent") or fields.get("resume_job_id") or fields.get("force_project_scope"):
+        return True
+    return bool(text.strip())
+
+
 async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> None:
-    if session.muted or not text.strip():
+    if session.muted and not _should_run_turn(session, text):
+        return
+    if not _should_run_turn(session, text):
         return
     context = dict(session.context_json)
     context.setdefault("muted", session.muted)
@@ -127,16 +144,30 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
         _log.warning("No active_project_id in context_json; skipping turn")
         return
     session.cancel_tts.set()
+    session.cancel_turn.clear()
+    await room.local_participant.publish_data(
+        json.dumps({"type": "turn_start", "text": text.strip()[:500]}).encode(),
+        reliable=True,
+    )
     async with session.turn_lock:
+
+        async def on_chunk(chunk: dict[str, Any]) -> None:
+            if session.cancel_turn.is_set():
+                return
+            await _publish_dock_event(room, chunk)
+
         try:
             reply, events, turn_end = await run_turn_with_reply(
                 text=text,
                 thread_id=session.thread_id,
                 context_json=context,
+                on_chunk=on_chunk,
             )
         except httpx.HTTPError:
             _log.exception("voice_turn failed")
             return
+        if turn_end:
+            await _publish_dock_event(room, turn_end)
         await _forward_dock_events(room, events)
         if turn_end.get("details", {}).get("approval_id") or any(
             e.get("type") == "approval" for e in events
@@ -187,6 +218,9 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
         if msg.get("thread_id"):
             session.thread_id = msg["thread_id"]
         session.muted = bool(msg.get("muted", session.muted))
+        if not session.muted:
+            session.cancel_tts.set()
+            session.cancel_turn.set()
         _log.info(
             "context_update muted=%s project=%s thread=%s",
             session.muted,
@@ -196,12 +230,27 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
         return
     if mtype in ("approve", "cancel"):
         action = "approve" if mtype == "approve" else "dismiss"
-        await post_resume(
-            thread_id=session.thread_id,
-            approval_id=msg.get("approval_id", ""),
-            action=action,
-            context_json=session.context_json,
+        session.cancel_tts.set()
+        try:
+            result = await post_resume(
+                thread_id=session.thread_id,
+                approval_id=msg.get("approval_id", ""),
+                action=action,
+                context_json=session.context_json,
+            )
+        except httpx.HTTPError:
+            _log.exception("resume failed")
+            return
+        reply = str(result.get("reply") or result.get("status") or "Done.")
+        await _publish_dock_event(
+            room,
+            {"type": "turn_end", "reply": reply, "graph_write": True, "details": result},
         )
+        if reply.strip() and speech_enabled():
+            try:
+                await _play_wav(room, session, await synthesize_wav(reply[:2000]))
+            except httpx.HTTPError:
+                _log.exception("TTS failed after resume")
         return
     if mtype == "agent_turn":
         _schedule_voice_turn(room, session, msg.get("text", ""))

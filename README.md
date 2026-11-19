@@ -12,7 +12,7 @@ The monolithic v1 stack (orchestrator ingest, `/api/chat`) is preserved only on 
 |--------------------|---------------|
 | Workflow-driven writes + explicit approve | URL → auto ingest + link + reorg |
 | Deterministic tools + LangGraph workers | v1 `ExecutiveOrchestrator` |
-| Headless REST + pytest (`/api/*`) | Phase 2 voice shell (LiveKit + dock) — see below |
+| Headless REST + pytest (`/api/*`) | Phase 2 voice shell (LiveKit + dock) on `main` |
 | Agents call `get_chains().invoke` / `get_decision_scorer()` (mock in CI) | **Colab four-model stack** for prod routing (`pytest -m vllm` gateway smoke) |
 
 Canon: **[`docs/`](./docs/)** — [docs/README.md](./docs/README.md), [docs/09-phasing.md](./docs/09-phasing.md), [docs/11-testing.md](./docs/11-testing.md).

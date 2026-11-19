@@ -59,7 +59,7 @@ class Store:
             metadata={"genesis": True},
         )
         self._db.projects.insert_one(project.to_mongo())
-        self._db.nodes.insert_one(genesis.to_mongo())
+        self.upsert_node(genesis)
         self._db.projects.update_one(
             {"_id": pid},
             {"$push": {"node_ids": genesis_id}},

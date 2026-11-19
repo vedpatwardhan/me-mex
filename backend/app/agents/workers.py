@@ -25,6 +25,11 @@ def _scorer_node(store: Store, node_id: str) -> ScorerNode:
 
 
 def route_intent(text: str, context: dict, project: Any) -> str:
+    fields = context.get("custom_fields") or {}
+    if fields.get("resume_job_id"):
+        return "conversation"
+    if fields.get("force_project_scope") and not (project.introduction or "").strip():
+        return "project_scope"
     intro = (project.introduction or "").strip()
     payload = json.dumps({"text": text, "context": context}, ensure_ascii=False)
     result = get_chains().supervisor.invoke(

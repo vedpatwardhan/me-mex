@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import operator
+import os
 from typing import Annotated, Any, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-from app.agents import workers
+from app.agents import job_runtime, workers
 from app.agents.context_preprocessor import (
     apply_custom_fields_to_text,
     block_graph_writes_without_scope,
@@ -69,6 +70,33 @@ def _worker_node(state: AgentState) -> AgentState:
     text = state.get("effective_text") or state["text"]
     context = state.get("context_json") or {}
     w = state.get("worker", "conversation")
+    fields = context.get("custom_fields") or {}
+    resume_job_id = fields.get("resume_job_id")
+    if resume_job_id:
+        job = job_runtime.resume_job(str(resume_job_id))
+        if job and job.get("output"):
+            return {**state, "output": job["output"], "worker": "intradoc"}
+    bg_intradoc = (
+        fields.get("background_intradoc") == "1"
+        or float(os.getenv("INTRADOC_BG_SLEEP_S", "0") or 0) > 0
+    )
+    if w == "intradoc" and bg_intradoc:
+        job = job_runtime.start_background_intradoc(
+            thread_id=state["thread_id"],
+            ctx=ctx,
+            text=text,
+            context=context,
+            worker_fn=workers.intradoc_worker,
+        )
+        return {
+            **state,
+            "output": {
+                "reply": f"Deep read started in background (job {job['job_id']}).",
+                "graph_write": False,
+                "job_id": job["job_id"],
+            },
+            "worker": "intradoc",
+        }
     if state.get("scope_blocked"):
         out = {
             "reply": "Set project scope first (unmute / P1 onboarding) before graph writes.",
@@ -173,6 +201,7 @@ def run_agent_turn(
     context_json: dict | None = None,
     checkpointer: JsonCheckpointStore | None = None,
 ) -> dict:
+    job_runtime.park_active_jobs(thread_id)
     graph = get_compiled_graph()
     state: AgentState = {
         "text": text,
@@ -186,7 +215,7 @@ def run_agent_turn(
     snap = graph.get_state(config)
     values = snap.values if snap and snap.values else {}
     out = values.get("output") or {}
-    jobs = values.get("jobs") or []
+    jobs = list(values.get("jobs") or []) + job_runtime.list_jobs(thread_id)
     if checkpointer:
         checkpointer.save(
             thread_id,
@@ -259,6 +288,9 @@ async def astream_agent_turn(
     """Yield dock SSE payloads from astream_events v3."""
     from app.agents.streaming import event_to_dock_payload
 
+    for job in job_runtime.park_active_jobs(thread_id):
+        yield {"type": "custom", "job": job}
+
     graph = get_compiled_graph()
     state: AgentState = {
         "text": text,
@@ -282,5 +314,5 @@ async def astream_agent_turn(
         "reply": out.get("reply", ""),
         "graph_write": out.get("graph_write", False),
         "details": out,
-        "jobs": values.get("jobs") or [],
+        "jobs": list(values.get("jobs") or []) + job_runtime.list_jobs(thread_id),
     }

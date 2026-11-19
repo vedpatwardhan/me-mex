@@ -48,7 +48,18 @@ export const RecommendationsDock: React.FC<Props> = ({
               key={item.id}
               className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-200"
             >
-              <span className="text-slate-500">{item.className}</span> {item.title}
+              <span
+                className={
+                  item.className === 'job'
+                    ? 'text-amber-500'
+                    : item.className === 'approval'
+                      ? 'text-emerald-500'
+                      : 'text-slate-500'
+                }
+              >
+                {item.className}
+              </span>{' '}
+              {item.title}
               {item.detail ? <div className="text-slate-400">{item.detail}</div> : null}
               {item.className === 'approval' && onApprove && onDismiss ? (
                 <div className="mt-2 flex gap-2">

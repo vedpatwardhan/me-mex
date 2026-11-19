@@ -8,15 +8,21 @@ import { parseCustomFields } from '../utils/dockUtils';
 type Props = {
   projectId?: string;
   selectedNodeId?: string | null;
+  projectIntroduction?: string;
   onMuteToggle?: (muted: boolean) => void;
   onContext?: (ctx: VoiceContext) => void;
+  onDockStreamEvent?: (ev: Record<string, unknown>) => void;
+  onVoiceSession?: (session: VoiceSession | null) => void;
 };
 
 export const VoiceRail: React.FC<Props> = ({
   projectId,
   selectedNodeId,
+  projectIntroduction,
   onMuteToggle,
   onContext,
+  onDockStreamEvent,
+  onVoiceSession,
 }) => {
   const [muted, setMuted] = useState(true);
   const [state, setState] = useState<VoiceSessionState>('Muted');
@@ -44,10 +50,27 @@ export const VoiceRail: React.FC<Props> = ({
 
   const ensureSession = () => {
     if (!sessionRef.current) {
-      sessionRef.current = new VoiceSession((s) => setVoiceStateRef.current(s));
+      sessionRef.current = new VoiceSession(
+        (s) => setVoiceStateRef.current(s),
+        (ev) => onDockStreamEvent?.(ev),
+      );
+      onVoiceSession?.(sessionRef.current);
+    } else if (onDockStreamEvent) {
+      sessionRef.current.setDockEventHandler(onDockStreamEvent);
     }
     return sessionRef.current;
   };
+
+  useEffect(() => {
+    sessionRef.current?.setDockEventHandler(onDockStreamEvent);
+  }, [onDockStreamEvent]);
+
+  useEffect(() => {
+    const session = sessionRef.current;
+    if (!session?.isReady()) return;
+    void session.publishContext(buildContext());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- republish on project/selection change
+  }, [projectId, selectedNodeId, threadId]);
 
   const roomReady = sessionRef.current?.isReady() ?? false;
   const connected =
@@ -73,7 +96,13 @@ export const VoiceRail: React.FC<Props> = ({
       if (!session.isReady()) {
         throw new Error('Could not join LiveKit room');
       }
-      await session.setMuted(false, ctx);
+      const scopeCtx = !projectIntroduction?.trim()
+        ? {
+            ...ctx,
+            custom_fields: { ...ctx.custom_fields, force_project_scope: '1' },
+          }
+        : ctx;
+      await session.setMuted(false, scopeCtx);
       setState('Listening');
       setMuted(false);
       onMuteToggle?.(false);
@@ -117,6 +146,8 @@ export const VoiceRail: React.FC<Props> = ({
     setVoiceError(null);
     try {
       await session.disconnect();
+      sessionRef.current = null;
+      onVoiceSession?.(null);
       setState('Muted');
       setMuted(true);
       onMuteToggle?.(true);
@@ -164,6 +195,21 @@ export const VoiceRail: React.FC<Props> = ({
         Status: {state}
         {connected ? (live ? ' · mic on' : ' · mic off (session active)') : ' · not connected'}
       </div>
+      {connected && muted ? (
+        <button
+          type="button"
+          className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-200"
+          onClick={() => {
+            const s = ensureSession();
+            if (s.isReady()) void s.sendAgentTurn('', { ...buildContext(), muted: true });
+          }}
+        >
+          Send muted turn (custom fields)
+        </button>
+      ) : null}
+      {!projectIntroduction?.trim() && connected ? (
+        <p className="text-xs text-cyan-400/90">Unmute to set project scope (P1).</p>
+      ) : null}
       {voiceError ? (
         <div className="text-xs text-rose-400 break-words" role="alert">
           {voiceError}
