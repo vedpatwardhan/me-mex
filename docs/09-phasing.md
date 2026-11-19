@@ -112,7 +112,8 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | Agent | P1 | P2 |
 |-------|----|----|
 | **Supervisor** | Headless routing tests | LiveKit turns + `astream_events` |
-| **Conversation** | W2/W9 REST | Voice inquiry, fetch, passages |
+| **Conversation (voice plane 1)** | W2/W9 REST harness | Dialogue only; dispatch workers — **must match** [04 §12.11–12.13](./04-agent-orchestration.md#1211-conversation-first-voice-normative) before voice gate green |
+| **WorkflowAgent** | — | Dock card LLM (§12.4b) + proactive TTS (§12.12) |
 | **GistWorker** | Gist/attach/note/todo tools | W2 commit + W6 |
 | **IntraDocWorker** | Extract harness → staging → commit | W3 + dock staging row + job progress |
 | **LinkPlaceWorker** | Reranker + placement enqueue | W4 + dock approval |
@@ -260,7 +261,9 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 
 **Goal:** Every workflow in [§4](#4-user-workflows-06--phases) voice/panel path; committed stack live [00 §8](./00-vision-and-principles.md#8-v2-platform-plan-committed).
 
-### Runtime ([04 §12](./04-agent-orchestration.md#12-langgraph--langchain-runtime-interactive-agent))
+### Runtime ([04 §12](./04-agent-orchestration.md#12-langgraph--langchain-runtime-interactive-agent); voice normative [§12.11–12.13](./04-agent-orchestration.md#1211-conversation-first-voice-normative))
+
+**Phase 2 voice gate:** implementation must match **three-plane** voice (Conversation dialogue-only, WorkflowObserver + WorkflowAgent, async dispatch) per §12.11–12.13 before marking exit criteria green.
 
 - Root StateGraph, checkpointer + `thread_id`, **`astream_events` v3** → dock + TTS.
 - **`jobs`** ledger + `custom` stream for intra-doc/scorer progress.

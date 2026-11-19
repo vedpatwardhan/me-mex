@@ -6,7 +6,11 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 
-def event_to_dock_payload(ev: dict[str, Any]) -> dict[str, Any] | None:
+def event_to_dock_payload(
+    ev: dict[str, Any],
+    *,
+    voice_turn: bool = False,
+) -> dict[str, Any] | None:
     kind = ev.get("event") or ""
     data = ev.get("data") or {}
     if kind == "on_chat_model_stream":
@@ -37,8 +41,12 @@ def event_to_dock_payload(ev: dict[str, Any]) -> dict[str, Any] | None:
                             "detail": out.get("reply"),
                         }
                     elif out.get("reply"):
-                        payload["type"] = "reply"
-                        payload["content"] = out.get("reply")
+                        if voice_turn:
+                            payload["type"] = "worker_progress"
+                            payload["content"] = out.get("reply")
+                        else:
+                            payload["type"] = "reply"
+                            payload["content"] = out.get("reply")
             return payload
     return None
 

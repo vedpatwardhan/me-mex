@@ -104,6 +104,21 @@ me-mex/
 | Reranker eval | Script/test: ranking metric on held-out bootstrap (optional gate) [00 §9](./00-vision-and-principles.md) |
 | Checkpoint JSON | Unit: save/load `thread_id`, resume after interrupt |
 
+### 3.5 Voice three-plane ([04 §12.11–12.13](./04-agent-orchestration.md))
+
+Marker **`voice_plane`** (default CI; HTTP/SSE only, no LiveKit room).
+
+| Contract | Test module |
+|----------|-------------|
+| Conversation no tools on voice | `test_voice_conversation_stream.py` |
+| Async dispatch off hot path | `test_voice_dispatch_enqueued.py` |
+| Chit-chat skips worker | `test_voice_chit_chat_no_graph.py` |
+| Briefing API | `test_session_briefing_api.py` |
+| Worker reply not hot-path TTS | `test_streaming_voice_filter.py` |
+| WorkflowAgent metadata | `test_workflow_agent.py` |
+| §12.13 surface | `test_voice_spec_invariants.py` |
+| W9 voice path | `test_workflow_w9_voice_summary.py` |
+
 ---
 
 ## 4. Workflow test matrix ([06](./06-workflows.md))

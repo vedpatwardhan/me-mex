@@ -48,19 +48,54 @@ async def post_resume(
         return r.json()
 
 
+def _use_voice_conversation_stream(context_json: dict[str, Any]) -> bool:
+    if context_json.get("voice_turn") is True:
+        return True
+    return str(context_json.get("voice_turn", "")).lower() in ("1", "true", "yes")
+
+
 async def stream_turn(
     *,
     text: str,
     thread_id: str,
     context_json: dict[str, Any],
 ) -> AsyncIterator[dict[str, Any]]:
+    path = (
+        "/api/voice/conversation/stream"
+        if _use_voice_conversation_stream(context_json)
+        else "/api/agent/turn/stream"
+    )
+    payload = context_json
+    if path.endswith("conversation/stream"):
+        payload = {**context_json, "voice_turn": True}
     async with (
         httpx.AsyncClient(timeout=180.0) as client,
         client.stream(
             "POST",
-            f"{BACKEND_URL}/api/agent/turn/stream",
-            json={"text": text, "thread_id": thread_id, "context_json": context_json},
+            f"{BACKEND_URL}{path}",
+            json={"text": text, "thread_id": thread_id, "context_json": payload},
         ) as response,
+    ):
+        response.raise_for_status()
+        async for line in response.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            yield json.loads(line[6:])
+
+
+async def stream_session_events(
+    *,
+    project_id: str,
+    thread_id: str,
+) -> AsyncIterator[dict[str, Any]]:
+    url = (
+        f"{BACKEND_URL}/api/agent/session/events"
+        f"?project_id={httpx.QueryParams({'project_id': project_id})['project_id']}"
+        f"&thread_id={httpx.QueryParams({'thread_id': thread_id})['thread_id']}"
+    )
+    async with (
+        httpx.AsyncClient(timeout=None) as client,
+        client.stream("GET", url) as response,
     ):
         response.raise_for_status()
         async for line in response.aiter_lines():
@@ -85,6 +120,8 @@ async def run_turn_with_reply(
         if on_chunk is not None:
             await on_chunk(chunk)
         if chunk.get("type") == "token":
+            if chunk.get("source") not in (None, "conversation"):
+                continue
             tokens.append(chunk.get("content") or "")
         if chunk.get("type") == "turn_end":
             turn_end = chunk

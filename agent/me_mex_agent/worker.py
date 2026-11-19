@@ -29,7 +29,7 @@ from me_mex_agent.audio_util import (
     should_end_utterance,
 )
 from me_mex_agent.speech_colab import speech_enabled, synthesize_wav, transcribe_wav
-from me_mex_agent.turn_bridge import post_resume, run_turn_with_reply
+from me_mex_agent.turn_bridge import post_resume, run_turn_with_reply, stream_session_events
 from me_mex_agent.vad_silero import (
     SileroUtteranceCollector,
     load_silero_vad,
@@ -60,6 +60,8 @@ class RoomSession:
     utterance_collector: SileroUtteranceCollector | None = None
     stt_semaphore: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
     vad: Any = None
+    proactive_spoken: set[str] = field(default_factory=set)
+    session_events_task: asyncio.Task | None = None
 
 
 def _parse_data(payload: bytes) -> dict[str, Any] | None:
@@ -160,6 +162,7 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
         return
     context = dict(session.context_json)
     context.setdefault("muted", session.muted)
+    context["voice_turn"] = True
     project_id = context.get("active_project_id") or context.get("project_id")
     if not project_id:
         _log.warning("No active_project_id in context_json; skipping turn")
@@ -170,6 +173,7 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
         json.dumps({"type": "turn_start", "text": text.strip()[:500]}).encode(),
         reliable=True,
     )
+    _ensure_session_events_listener(room, session)
     async with session.turn_lock:
 
         async def on_chunk(chunk: dict[str, Any]) -> None:
@@ -210,6 +214,68 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
                 json.dumps({"type": "agent_reply", "text": reply}).encode(),
                 reliable=True,
             )
+
+
+async def _maybe_proactive_tts(
+    room: rtc.Room,
+    session: RoomSession,
+    *,
+    job_id: str,
+    text: str,
+) -> None:
+    if not text.strip() or session.muted or not speech_enabled():
+        return
+    if job_id in session.proactive_spoken:
+        return
+    session.proactive_spoken.add(job_id)
+    session.cancel_tts.set()
+    try:
+        wav = await synthesize_wav(text.strip())
+        await _play_wav(room, session, wav)
+    except httpx.HTTPError:
+        _log.exception("proactive TTS failed")
+
+
+async def _consume_session_events(room: rtc.Room, session: RoomSession) -> None:
+    project_id = session.context_json.get("active_project_id") or session.context_json.get(
+        "project_id"
+    )
+    if not project_id:
+        return
+    try:
+        async for ev in stream_session_events(
+            project_id=str(project_id),
+            thread_id=session.thread_id,
+        ):
+            if ev.get("type") == "proactive":
+                jid = str(ev.get("job_id") or "")
+                line = str(ev.get("text") or "")
+                await _maybe_proactive_tts(room, session, job_id=jid or line[:32], text=line)
+                await room.local_participant.publish_data(
+                    json.dumps({"type": "proactive_reply", "text": line, "job_id": jid}).encode(),
+                    reliable=True,
+                )
+            elif ev.get("type") in ("job_update", "recommendation"):
+                await room.local_participant.publish_data(
+                    json.dumps({"type": ev["type"], **ev}).encode(),
+                    reliable=True,
+                )
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001
+        _log.exception("session events stream ended")
+
+
+def _ensure_session_events_listener(room: rtc.Room, session: RoomSession) -> None:
+    project_id = session.context_json.get("active_project_id") or session.context_json.get(
+        "project_id"
+    )
+    if not project_id:
+        return
+    task = session.session_events_task
+    if task is not None and not task.done():
+        return
+    session.session_events_task = asyncio.create_task(_consume_session_events(room, session))
 
 
 def _schedule_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> None:
@@ -292,6 +358,7 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
                 "mic muted (peak_rms=%.4f)",
                 session.peak_rms,
             )
+        _ensure_session_events_listener(room, session)
         _log.info(
             "context_update muted=%s project=%s thread=%s",
             session.muted,

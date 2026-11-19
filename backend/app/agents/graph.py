@@ -287,7 +287,9 @@ async def astream_agent_turn(
 ):
     """Yield dock SSE payloads from astream_events v3."""
     from app.agents.streaming import event_to_dock_payload
+    from app.agents.voice_dispatch import is_voice_turn
 
+    voice = is_voice_turn(context_json)
     for job in job_runtime.park_active_jobs(thread_id):
         yield {"type": "custom", "job": job}
 
@@ -302,7 +304,7 @@ async def astream_agent_turn(
     config = {"configurable": {"thread_id": thread_id}}
     event_iter = await graph.astream_events(state, config=config, version="v3")
     async for ev in event_iter:
-        payload = event_to_dock_payload(ev)
+        payload = event_to_dock_payload(ev, voice_turn=voice)
         if payload:
             yield payload
     snap = await graph.aget_state(config)

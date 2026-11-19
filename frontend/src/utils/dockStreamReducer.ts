@@ -67,6 +67,30 @@ export function applyStreamEvent(
     if (jobPatch) return { ...state, items: upsertJob(state.items, jobPatch) };
     return state;
   }
+  if (type === 'proactive_reply' && typeof ev.text === 'string') {
+    return { ...state, latestReply: ev.text as string };
+  }
+  if (type === 'job_update') {
+    const jobPatch = ev.job as Record<string, unknown> | undefined;
+    if (jobPatch) return { ...state, items: upsertJob(state.items, jobPatch) };
+  }
+  if (type === 'recommendation') {
+    const cards = (ev.cards as Array<Record<string, unknown>>) || [];
+    let items = state.items;
+    for (const card of cards) {
+      const row: DockItem = {
+        id: String(card.id ?? `rec-${items.length}`),
+        className: (card.className as DockItem['className']) || 'nudge',
+        title: String(card.title ?? 'Recommendation'),
+        detail: '',
+      };
+      items = [row, ...items.filter((i) => i.id !== row.id)];
+    }
+    return { ...state, items };
+  }
+  if (type === 'worker_progress') {
+    return state;
+  }
   if (type === 'turn_end') {
     let next = { ...state };
     const reply = ev.reply as string | undefined;

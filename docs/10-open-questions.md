@@ -36,6 +36,10 @@
 | M2 | **Open** — One global reranker checkpoint vs per-project fine-tune on gateway |
 | M3 | **Resolved** — [§6](#6-resolved-decisions-locked) |
 | M4 | **Resolved** — [§6](#6-resolved-decisions-locked) |
+| V1 | **Open** — `VOICE_FOREGROUND_MAX_TOKENS` default ([04 §12.11](./04-agent-orchestration.md#1211-conversation-first-voice-normative)) |
+| V2 | **Resolved** — Proactive TTS on job `done` / `awaiting_approval` is **always on** when unmuted ([04 §12.12](./04-agent-orchestration.md#1212-proactive-updates-blend-in)) |
+| V3 | **Open** — Conversation endpoint placement: backend stream vs Colab hop for plane 1 LLM |
+| V4 | **Open** — Keyword-first `route_intent` on dispatch-only path for latency |
 
 ---
 

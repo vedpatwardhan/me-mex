@@ -113,7 +113,7 @@ Use a **fresh project** name like `Demo — <your topic>` so the graph stays eas
 | B4 | Confirm when agent summarizes scope | Scope text appears in dock; Genesis/description updates after approve if prompted | |
 | B5 | **Mute mic** while assistant finishes / TTS plays | Session **stays** connected (`mic off (session active)`); hear TTS without re-connecting | |
 
-**Logs:** `agent.log` → `STT utterance`, `voice_turn reply_len=…` (no `voice_turn failed`); `backend.log` → `POST /api/agent/turn/stream` without trailing ASGI `ERROR`.
+**Logs:** `agent.log` → `STT utterance`, `voice_turn reply_len=…` (no `voice_turn failed`); `backend.log` → `POST /api/voice/conversation/stream` (conversation-first) and optional `dispatch job_id=…`; proactive TTS may log after job `done` / `awaiting_approval` — no trailing ASGI `ERROR`.
 
 **Workflow:** [06 P1](./06-workflows.md#p1--first-voice-project-scope-before-research)
 

@@ -11,11 +11,13 @@ This document is the **end-to-end user journey**—what you do in the UI, when v
 | Rule | Meaning |
 |------|---------|
 | **Initiate, not execute** | Tapping/voicing a recommendation **starts a guided step**: show context, options, drafts—**you** decide the next move. |
-| **Conversation first** | Gist, deep-read **content**, placement options, and reorg proposals can be discussed in the dock **before** any Mongo write. |
+| **Conversation first** | On voice, **Conversation** speaks first (interim ack); workers fetch/score/extract **async** ([04 §12.11](./04-agent-orchestration.md#1211-conversation-first-voice-normative)). Gist, deep-read **content**, placement, and reorg can be discussed in dock **before** Mongo write. |
 | **Approval = write** | ROOT creation, links, intra-doc commit, reorg apply happen only after you **approve** (button or voice). |
 | **Direct path OK** | You can skip recommendations with an explicit command + `custom_fields` (e.g. arXiv id + “create ROOT; gist is …”). |
 
 **Retrieval** is usually **on demand** (you ask); the only common **retrieval-related recommendation** is “this discussion relates to ToDo X” ([§10](#10-w11--retrieval)).
+
+**Voice example (deep read):** You say *“build the intra-doc graph for this paper.”* Conversation replies *“I’ll start a deep read—you can keep talking.”* LangGraph dispatches **IntraDocWorker** async; dock shows a **job chip**; when staging is ready, **WorkflowAgent** adds an approval card and Conversation speaks a **short proactive line** ([04 §12.12](./04-agent-orchestration.md#1212-proactive-updates-blend-in)).
 
 ---
 

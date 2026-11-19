@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -34,9 +34,9 @@ class Node(BaseModel):
     description: str = ""
     node_kind: NodeKind
     project_id: str
-    source_uri: Optional[str] = None
+    source_uri: str | None = None
     passage_ids: list[str] = Field(default_factory=list)
-    parent_root_id: Optional[str] = None
+    parent_root_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
@@ -50,7 +50,7 @@ class Node(BaseModel):
         return doc
 
     @classmethod
-    def from_mongo(cls, doc: dict[str, Any]) -> "Node":
+    def from_mongo(cls, doc: dict[str, Any]) -> Node:
         kind = doc.get("metadata", {}).get("node_kind") or "CONCEPT_M"
         return cls(
             _id=doc["_id"],
@@ -118,8 +118,8 @@ class StagingConcept(BaseModel):
 
 
 class StagingBundle(BaseModel):
-    root_id: Optional[str] = None
-    pending_url: Optional[str] = None
+    root_id: str | None = None
+    pending_url: str | None = None
     content_hash: str = ""
     concepts: list[StagingConcept] = Field(default_factory=list)
     updated_at: float = Field(default_factory=time.time)
@@ -137,6 +137,8 @@ class PendingApproval(BaseModel):
 
 
 class AgentTurnRequest(BaseModel):
+    """Agent turn envelope; use ``context_json.voice_turn`` for plane-1 voice (see ``/api/voice/conversation/stream``)."""
+
     text: str
     thread_id: str
     context_json: dict[str, Any] = Field(default_factory=dict)

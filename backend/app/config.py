@@ -79,6 +79,9 @@ class Settings:
     LLM_COMPLETION_MAX_TOKENS: int = int(os.getenv("LLM_COMPLETION_MAX_TOKENS", "2048"))
     CONSOLIDATION_MAX_TOKENS: int = int(os.getenv("CONSOLIDATION_MAX_TOKENS", "3072"))
     CHAT_COMPLETION_MAX_TOKENS: int = int(os.getenv("CHAT_COMPLETION_MAX_TOKENS", "1024"))
+    VOICE_FOREGROUND_MAX_TOKENS: int = int(os.getenv("VOICE_FOREGROUND_MAX_TOKENS", "512"))
+    WORKFLOW_AGENT_MAX_TOKENS: int = int(os.getenv("WORKFLOW_AGENT_MAX_TOKENS", "256"))
+    VOICE_KEYWORD_DISPATCH: bool = _env_bool("VOICE_KEYWORD_DISPATCH", "false")
     INGEST_EXTRACTION_CONCURRENCY: int = int(os.getenv("INGEST_EXTRACTION_CONCURRENCY", "4"))
 
     # Graph traversal (RetrievalWorker BFS)

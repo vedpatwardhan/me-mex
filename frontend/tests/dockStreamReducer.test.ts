@@ -13,6 +13,22 @@ describe('dockStreamReducer', () => {
     expect(s2.latestReply).toBe('Hello world');
   });
 
+  it('handles job_update without turn_end', () => {
+    const s = applyStreamEvent(emptyDockStreamState(), {
+      type: 'job_update',
+      job: { job_id: 'job-1', label: 'Deep read', status: 'running', worker: 'intradoc' },
+    });
+    expect(s.items.some((i) => i.id === 'job-1' && i.className === 'job')).toBe(true);
+  });
+
+  it('ignores worker_progress for latestReply', () => {
+    const s = applyStreamEvent(emptyDockStreamState(), {
+      type: 'worker_progress',
+      content: 'worker should not show',
+    });
+    expect(s.latestReply).toBe('');
+  });
+
   it('adds approval on turn_end', () => {
     const s = applyStreamEvent(emptyDockStreamState(), {
       type: 'turn_end',

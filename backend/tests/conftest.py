@@ -86,6 +86,16 @@ def project(store):
 
 
 @pytest.fixture
+def voice_context_json(project):
+    return {
+        "voice_turn": True,
+        "active_project_id": project.id,
+        "project_id": project.id,
+        "custom_fields": {},
+    }
+
+
+@pytest.fixture
 def empty_project(store):
     return store.create_project(name="Empty Project")
 

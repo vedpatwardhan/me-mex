@@ -2,7 +2,7 @@
 
 > **Canon:** [00-vision-and-principles.md](./00-vision-and-principles.md) §5–6, §8. **Graph rules:** [03-graph-and-memory.md](./03-graph-and-memory.md).
 
-LangGraph orchestrates **worker agents** (LLM + decision model) and **deterministic tools** (Mongo, staging, dock) behind LiveKit. **Conversation** does **not** mutate Mongo unless an agent invokes a **write tool** and you approve where required. **Gist**, **intra-doc**, **link/place**, and **reorg** are **separate** agent paths—not a v1 monolithic ingest.
+**Voice:** plane 1 **Conversation** (dialogue only, no tools) on LiveKit; **WorkflowObserver** + **WorkflowAgent** for jobs and dock cards; **LangGraph workers** on dispatch only ([§2](#2-topology)). **LangGraph** orchestrates worker agents (LLM + decision model) and **deterministic tools** (Mongo, staging, dock). Conversation does **not** mutate Mongo—workers do, after HITL where required. **Gist**, **intra-doc**, **link/place**, and **reorg** are **separate** agent paths—not a v1 monolithic ingest.
 
 ---
 
@@ -14,7 +14,8 @@ LangGraph orchestrates **worker agents** (LLM + decision model) and **determinis
 | Orchestration | **LangGraph** root graph + LangChain `create_agent` **worker agents** |
 | Graph DB | **MongoDB** via **deterministic tools only** |
 | Checkpointer | LangGraph session state—**plain JSON on disk** (per `thread_id`); **not** Mongo knowledge collections ([§12.2](./04-agent-orchestration.md#122-persistence-thread_id--checkpointer)) |
-| Conversation | Supervisor / Conversation agent—**no write tools** unless routed |
+| Voice Conversation (plane 1) | LiveKit STT→TTS path—**dialogue only**, **no tools**; dispatches LangGraph for all data/work ([§2](#2-topology), [§12.11](#1211-conversation-first-voice-normative)) |
+| REST / harness | Monolithic turn may still route **Conversation worker** with read-only tools until voice split lands ([§12.13](#1213-spec-vs-implementation)) |
 | Retrieval / placement / reorg hops | **Gateway reranker DecisionScorer**: `query_node` + full `frontier` relevance vector; agent top‑k ([05 §3](./05-models-and-runtime.md#31-purpose--relevance-over-a-candidate-batch-replaces-v1-subgraph_expansion)) |
 | Tools | **Deterministic only**—no LLM, no DecisionScorer, no embedder calls inside tool code ([§6](#6-deterministic-tools)) |
 | Interactive runtime | **`astream_events` (v3)**, checkpointer + **`thread_id`**, **foreground/background context switch**, HITL only where graph writes need OK ([§12](#12-langgraph--langchain-runtime-interactive-agent)) |
@@ -23,29 +24,82 @@ LangGraph orchestrates **worker agents** (LLM + decision model) and **determinis
 
 ## 2. Topology
 
+### 2.0 Voice normative: three planes
+
+Primary reference: [assets/scratchpad_2.png](../assets/scratchpad_2.png).
+
+| Plane | Always on? | Role |
+|-------|------------|------|
+| **1 — LiveKit voice POC** | When unmuted | **STT → Conversation agent → TTS**; transcript to dock; **no tools** on Conversation |
+| **2a — WorkflowObserver** | Per `thread_id` | Deterministic: merge worker outputs into **`jobs`**, stream progress, refresh nudge **inputs** — **no LLM** |
+| **2b — WorkflowAgent** | Per `thread_id` | Small LLM pass: observer signals → **ranked dock cards** / titles — **no Mongo writes** ([§12.4b](#124b-workflowagent-dock-recommendations)) |
+| **3 — LangGraph workers** | **On dispatch** | `ContextPreprocessor` → `Supervisor` → Gist / IntraDoc / Link / Reorg / Retrieval / ProjectScope … + HITL |
+
 ```
-[You] ←LiveKit audio/data→ [LiveKit Agent Worker]
-                                    │
-                                    ▼
-                          LangGraph root StateGraph
-                          (checkpointer on root only)
-                                    │
-              ┌─────────────────────┼─────────────────────┐
-              ▼                     ▼                     ▼
-     ContextPreprocessor      Supervisor            WorkflowObserver
-     (deterministic)          create_agent          (deterministic: jobs ledger)
+[You] ←audio/data→ LiveKit agent worker
+                        │
+           ┌────────────┴────────────┐
+           ▼                         ▼
+    STT → Conversation → TTS    (optional) dispatch
+           │      dialogue only       │
+           │      no tools            ▼
+           │              LangGraph root — invocation + state transition
+           │                         │
+           │              Gist | IntraDoc | Link | Reorg | Retrieval | …
+           │                         │
+           └─ transcript ──→ Dock ←──┴── WorkflowObserver → WorkflowAgent
+```
+
+- **Conversation ↔ LangGraph root:** read **current state / status**; send **dispatch context** to execute or **override & move to new state** (e.g. start intra-doc job).
+- **Pure dialogue** may skip plane 3; any **information need** (gist, fetch, retrieval, placement, extract, …) → **dispatch** async; Conversation speaks **interim** ack first ([§12.11](#1211-conversation-first-voice-normative)).
+- **Mongo writes** only through **worker tools** after HITL where required.
+
+### 2.0.1 Worker graph slice (dispatch path)
+
+Diagram below is the **LangGraph worker fan-out** (plane 3). The **Conversation** node in the fan-out is for **REST / pytest harness** ([`conversation_worker`](../backend/app/agents/workers.py)), **not** the voice hot path.
+
+```
+[LiveKit or REST dispatch] → ContextPreprocessor → Supervisor
                               │
         ┌─────────────────────┼─────────────────────┐
         ▼           ▼         ▼         ▼           ▼
    Conversation  GistWorker  IntraDoc  LinkPlace  ReorgWorker
-   (no graph     Worker      Worker    Worker     Topology +
-    writes)                           Partition  Retrieval
-                                      + highlight
+   (REST only)   Worker      Worker    Worker     + Retrieval …
+        │             └──────────┬────────────────┘
+        ▼                          ▼
+   hitl_gate (writes)     WorkflowObserver → WorkflowAgent → Dock
 ```
 
-- **User-facing process** joins the LiveKit room; Mongo writes **only** through **deterministic tools** that agents invoke.
-- **Supervisor** routes turns to **worker agents** (each may call Ministral and/or DecisionScorer, then tools—≤8 tools per agent step for Ministral tool-calling).
-- **Conversation agent:** Q&A, summarize, spoken replies—**LLM in the agent**; fetch/highlight via deterministic tools only—**no graph writes** by default.
+- **Supervisor** routes dispatched intents to **worker agents** (Ministral and/or DecisionScorer, then deterministic tools—≤8 tools per step for Ministral tool-calling).
+- **User-facing LiveKit process** joins the room; plane 1 **Conversation** does not invoke tools.
+
+### 2.1 LangGraph primer (Me-Mex)
+
+Read this before [§12](#12-langgraph--langchain-runtime-interactive-agent).
+
+| Term | Me-Mex meaning |
+|------|----------------|
+| **`thread_id`** | Stable session key (room + project); survives mute/unmute; holds checkpointer + `jobs` |
+| **Checkpointer** | JSON on disk under `backend/data/checkpoints/<thread_id>/` — messages, channel state, `jobs`, interrupt metadata — **not** Mongo knowledge graph |
+| **Voice turn** | Plane 1: Conversation stream + optional **dispatch**; does not require full root `invoke()` for chit-chat |
+| **Graph turn** | Plane 3: worker subgraph + observer update; triggered by dispatch, HITL resume, or REST harness |
+| **Worker agent** | Gist, IntraDoc, LinkPlace, … — LLM/scorer in node, **tools** for persist/fetch |
+| **`interrupt()` / `Command(resume)`** | HITL for **graph writes** only — not parking background jobs |
+| **`astream_events` v3** | Voice: tokens from **Conversation** to dock + TTS; workers emit `custom` / `tasks` for progress |
+| **WorkflowObserver** | Deterministic ledger ([§12.4](#124-tracking-what-the-user-asked-for-job-ledger)) |
+| **WorkflowAgent** | Small LLM dock card author ([§12.4b](#124b-workflowagent-dock-recommendations)) |
+| **What LangGraph is not here** | Not a second DB; not the voice Conversation persona |
+
+**Code map (current `main`):**
+
+| File | Role |
+|------|------|
+| [`backend/app/agents/graph.py`](../backend/app/agents/graph.py) | `build_graph`, `astream_agent_turn`, `_workflow_observer` |
+| [`backend/app/agents/workers.py`](../backend/app/agents/workers.py) | Worker bodies, `route_intent`, `conversation_worker` (REST) |
+| [`backend/app/agents/job_runtime.py`](../backend/app/agents/job_runtime.py) | Background intradoc, job park/resume |
+| [`agent/me_mex_agent/worker.py`](../agent/me_mex_agent/worker.py) | LiveKit → `POST /api/agent/turn/stream` today |
+
+**Target vs today:** voice should **not** route spoken replies through a single synchronous `_worker_node`; see [§12.13](#1213-spec-vs-implementation).
 
 ---
 
@@ -104,8 +158,9 @@ See [02-user-experience.md](./02-user-experience.md).
 
 | Agent | Model work (in agent, not in tools) | Typical deterministic tools after |
 |-------|-------------------------------------|-----------------------------------|
-| **Supervisor** | Turn routing, optional short reply | Delegates to workers |
-| **Conversation** | Inquiry, summary, comparison, TTS script | `fetch_normalized_text`, `open_passages`, `get_suggested_next_actions` |
+| **Supervisor** | Turn routing on **dispatch path** | Delegates to workers |
+| **Conversation (voice, plane 1)** | Dialogue, interim ack, status from briefing — **TTS script** | **No tools** — dispatch workers for fetch/retrieval/gist/scoring |
+| **Conversation (REST harness)** | Inquiry, summary (legacy monolithic turn) | `fetch_normalized_text`, `open_passages`, `get_suggested_next_actions` until harness converges |
 | **GistWorker** | Optional gist phrasing from your text | `create_or_update_root_gist`, `attach_source_uri`, `create_note`, `create_todo`, `promote_todo_to_concept_m` |
 | **IntraDocWorker** | Chunk → extract → consolidate **LLM loop** (v1 prompts) | `fetch_normalized_text`, `upsert_staging_bundle`, `edit_staging_concept`, `enqueue_pending_approval`, `commit_intra_doc_graph` |
 | **LinkPlaceWorker** | `query_node` = `ROOT`; frontier = hub/`INSIGHT` shortlist; full prob vector → dock | `enqueue_pending_approval`, `create_root_insight_edges` on approve |
@@ -207,18 +262,19 @@ Until scope is saved, **no** gist ROOT / intra-doc / link / reorg **writes** (in
 
 ## 8. Supervisor routing (intent → agent)
 
-| User intent (examples) | Agent | Graph write? |
-|------------------------|-------|--------------|
-| Unmute on empty scope (P1) | ProjectScope conversation until criteria met | No (until `update_project_scope`) |
-| arXiv + “what’s the gist?” (W2) | Conversation + fetch | No (ROOT via recommendation or explicit command) |
-| “Summarize this link” | Conversation (+ `fetch_normalized_text`) | No |
-| “Save that as gist” | GistWorker | Yes (ROOT) via tool |
-| “Deepen this ROOT / build concept graph” | IntraDocWorker (LLM extract) → staging tools | Yes (after `commit_intra_doc_graph` approve) |
-| “Where does this fit?” | LinkPlaceWorker (DecisionScorer) → dock → `create_root_insight_edges` | Only after approve |
-| “Split this crowded hub” | ReorgRecommendWorker → `preview_reorg_diff` → ReorgApplyWorker | Yes (only after approve) |
-| “What relates to X?” | RetrievalWorker (scorer hops + summary) → `highlight_nodes` | No (highlight only) |
+| User intent (examples) | Agent | Graph write? | Voice foreground (plane 1) |
+|------------------------|-------|--------------|----------------------------|
+| Unmute on empty scope (P1) | ProjectScope worker (on dispatch) | No (until `update_project_scope`) | Convo dialogue; dispatch scope worker when persisting |
+| arXiv + “what’s the gist?” (W2) | GistWorker or RetrievalWorker + fetch in worker | No (ROOT via recommendation or command) | Convo ack → async worker; gist talk in Convo only |
+| “Summarize this link” | RetrievalWorker (+ `fetch_normalized_text` in worker) | No | Convo: *“pulling that up…”* → dispatch |
+| “Save that as gist” | GistWorker | Yes (ROOT) via tool | Convo ack → async GistWorker |
+| “Deepen this ROOT / build concept graph” | IntraDocWorker (LLM extract) → staging tools | Yes (after `commit_intra_doc_graph` approve) | Convo ack → async IntraDoc job |
+| “Where does this fit?” | LinkPlaceWorker (DecisionScorer) → dock → `create_root_insight_edges` | Only after approve | Convo ack → async LinkPlace |
+| “Split this crowded hub” | ReorgRecommendWorker → `preview_reorg_diff` → ReorgApplyWorker | Yes (only after approve) | Convo ack → async Reorg path |
+| “What relates to X?” | RetrievalWorker (scorer hops + summary) → `highlight_nodes` | No (highlight only) | Convo ack → async Retrieval |
+| Pure chit-chat / status of known job | None (plane 3 skip) | No | Convo reads `jobs` / briefing only |
 
-Plain-language persist commands map here; non-trivial diffs use `interrupt(response_schema=...)`.
+Plain-language persist commands map here; non-trivial diffs use `interrupt(response_schema=...)`. On voice, **Supervisor runs on dispatch**, not before Conversation speaks.
 
 ---
 
@@ -287,7 +343,7 @@ Workers are **LangGraph subgraphs** (each may be `create_agent(...)`). Root grap
 
 | Projection | UX |
 |------------|-----|
-| **`stream.messages`** | LLM tokens → recommendations dock “latest response” + Kokoro TTS (incremental) |
+| **`stream.messages`** | Voice: **Conversation** tokens → dock “latest response” + Kokoro TTS; worker tokens → dock progress only (not hot-path TTS) |
 | **`stream.custom`** / **`get_stream_writer`** | Fine-grained status: `{"job_id": "…", "phase": "extract", "chunk": "4/12"}` → dock + job ledger |
 | **`stream.tasks`** | Native task start/finish (parallel `Send`, subgraph steps) → worker badges |
 | **`stream.values`** | Full state snapshots after supersteps → sync `jobs` list to UI |
@@ -312,13 +368,28 @@ Root state includes an append-only or reducer-backed **`jobs`** list (name TBD i
 | `recommendation_id` | Link to dock approval item when waiting |
 | `progress` | Optional string from `get_stream_writer` |
 
-**WorkflowObserver** (deterministic graph node after each superstep):
+**WorkflowObserver** (deterministic — **always relevant** to a session, not only after a voice graph step):
 
-- Merges `stream.tasks` / tool results into `jobs`.
-- Refreshes **`get_suggested_next_actions`** inputs.
+- Ingests worker **outputs**, `stream.tasks`, tool results, and HITL payloads.
+- Merges into **`jobs`** on `thread_id` and updates fields (`status`, `progress`, `recommendation_id`).
+- Refreshes **`get_suggested_next_actions`** **inputs** (deterministic nudge query reads current Mongo graph).
+- Feeds **`session_briefing`** for plane 1 Conversation ([§12.11](#1211-conversation-first-voice-normative)).
 - Does **not** call LLMs.
 
-Supervisor / Conversation agents answer “what happened to my deep read?” by reading **`jobs`** + `list_pending_approvals` from state/tools.
+Plane 1 **Conversation** answers “what happened to my deep read?” from **briefing / `jobs`** without starting a new worker unless the user asks for **new** work.
+
+### 12.4b WorkflowAgent (dock recommendations)
+
+**WorkflowAgent** sits after **WorkflowObserver** ([scratchpad_2.png](../assets/scratchpad_2.png)):
+
+| Responsibility | Detail |
+|----------------|--------|
+| Input | Observer signals: new/updated `jobs`, worker result snippets, pending approval payloads (structured JSON from workers) |
+| Model | Same Ministral via Colab; **tight `max_tokens`**; ranks and phrases **dock cards** — **no graph writes** |
+| Output | Ordered recommendation list for dock UI; optional one-line **proactive script** for Conversation ([§12.12](#1212-proactive-updates-blend-in)) |
+| vs `enqueue_pending_approval` | Workers still **stage data** and create approval rows with **payload**; WorkflowAgent may **title, rank, and order** cards — it does not replace HITL payloads |
+
+When the user **asks for recommendations** explicitly, plane 1 Conversation may surface WorkflowAgent output in spoken form; dock always receives the structured list.
 
 ### 12.5 Context switching (foreground vs background)
 
@@ -326,7 +397,7 @@ Supervisor / Conversation agents answer “what happened to my deep read?” by 
 
 | Layer | Behavior |
 |-------|----------|
-| **Foreground** | Supervisor + Conversation on **every new utterance**; streams reply + handles barge-in. This is the “user-facing agent.” |
+| **Foreground** | **Conversation (plane 1)** on every utterance; streams dialogue + handles barge-in. **Supervisor** runs on **dispatch** only. |
 | **Background** | Heavy worker subgraphs (**IntraDocWorker**, long placement/reorg scoring) registered as **`jobs`** with their own progress streams. |
 | **On context switch** | User changes topic or selects another ROOT → foreground routes the **new** intent; background job **parks** at last checkpoint (`jobs.status` → `paused` or stays `running` if safe to continue in parallel). **No approval** required to switch context. |
 | **Resume background** | User returns (“continue the ERA deep read”) → supervisor routes to same `job_id`; `Command(resume=…)` or new invocation loads checkpoint and continues. |
@@ -398,12 +469,71 @@ Prefer **dynamic `interrupt()`** for HITL only—not for parking background work
 
 ### 12.10 LiveKit bridge (implementation sketch)
 
+**Target (normative):**
+
 ```
-User audio → STT → text + context_json
-       → foreground: astream_events (thread_id = session) → dock + TTS
-       → background: optional parallel job (job_id) → custom/tasks → jobs ledger
-New user turn (context switch) → foreground routes new intent; background parks/checkpoints (no approval)
-Background done extract → enqueue dock HITL row (approve commit)
-User "approve 2" / tap → Command(resume=…) for that HITL item only
-Barge-in → stop foreground TTS/stream; background unchanged unless user cancels job
+voice: STT → Conversation(stream, session_briefing from Observer) → TTS → dock transcript
+       └─ optional dispatch(thread_id, worker_kind, context_json.voice_turn=true)
+            → LangGraph workers (async) → Observer → WorkflowAgent → dock cards
+            → proactive Convo one-liner + TTS on done / awaiting_approval
+Observer: always jobs + briefing; runs without a foreground graph step on chit-chat turns
+REST harness: may keep POST /api/agent/turn(/stream) monolithic through conversation_worker for pytest
+HITL: user approve / voice token → Command(resume=…) same thread_id
+Barge-in → cancel foreground TTS/stream only; debounce proactive TTS per job_id
 ```
+
+**Today on `main`:** LiveKit calls a **single** `astream_agent_turn` through root graph `_worker_node` — see [§12.13](#1213-spec-vs-implementation).
+
+### 12.11 Conversation-first voice (normative)
+
+1. **LiveKit path:** STT → **Conversation endpoint** (contract TBD: backend stream or Colab hop) with `context_json.voice_turn = true`.
+2. **Dialogue only:** Conversation has **no tools** on voice — no `fetch`, `open_passages`, or retrieval. Facts → **dispatch** plane 3 ([§8](#8-supervisor-routing-intent--agent)).
+3. **Interim contract:** While `jobs[].status == running`, Convo explains wait; **status questions** use briefing/`jobs` only.
+4. **Token budget:** Conversation uses low `max_tokens` (policy env e.g. `VOICE_FOREGROUND_MAX_TOKENS` — default TBD [10](./10-open-questions.md)).
+5. **Phase from briefing:** e.g. incomplete scope → P1 onboarding copy; running intra-doc → offer status; pending approvals → short reminder (not full staging JSON aloud).
+6. **Dispatch:** Same utterance: Convo reply **first**, then async worker; worker `reply` must **not** replace Convo on the STT→TTS hot path.
+7. **`session_briefing`** shape (Observer → Convo each call):
+
+```json
+{
+  "project_scope_snippet": "…",
+  "active_jobs": [{ "job_id": "…", "kind": "intra_doc", "status": "running", "label": "…" }],
+  "last_route": "retrieval",
+  "pending_approval_count": 1,
+  "worker_result_snippet": "truncated optional"
+}
+```
+
+8. **Persistence:** Append user/assistant lines on `thread_id` even when plane 3 skipped; full graph invoke only on dispatch, resume, or harness.
+
+### 12.12 Proactive updates (blend-in)
+
+| Rule | Detail |
+|------|--------|
+| Trigger | Job `done` or `awaiting_approval` after Observer ingests worker output |
+| Dock | WorkflowAgent creates/updates recommendation row **always** |
+| Voice | **Always** one short TTS line through Conversation when session active (not muted); barge-in **cancels** proactive TTS |
+| Style | 1–3 sentences; reference user goal; point to dock for detail — no full extract narration |
+| Spam guard | Debounce proactive speech per `job_id` |
+| Status on ask | Convo reads `jobs` / briefing — no new worker |
+
+**Example:** *“What does this paper say about X?”* → Convo: *“I’m getting the details…”* → dispatch RetrievalWorker → Observer → WorkflowAgent dock row + Convo proactive summary when `done`.
+
+See [02 §4.1](./02-user-experience.md) job status chips.
+
+### 12.13 Spec vs implementation
+
+Honest gap table — engineering backlog after this spec:
+
+| Behavior | Spec (this doc) | Code on `main` today |
+|----------|-----------------|----------------------|
+| Conversation outside LangGraph on voice | Yes (plane 1) | No — `/api/agent/turn/stream` is full graph |
+| Conversation tools on voice | **None** | `conversation_worker` may call LLM only; routing still sync worker |
+| WorkflowObserver always feeds briefing | Yes | Observer runs only after `_worker_node` |
+| WorkflowAgent dock cards | Yes (small LLM) | Not present — workers call `enqueue_pending_approval` directly |
+| Voice spoken reply always Conversation-first | Yes | Worker may own `reply` and block TTS |
+| Background jobs for heavy intents | All routed kinds async | Partial — intradoc + `INTRADOC_BG` flag only |
+| Streamed tokens to TTS from Conversation | Yes | Workers often `.invoke()` sync |
+| Proactive job-complete TTS | Always (§12.12) | Not present |
+| `session_briefing` on Conversation | Yes | Not present |
+| `context_json.voice_turn` | Specified | Not honored in router |

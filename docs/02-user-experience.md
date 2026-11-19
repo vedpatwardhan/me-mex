@@ -69,7 +69,7 @@ The **right dock is always visible** and is the **single control surface** for c
 
 ### 4.1 Latest response (top of dock)
 
-- **Current turn** text: your utterance (or STT partial while speaking) + **streaming assistant reply**.
+- **Current turn** text: your utterance (or STT partial while speaking) + **streaming assistant reply** from the **Conversation agent** (plane 1 — dialogue only, no tools). Workers run async; outcomes arrive via **job chips**, **recommendations**, and **proactive** short voice lines ([04 §12.11–12.12](./04-agent-orchestration.md#1211-conversation-first-voice-normative)).
 - **Worker badge** when a subgraph runs (from LangGraph **`tasks`** / **`subgraphs`** stream); **progress** lines from **`custom`** stream (e.g. intra-doc chunk 4/12).
 - **Job status:** in-flight work the user asked for appears in dock as a **status chip** or row tied to `job_id` (backed by root graph `jobs` state—[04 §12.4](./04-agent-orchestration.md#124-tracking-what-the-user-asked-for-job-ledger)).
 - **Inquiry-first:** prose in this block does **not** imply graph writes until you **approve** a recommendation or give an explicit persist command.

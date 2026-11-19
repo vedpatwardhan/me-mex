@@ -5,12 +5,15 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from app.agents.conversation_voice import astream_conversation_voice
 from app.agents.graph import (
     astream_agent_turn,
     get_compiled_graph,
     resume_approval,
     run_agent_turn,
 )
+from app.agents.session_events import format_sse, subscribe_session_events
+from app.agents.session_plane import build_session_briefing
 from app.db import ToolContext, get_store
 from app.models import AgentResumeRequest, AgentTurnRequest, NodeKind
 from app.services.checkpoints import JsonCheckpointStore
@@ -114,6 +117,47 @@ def get_project(project_id: str):
     except Exception as e:
         raise HTTPException(404, str(e)) from e
     return p.model_dump(by_alias=True)
+
+
+@router.get("/agent/session/briefing")
+def session_briefing(
+    project_id: str = Query(..., min_length=1),
+    thread_id: str = Query(..., min_length=1),
+):
+    return build_session_briefing(project_id=project_id, thread_id=thread_id)
+
+
+@router.get("/agent/session/events")
+async def session_events(
+    project_id: str = Query(..., min_length=1),
+    thread_id: str = Query(..., min_length=1),
+):
+    async def gen():
+        async for event in subscribe_session_events(thread_id):
+            yield format_sse(event)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@router.post("/voice/conversation/stream")
+async def voice_conversation_stream(body: AgentTurnRequest):
+    project_id = body.context_json.get("active_project_id") or body.context_json.get("project_id")
+    if not project_id:
+        raise HTTPException(400, "active_project_id required in context_json")
+    ctx = {**body.context_json, "voice_turn": True}
+
+    async def gen():
+        async for chunk in astream_conversation_voice(
+            project_id=project_id,
+            thread_id=body.thread_id,
+            text=body.text,
+            context_json=ctx,
+        ):
+            import json
+
+            yield f"data: {json.dumps(chunk)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @router.post("/agent/turn/stream")
