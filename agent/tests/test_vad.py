@@ -1,4 +1,21 @@
-from me_mex_agent.audio_util import should_end_utterance
+import struct
+from types import SimpleNamespace
+
+from me_mex_agent.audio_util import frame_to_mono_floats, should_end_utterance
+
+
+def test_frame_to_mono_floats_stereo_interleaved():
+    # L=10000, R=-10000 → mean ~0; L=16000, R=16000 → strong signal
+    samples = struct.pack("<hhhh", 16000, 16000, 0, 0)
+    frame = SimpleNamespace(
+        sample_rate=48000,
+        num_channels=2,
+        samples_per_channel=2,
+        data=samples,
+    )
+    floats, _frame_ms = frame_to_mono_floats(frame)
+    assert len(floats) == 2
+    assert max(abs(f) for f in floats) > 0.4
 
 
 def test_should_not_end_before_min_speech_or_silence():

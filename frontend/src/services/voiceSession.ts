@@ -101,12 +101,23 @@ export class VoiceSession {
     const url = normalizeLiveKitUrl(rawUrl);
     const room = new Room({ adaptiveStream: true });
 
-    room.on(RoomEvent.TrackSubscribed, (track) => {
-      if (track.kind === Track.Kind.Audio) {
-        const el = track.attach();
+    const attachAgentAudio = (track: { kind: Track.Kind; attach: () => HTMLMediaElement }) => {
+      if (track.kind !== Track.Kind.Audio) return;
+      let el = document.getElementById('agent-tts-audio') as HTMLAudioElement | null;
+      if (!el) {
+        el = track.attach() as HTMLAudioElement;
         el.id = 'agent-tts-audio';
+        el.volume = 1;
         document.body.appendChild(el);
+      } else {
+        track.attach(el);
       }
+      void room.startAudio().catch(() => undefined);
+      void el.play().catch(() => undefined);
+    };
+
+    room.on(RoomEvent.TrackSubscribed, (track) => {
+      attachAgentAudio(track);
     });
     room.on(RoomEvent.DataReceived, (payload) => {
       try {
@@ -143,6 +154,7 @@ export class VoiceSession {
       await room.connect(url, token, { autoSubscribe: true });
       await this.waitUntilConnected(room);
       this.room = room;
+      void room.startAudio().catch(() => undefined);
       this.emit('Listening');
     } catch (err) {
       await room.disconnect();
@@ -172,31 +184,51 @@ export class VoiceSession {
     await this.room.localParticipant.publishData(payload, { reliable: true });
   }
 
-  async setMuted(muted: boolean, ctx: VoiceContext): Promise<void> {
+  /** Update worker context without blocking the UI on data-channel ACK. */
+  publishContextFireAndForget(ctx: VoiceContext): void {
+    if (!this.room || !this.isReady()) return;
+    void this.publishContextUpdate(ctx, ctx.muted).catch(() => undefined);
+  }
+
+  setLiveContext(ctx: VoiceContext | null): void {
+    this.liveContext = ctx;
+  }
+
+  async setMicrophoneEnabled(enabled: boolean): Promise<void> {
     if (!this.room || !this.isReady()) {
       throw new Error('LiveKit room is not connected — mic cannot be published');
     }
-    if (!muted) {
-      this.liveContext = { ...ctx, muted: false };
-      // Worker ignores mic audio until context_update sets muted=false.
-      await this.publishContextUpdate(ctx, false);
-      await this.room.localParticipant.setMicrophoneEnabled(true);
-      window.setTimeout(() => {
-        if (this.liveContext && this.isReady()) {
-          void this.publishContextUpdate(this.liveContext, false);
-        }
-      }, 1500);
-    } else {
+    await this.room.localParticipant.setMicrophoneEnabled(enabled);
+  }
+
+  /** Mic + context for voice rail; context is sent async (see VoiceRail useEffect). */
+  async applyMicMuted(muted: boolean, ctx: VoiceContext): Promise<void> {
+    if (!this.room || !this.isReady()) {
+      throw new Error('LiveKit room is not connected — mic cannot be published');
+    }
+    if (muted) {
       this.liveContext = null;
-      await this.room.localParticipant.setMicrophoneEnabled(false);
-      await this.publishContextUpdate(ctx, true);
+      await this.setMicrophoneEnabled(false);
+    } else {
+      this.liveContext = { ...ctx, muted: false };
+      // Publish before opening mic when possible; never block UI on ACK.
+      this.publishContextFireAndForget({ ...ctx, muted: false });
+      await this.setMicrophoneEnabled(true);
     }
     this.emit(muted ? 'Muted' : 'Listening');
   }
 
+  /** @deprecated Prefer applyMicMuted + publishContextFireAndForget from the rail. */
+  async setMuted(muted: boolean, ctx: VoiceContext): Promise<void> {
+    await this.applyMicMuted(muted, ctx);
+    if (muted) {
+      this.publishContextFireAndForget({ ...ctx, muted: true });
+    }
+  }
+
   async publishContext(ctx: VoiceContext): Promise<void> {
     if (!this.room || !this.isReady()) return;
-    await this.publishContextUpdate(ctx, ctx.muted);
+    this.publishContextFireAndForget(ctx);
   }
 
   async sendAgentTurn(text: string, ctx: VoiceContext) {
@@ -237,17 +269,21 @@ export class VoiceSession {
 
   async disconnect(): Promise<void> {
     if (this.connectPromise) {
-      try {
-        await this.connectPromise;
-      } catch {
-        /* connect failed */
-      }
+      await Promise.race([
+        this.connectPromise.catch(() => undefined),
+        new Promise<void>((r) => window.setTimeout(r, 400)),
+      ]);
     }
     const room = this.room;
     this.room = null;
+    this.liveContext = null;
+    this.connectPromise = null;
     if (room) {
-      await room.localParticipant.setMicrophoneEnabled(false).catch(() => undefined);
-      await room.disconnect();
+      void room.localParticipant.setMicrophoneEnabled(false).catch(() => undefined);
+      await Promise.race([
+        room.disconnect(),
+        new Promise<void>((r) => window.setTimeout(r, 3_000)),
+      ]);
     }
     this.emit('Muted');
   }

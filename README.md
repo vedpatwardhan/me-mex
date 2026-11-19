@@ -178,7 +178,7 @@ Set in gitignored `backend/.env`: `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_AP
 
 **Verify:** `curl http://localhost:8000/api/livekit/token -X POST -H 'Content-Type: application/json' -d '{"room":"me-mex","identity":"dev"}'`
 
-**Voice VAD tuning** (optional env on the agent worker): `VOICE_SILENCE_RMS`, `VOICE_MIN_UTTERANCE_MS`, `VOICE_END_SILENCE_MS` (default 1500), `VOICE_MAX_UTTERANCE_MS` — see [agent/.env.example](./agent/.env.example).
+**Voice VAD** (local Silero on the agent worker): default `VOICE_VAD=silero`; optional `VOICE_MIN_SILENCE_MS` (550), `VOICE_MIN_UTTERANCE_MS`, `VOICE_MAX_UTTERANCE_MS`. Legacy RMS: `VOICE_VAD=rms` — see [agent/.env.example](./agent/.env.example).
 
 **Voice E2E smoke** (one sentence, stay connected ~60s after you stop speaking):
 

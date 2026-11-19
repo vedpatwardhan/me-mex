@@ -5,6 +5,27 @@ from __future__ import annotations
 import io
 import struct
 import wave
+from typing import Any
+
+
+def frame_to_mono_floats(frame: Any) -> tuple[list[float], int]:
+    """LiveKit AudioFrame is int16 interleaved by channel → mono floats + frame duration ms."""
+    sample_rate = int(getattr(frame, "sample_rate", 48000) or 48000)
+    n_ch = max(1, int(getattr(frame, "num_channels", 1) or 1))
+    n = int(getattr(frame, "samples_per_channel", 0) or 0)
+    if n <= 0:
+        return [], 0
+    nbytes = n * n_ch * 2
+    raw = bytes(getattr(frame, "data", b"") or b"")[:nbytes]
+    if len(raw) < nbytes:
+        return [], 0
+    all_s = struct.unpack(f"<{n * n_ch}h", raw)
+    if n_ch == 1:
+        floats = [s / 32768.0 for s in all_s]
+    else:
+        floats = [sum(all_s[i : i + n_ch]) / (32768.0 * n_ch) for i in range(0, len(all_s), n_ch)]
+    frame_ms = int(1000 * len(floats) / sample_rate) if sample_rate else 0
+    return floats, frame_ms
 
 
 def pcm16_mono_to_wav(pcm: bytes, sample_rate: int = 48000) -> bytes:

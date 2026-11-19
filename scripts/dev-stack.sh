@@ -93,11 +93,12 @@ start_livekit_docker() {
     exit 1
   fi
   stop_livekit_docker
-  log "Starting LiveKit SFU (docker) on ws://localhost:${LIVEKIT_HTTP_PORT}"
+  # Advertise loopback ICE to the host browser (default bridge IP 172.17.x is not reachable).
+  log "Starting LiveKit SFU (docker) on ws://127.0.0.1:${LIVEKIT_HTTP_PORT}"
   docker run -d --name "${LIVEKIT_CONTAINER}" \
     -p "${LIVEKIT_HTTP_PORT}:7880" -p 7881:7881 -p 7882:7882/udp \
     -e LIVEKIT_KEYS="devkey: secret" \
-    livekit/livekit-server --dev >/dev/null
+    livekit/livekit-server --dev --node-ip 127.0.0.1 >/dev/null
 
   local i
   for i in $(seq 1 30); do

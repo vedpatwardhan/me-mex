@@ -122,12 +122,14 @@ Until then, `query_nodes_by_embedding` may remain a stub; keyword search remains
 ## 5. Speech pipeline
 
 ```
-LiveKit room
-  → VAD
-  → Whisper-tiny (STT)
-  → LangGraph turn (text + context_json)
-  → edge-tts (TTS)
+LiveKit room (browser mic)
+  → Silero VAD (local agent worker, CPU)
+  → Whisper-tiny (STT, Colab speech sidecar)
+  → LangGraph turn (text + context_json, local backend)
+  → edge-tts (TTS, Colab)
 ```
+
+Utterances end on Silero **end-of-speech** (~550 ms trailing silence by default) or **flush on mute** (push-to-talk). Tunables: `VOICE_VAD`, `VOICE_MIN_SILENCE_MS`, `VOICE_MIN_UTTERANCE_MS` on the worker — see [agent/.env.example](../agent/.env.example).
 
 Barge-in cancels **foreground** stream mid-utterance.
 

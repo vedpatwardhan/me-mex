@@ -20,6 +20,7 @@ This folder is the **source of truth** for the rebuild after git tag **`v1`**. *
 | [09-phasing.md](./09-phasing.md) | **Full rollout map** — phases + coverage matrices (spec → delivery) |
 | [10-open-questions.md](./10-open-questions.md) | Unresolved decisions only |
 | [11-testing.md](./11-testing.md) | Unit / integration / e2e matrix, CI, phase test gates |
+| [12-demo-runbook.md](./12-demo-runbook.md) | **Manual demo / workflow smoke** (any research domain; not robotics import) |
 | [references.md](./references.md) | Repo and exemplar pointers |
 
 ---

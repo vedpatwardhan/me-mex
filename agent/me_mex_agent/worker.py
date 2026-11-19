@@ -14,20 +14,27 @@ import httpx
 
 try:
     from livekit import rtc
-    from livekit.agents import JobContext, WorkerOptions, cli
+    from livekit.agents import JobContext, JobProcess, WorkerOptions, cli
 except ImportError:  # pragma: no cover
     rtc = None
     JobContext = Any  # type: ignore[misc,assignment]
+    JobProcess = Any  # type: ignore[misc,assignment]
     WorkerOptions = Any
     cli = None
 
 from me_mex_agent.audio_util import (
     float32_to_pcm16,
+    frame_to_mono_floats,
     pcm16_mono_to_wav,
     should_end_utterance,
 )
 from me_mex_agent.speech_colab import speech_enabled, synthesize_wav, transcribe_wav
 from me_mex_agent.turn_bridge import post_resume, run_turn_with_reply
+from me_mex_agent.vad_silero import (
+    SileroUtteranceCollector,
+    load_silero_vad,
+    voice_vad_mode,
+)
 
 _log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +55,11 @@ class RoomSession:
     cancel_turn: asyncio.Event = field(default_factory=asyncio.Event)
     tts_source: Any = None
     tts_track: Any = None
+    audio_consumer_started: bool = False
+    peak_rms: float = 0.0
+    utterance_collector: SileroUtteranceCollector | None = None
+    stt_semaphore: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
+    vad: Any = None
 
 
 def _parse_data(payload: bytes) -> dict[str, Any] | None:
@@ -61,6 +73,13 @@ def _rms(samples: list[float]) -> float:
     if not samples:
         return 0.0
     return (sum(s * s for s in samples) / len(samples)) ** 0.5
+
+
+def prewarm(proc: JobProcess) -> None:
+    if voice_vad_mode() != "silero":
+        _log.info("VOICE_VAD=rms — Silero not loaded in prewarm")
+        return
+    proc.userdata["vad"] = load_silero_vad()
 
 
 async def _ensure_tts_track(room: rtc.Room, session: RoomSession) -> None:
@@ -81,6 +100,7 @@ async def _play_wav(room: rtc.Room, session: RoomSession, wav: bytes) -> None:
 
     session.cancel_tts.clear()
     await _ensure_tts_track(room, session)
+    _log.info("TTS playback start (%d bytes wav)", len(wav))
     assert session.tts_source is not None
     with wave.open(io.BytesIO(wav), "rb") as wf:
         rate = wf.getframerate()
@@ -109,6 +129,7 @@ async def _play_wav(room: rtc.Room, session: RoomSession, wav: bytes) -> None:
             samples_per_channel=count,
         )
         await session.tts_source.capture_frame(frame)
+    _log.info("TTS playback done")
 
 
 async def _publish_dock_event(room: rtc.Room, chunk: dict[str, Any]) -> None:
@@ -208,6 +229,45 @@ def _schedule_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> Non
     asyncio.create_task(_guarded())
 
 
+def _schedule_stt_pipeline(
+    room: rtc.Room,
+    session: RoomSession,
+    wav: bytes,
+    duration_s: float,
+    reason: str,
+) -> None:
+    async def _run() -> None:
+        async with session.stt_semaphore:
+            if not speech_enabled():
+                _log.warning(
+                    "VAD utterance (%.2fs, %s) ready but COLAB_INFERENCE_BASE_URL unset",
+                    duration_s,
+                    reason,
+                )
+                return
+            _log.info(
+                "VAD utterance ready (%.2fs, %d bytes wav, flush=%s) → Colab STT",
+                duration_s,
+                len(wav),
+                reason,
+            )
+            try:
+                result = await transcribe_wav(wav)
+                text = (result.get("text") or "").strip()
+                _log.info(
+                    "STT utterance (%.2fs, %d bytes wav): %r",
+                    duration_s,
+                    len(wav),
+                    text[:120],
+                )
+                if text:
+                    _schedule_voice_turn(room, session, text)
+            except httpx.HTTPError:
+                _log.exception("STT failed")
+
+    asyncio.create_task(_run())
+
+
 async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> None:
     msg = _parse_data(payload)
     if not msg:
@@ -217,10 +277,21 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
         session.context_json.update(msg.get("context_json") or {})
         if msg.get("thread_id"):
             session.thread_id = msg["thread_id"]
-        session.muted = bool(msg.get("muted", session.muted))
-        if not session.muted:
+        was_muted = session.muted
+        new_muted = bool(msg.get("muted", session.muted))
+        if was_muted != new_muted and new_muted and session.utterance_collector is not None:
+            await session.utterance_collector.flush_mute()
+        session.muted = new_muted
+        # Barge-in only when the user actually un-mutes, not on duplicate context_update.
+        if not session.muted and was_muted:
             session.cancel_tts.set()
             session.cancel_turn.set()
+            session.peak_rms = 0.0
+        elif not was_muted and session.muted and session.peak_rms > 0:
+            _log.info(
+                "mic muted (peak_rms=%.4f)",
+                session.peak_rms,
+            )
         _log.info(
             "context_update muted=%s project=%s thread=%s",
             session.muted,
@@ -267,7 +338,7 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
                 _log.exception("STT failed")
 
 
-async def _consume_audio_track(
+async def _consume_audio_track_rms(
     track: rtc.Track,
     room: rtc.Room,
     session: RoomSession,
@@ -285,14 +356,11 @@ async def _consume_audio_track(
             continue
         frame = event.frame
         sample_rate = frame.sample_rate
-        import struct
-
-        samples = struct.unpack(
-            f"<{frame.samples_per_channel}h", frame.data[: frame.samples_per_channel * 2]
-        )
-        floats = [s / 32768.0 for s in samples]
+        floats, frame_ms = frame_to_mono_floats(frame)
+        if not floats:
+            continue
         rms = _rms(floats)
-        frame_ms = int(1000 * len(floats) / sample_rate)
+        session.peak_rms = max(session.peak_rms, rms)
         if rms > SILENCE_RMS:
             buffer.extend(floats)
             speaking_ms += frame_ms
@@ -314,21 +382,49 @@ async def _consume_audio_track(
             buffer.clear()
             silent_ms = 0
             speaking_ms = 0
-            if not speech_enabled():
+            _schedule_stt_pipeline(room, session, wav, duration_s, "rms")
+
+
+async def _consume_audio_track_silero(
+    track: rtc.Track,
+    room: rtc.Room,
+    session: RoomSession,
+    vad: Any,
+) -> None:
+    async def on_utterance(wav: bytes, duration_s: float, reason: str) -> None:
+        _schedule_stt_pipeline(room, session, wav, duration_s, reason)
+
+    collector = SileroUtteranceCollector(vad, on_utterance)
+    session.utterance_collector = collector
+    await collector.start()
+    stream = rtc.AudioStream(track)
+    try:
+        async for event in stream:
+            if session.muted:
                 continue
-            try:
-                result = await transcribe_wav(wav)
-                text = (result.get("text") or "").strip()
-                _log.info(
-                    "STT utterance (%.2fs, %d bytes wav): %r",
-                    duration_s,
-                    len(wav),
-                    text[:120],
-                )
-                if text:
-                    _schedule_voice_turn(room, session, text)
-            except httpx.HTTPError:
-                _log.exception("STT failed")
+            frame = event.frame
+            floats, _ = frame_to_mono_floats(frame)
+            if floats:
+                session.peak_rms = max(session.peak_rms, _rms(floats))
+            collector.push_frame(frame)
+    finally:
+        await collector.aclose()
+        session.utterance_collector = None
+
+
+async def _consume_audio_track(
+    track: rtc.Track,
+    room: rtc.Room,
+    session: RoomSession,
+) -> None:
+    if voice_vad_mode() == "rms":
+        await _consume_audio_track_rms(track, room, session)
+        return
+    vad = session.vad
+    if vad is None:
+        _log.error("Silero VAD missing on session — set VOICE_VAD=rms or fix worker prewarm")
+        return
+    await _consume_audio_track_silero(track, room, session, vad)
 
 
 def _start_audio_consumer(
@@ -337,9 +433,10 @@ def _start_audio_consumer(
     session: RoomSession,
     participant: rtc.RemoteParticipant,
 ) -> None:
-    _log.info("consuming audio track from %s", participant.identity)
-    # context_update can race agent join; a published user mic means an active voice session.
-    session.muted = False
+    if session.audio_consumer_started:
+        return
+    session.audio_consumer_started = True
+    _log.info("consuming audio track from %s (vad=%s)", participant.identity, voice_vad_mode())
     asyncio.create_task(_consume_audio_track(track, room, session))
 
 
@@ -355,6 +452,11 @@ async def entrypoint(ctx: JobContext) -> None:
         raise RuntimeError("livekit-agents not installed")
     room = ctx.room
     session = RoomSession()
+    if voice_vad_mode() == "silero":
+        session.vad = ctx.proc.userdata.get("vad")
+        if session.vad is None:
+            _log.warning("Silero VAD not in proc.userdata; loading in-process")
+            session.vad = load_silero_vad()
 
     @room.on("data_received")
     def _on_data(packet: rtc.DataPacket) -> None:
@@ -373,14 +475,20 @@ async def entrypoint(ctx: JobContext) -> None:
         _start_audio_consumer(track, room, session, participant)
 
     await ctx.connect()
-    _log.info("agent joined room %s", room.name)
+    _log.info(
+        "agent joined room %s (vad=%s colab speech=%s)",
+        room.name,
+        voice_vad_mode(),
+        "on" if speech_enabled() else "OFF — set COLAB_INFERENCE_BASE_URL",
+    )
     _attach_existing_audio(room, session)
 
 
 def main() -> None:
     if cli is None:
         raise RuntimeError("Install livekit-agents to run the worker")
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+    opts = WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm)
+    cli.run_app(opts)
 
 
 if __name__ == "__main__":

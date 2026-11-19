@@ -29,7 +29,7 @@ export const VoiceRail: React.FC<Props> = ({
   const [customFields, setCustomFields] = useState('arxiv_id=\nroot_id=');
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const sessionRef = useRef<VoiceSession | null>(null);
-  const togglingRef = useRef(false);
+  const [connecting, setConnecting] = useState(false);
   const setVoiceStateRef = useRef(setState);
   useEffect(() => {
     setVoiceStateRef.current = setState;
@@ -39,14 +39,6 @@ export const VoiceRail: React.FC<Props> = ({
     () => `voice-${projectId || 'default'}`,
     [projectId],
   );
-
-  const buildContext = (): VoiceContext => ({
-    active_project_id: projectId || '',
-    muted,
-    custom_fields: parseCustomFields(customFields),
-    selected_node_ids: selectedNodeId ? [selectedNodeId] : [],
-    thread_id: threadId,
-  });
 
   const ensureSession = () => {
     if (!sessionRef.current) {
@@ -65,12 +57,21 @@ export const VoiceRail: React.FC<Props> = ({
     sessionRef.current?.setDockEventHandler(onDockStreamEvent);
   }, [onDockStreamEvent]);
 
+  const contextForWorker = (micMuted = muted): VoiceContext => ({
+    active_project_id: projectId || '',
+    muted: micMuted,
+    custom_fields: parseCustomFields(customFields),
+    selected_node_ids: selectedNodeId ? [selectedNodeId] : [],
+    thread_id: threadId,
+  });
+
   useEffect(() => {
     const session = sessionRef.current;
-    if (!session?.isReady()) return;
-    void session.publishContext(buildContext());
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- republish on project/selection change
-  }, [projectId, selectedNodeId, threadId]);
+    if (!session?.isReady() || state === 'Thinking') return;
+    // Worker mic gate uses `muted` only; avoid republishing on Speaking (that canceled TTS).
+    session.publishContextFireAndForget(contextForWorker(muted));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- republish project/selection/mic
+  }, [projectId, selectedNodeId, threadId, muted]);
 
   const roomReady = sessionRef.current?.isReady() ?? false;
   const connected =
@@ -82,14 +83,15 @@ export const VoiceRail: React.FC<Props> = ({
   const live = connected && !muted && state === 'Listening';
 
   const startSession = async () => {
-    if (togglingRef.current) return;
-    togglingRef.current = true;
+    if (connecting) return;
+    setConnecting(true);
     const session = ensureSession();
-    const ctx = { ...buildContext(), muted: false };
+    const ctx = contextForWorker(false);
     onContext?.(ctx);
     setVoiceError(null);
     try {
       setState('Thinking');
+      setMuted(false);
       if (!session.isReady()) {
         await session.connect(`user-${projectId || 'me'}-${Date.now()}`);
       }
@@ -102,58 +104,52 @@ export const VoiceRail: React.FC<Props> = ({
             custom_fields: { ...ctx.custom_fields, force_project_scope: '1' },
           }
         : ctx;
-      await session.setMuted(false, scopeCtx);
+      session.setLiveContext(scopeCtx);
       setState('Listening');
       setMuted(false);
       onMuteToggle?.(false);
+      session.publishContextFireAndForget({ ...scopeCtx, muted: false });
+      await session.setMicrophoneEnabled(true);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Voice connection failed';
+      const raw = err instanceof Error ? err.message : 'Voice connection failed';
+      const message =
+        /permission denied/i.test(raw) || /NotAllowedError/i.test(raw)
+          ? 'Microphone blocked. On this Mac use http://127.0.0.1:3000 and allow mic when prompted. Phone browsers need HTTPS (or use the Mac browser for voice). Reset in Chrome: Site settings → Microphone.'
+          : raw;
       setVoiceError(message);
       setState('Muted');
       setMuted(true);
       onMuteToggle?.(true);
-      await session.disconnect();
+      void session.disconnect();
     } finally {
-      togglingRef.current = false;
+      setConnecting(false);
     }
   };
 
-  const setMicMuted = async (micMuted: boolean) => {
-    if (togglingRef.current) return;
+  const setMicMuted = (micMuted: boolean) => {
     const session = ensureSession();
     if (!session.isReady()) return;
-    togglingRef.current = true;
-    const ctx = { ...buildContext(), muted: micMuted };
+    const ctx = contextForWorker(micMuted);
     onContext?.(ctx);
     setVoiceError(null);
-    try {
-      await session.setMuted(micMuted, ctx);
-      setMuted(micMuted);
-      setState(micMuted ? 'Muted' : 'Listening');
-      onMuteToggle?.(micMuted);
-    } catch (err) {
+    setMuted(micMuted);
+    setState(micMuted ? 'Muted' : 'Listening');
+    onMuteToggle?.(micMuted);
+    void session.applyMicMuted(micMuted, ctx).catch((err) => {
       const message = err instanceof Error ? err.message : 'Could not update mic';
       setVoiceError(message);
-    } finally {
-      togglingRef.current = false;
-    }
+    });
   };
 
-  const endSession = async () => {
-    if (togglingRef.current) return;
-    togglingRef.current = true;
-    const session = ensureSession();
+  const endSession = () => {
+    const session = sessionRef.current;
     setVoiceError(null);
-    try {
-      await session.disconnect();
-      sessionRef.current = null;
-      onVoiceSession?.(null);
-      setState('Muted');
-      setMuted(true);
-      onMuteToggle?.(true);
-    } finally {
-      togglingRef.current = false;
-    }
+    sessionRef.current = null;
+    onVoiceSession?.(null);
+    setState('Muted');
+    setMuted(true);
+    onMuteToggle?.(true);
+    if (session) void session.disconnect();
   };
 
   return (
@@ -173,8 +169,8 @@ export const VoiceRail: React.FC<Props> = ({
         <div className="flex flex-col gap-2">
           <button
             type="button"
-            disabled={togglingRef.current || state === 'Thinking'}
-            onClick={() => void setMicMuted(!muted)}
+            disabled={state === 'Thinking'}
+            onClick={() => setMicMuted(!muted)}
             className={`rounded-md px-3 py-2 text-sm font-medium text-white ${
               live ? 'bg-emerald-700 hover:bg-emerald-600' : 'bg-amber-700 hover:bg-amber-600'
             } disabled:opacity-60`}
@@ -183,8 +179,7 @@ export const VoiceRail: React.FC<Props> = ({
           </button>
           <button
             type="button"
-            disabled={togglingRef.current}
-            onClick={() => void endSession()}
+            onClick={() => endSession()}
             className="rounded-md border border-slate-600 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
           >
             End session
@@ -201,7 +196,7 @@ export const VoiceRail: React.FC<Props> = ({
           className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-200"
           onClick={() => {
             const s = ensureSession();
-            if (s.isReady()) void s.sendAgentTurn('', { ...buildContext(), muted: true });
+            if (s.isReady()) void s.sendAgentTurn('', contextForWorker(true));
           }}
         >
           Send muted turn (custom fields)
@@ -221,10 +216,10 @@ export const VoiceRail: React.FC<Props> = ({
         value={customFields}
         onChange={(e) => {
           setCustomFields(e.target.value);
-          const ctx = buildContext();
+          const ctx = contextForWorker(muted);
           onContext?.(ctx);
           const s = ensureSession();
-          if (s.isReady()) void s.publishContext(ctx);
+          if (s.isReady() && state !== 'Thinking') s.publishContextFireAndForget(ctx);
         }}
         spellCheck={false}
       />
