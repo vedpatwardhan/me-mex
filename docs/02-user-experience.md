@@ -10,7 +10,7 @@ The UI supports **voice-first research** with a **single knowledge graph** (v1-s
 
 | Area | v2 behavior |
 |------|-------------|
-| Voice | **LiveKit** mute/unmute; Colab Whisper-tiny STT; Colab edge-tts |
+| Voice | **LiveKit** mute/unmute; Colab Whisper base.en STT (CPU); Colab edge-tts |
 | Canvas | **One graph** per project; **color + label** by node kind (gist ROOT, deep ROOT, immutable concepts, mutable knowledge, insight, note, **ToDo**) |
 | Right dock | **Always on** — latest turn + **recommendations** (nudges, **job status**, pending **write** approvals) |
 | Precision | **Custom fields** on voice rail every turn |
@@ -211,7 +211,7 @@ Raw `context_json` edit; syncs with voice rail **custom fields**.
 | Layer | Choice |
 |-------|--------|
 | Voice transport | **LiveKit** |
-| STT | **Whisper-tiny** |
+| STT | **Whisper base.en** (Colab CPU int8) |
 | TTS | **Kokoro** |
 | LLM | **Ministral 3 8B** on Colab **vLLM** |
 

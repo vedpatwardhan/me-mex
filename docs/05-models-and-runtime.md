@@ -2,7 +2,7 @@
 
 > **Canon:** [00-vision-and-principles.md](./00-vision-and-principles.md) §8. **Decision usage:** [04-agent-orchestration.md](./04-agent-orchestration.md). **Retrieval analysis:** [../reports/2026-11-18-retrieval-methods.md](../reports/2026-11-18-retrieval-methods.md).
 
-v2 runs **four remote models** on one Colab **inference gateway**—**Ministral 3 8B** (vLLM chat/tools), **cross-encoder reranker** (decision routing), **Whisper-tiny**, **edge-tts** (Colab Python 3.13)—behind a single HTTPS URL. **LangGraph agents**, LiveKit, MongoDB, and **checkpoint JSON** run **locally**; workers call Colab over HTTP. **No fine-tuning** is required to ship P2–P4 routing; bootstrap JSONL and live traces support **eval** and **optional** reranker fine-tune later.
+v2 runs **four remote models** on one Colab **inference gateway**—**Ministral 3 8B** (vLLM chat/tools), **cross-encoder reranker** (decision routing), **Whisper base.en** (CPU int8 in speech sidecar), **edge-tts** (Colab Python 3.13)—behind a single HTTPS URL. **LangGraph agents**, LiveKit, MongoDB, and **checkpoint JSON** run **locally**; workers call Colab over HTTP. **No fine-tuning** is required to ship P2–P4 routing; bootstrap JSONL and live traces support **eval** and **optional** reranker fine-tune later.
 
 **Not shipped:** generative JSON or chat-LLM hops for decision routing; LoRA-on-Ministral decision adapter; untrained logprob-only routing ([09-phasing.md](./09-phasing.md)).
 
@@ -15,7 +15,7 @@ v2 runs **four remote models** on one Colab **inference gateway**—**Ministral 
 | Graph DB | **MongoDB** | — |
 | Chat / agents LLM | `mistralai/Ministral-3-8B-Instruct-2512` via **vLLM** (`/v1`) | Required before interactive agents |
 | **Decision routing** | **Off-the-shelf cross-encoder reranker** on gateway (`POST /v1/decision/score`)—e.g. `BAAI/bge-reranker-base` | Same Colab stack as STT/TTS; **CPU**; no generative hop |
-| STT | **Whisper-tiny** (or tiny.en) | Colab speech sidecar (Phase 2 voice) |
+| STT | **Whisper base.en** (`faster-whisper`, CPU **int8**; optional `small` / HF distil) | Colab speech sidecar — **does not use GPU** with `WHISPER_DEVICE=cpu` |
 | TTS | **edge-tts** (Colab) | Colab speech sidecar (see `colab/speech_sidecar.py`) |
 | VAD | Silero or LiveKit | — |
 | Voice + agent | **LiveKit** + LangGraph | — |
@@ -124,7 +124,7 @@ Until then, `query_nodes_by_embedding` may remain a stub; keyword search remains
 ```
 LiveKit room (browser mic)
   → Silero VAD (local agent worker, CPU)
-  → Whisper-tiny (STT, Colab speech sidecar)
+  → Whisper base.en (STT, Colab speech sidecar, CPU int8)
   → LangGraph turn (text + context_json, local backend)
   → edge-tts (TTS, Colab)
 ```

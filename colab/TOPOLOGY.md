@@ -31,7 +31,7 @@ This document describes how **four remote capabilities** — chat LLM, **cross-e
               ┌───────────▼───┐   ┌─────▼─────────────┐
               │ vLLM  :8000   │   │ speech_sidecar    │
               │ GPU (L4)      │   │ :7861 CPU         │
-              │ Ministral 8B  │   │ Whisper + edge-tts│
+              │ Ministral 8B  │   │ base.en + edge-tts│
               └───────────────┘   └───────────────────┘
               (BGE reranker loads inside gateway process, CPU)
 ```

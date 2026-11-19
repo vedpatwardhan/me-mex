@@ -1,8 +1,14 @@
 """
 CPU speech HTTP API for Colab (no GPU).
 
+STT uses faster-whisper on CPU (default int8) so weights do not share the L4 with vLLM.
+TTS is edge-tts (network API; no local TTS weights on the VM).
+
   POST /stt/transcribe   multipart field \"audio\" (wav/webm)
   POST /tts/synthesize   JSON { \"text\": \"...\", \"voice\": \"af\" } → audio/wav
+
+Env: WHISPER_MODEL (default base.en), WHISPER_DEVICE=cpu, WHISPER_COMPUTE=int8,
+     WHISPER_BEAM_SIZE, WHISPER_LANGUAGE (optional ISO code, e.g. en).
 
 Run: uvicorn speech_sidecar:app --host 127.0.0.1 --port 7861
 """
@@ -17,9 +23,11 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-STT_MODEL = os.getenv("WHISPER_MODEL", "tiny")
+STT_MODEL = os.getenv("WHISPER_MODEL", "base.en")
 STT_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 STT_COMPUTE = os.getenv("WHISPER_COMPUTE", "int8")
+STT_BEAM_SIZE = max(1, int(os.getenv("WHISPER_BEAM_SIZE", "5")))
+STT_LANGUAGE = os.getenv("WHISPER_LANGUAGE") or None
 DEFAULT_VOICE = os.getenv("EDGE_TTS_DEFAULT_VOICE", "af_heart")
 EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-AriaNeural")
 
@@ -110,7 +118,11 @@ async def transcribe(audio: UploadFile = File(...)) -> JSONResponse:  # noqa: B0
     language = None
     try:
         model = _get_whisper()
-        segments, info = model.transcribe(path, beam_size=1)
+        segments, info = model.transcribe(
+            path,
+            beam_size=STT_BEAM_SIZE,
+            language=STT_LANGUAGE,
+        )
         language = getattr(info, "language", None)
         text = " ".join(s.text.strip() for s in segments).strip()
     finally:

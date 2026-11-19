@@ -22,7 +22,7 @@ Phase 4  Live decision traces + optional reranker refresh + observability comple
 Phase 5  Hardening (load scenarios, v1 fence, soak)
 ```
 
-**Invariants throughout:** no implicit graph ingest; no autonomous overnight co-scientist; MongoDB; **cross-encoder decision routing via Colab gateway** (no generative LLM hops; no LoRA decision MVP); Whisper-tiny; Kokoro; LiveKit; recommendations **initiate** guided flows—**no** silent graph writes ([06 §0](./06-workflows.md#0-how-recommendations-work-all-workflows)); v1 reuse **only when aligned** ([08](./08-migration-and-reuse.md) reuse doctrine).
+**Invariants throughout:** no implicit graph ingest; no autonomous overnight co-scientist; MongoDB; **cross-encoder decision routing via Colab gateway** (no generative LLM hops; no LoRA decision MVP); Whisper base.en (Colab CPU); edge-tts; LiveKit; recommendations **initiate** guided flows—**no** silent graph writes ([06 §0](./06-workflows.md#0-how-recommendations-work-all-workflows)); v1 reuse **only when aligned** ([08](./08-migration-and-reuse.md) reuse doctrine).
 
 ---
 
@@ -172,7 +172,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | Gateway `decision/score` (cross-encoder); four-model Colab stack | P1 |
 | ContextPreprocessor project scope in prompts | P2 (after P1 `update_project_scope`) |
 | Embeddings in agents (`query_nodes_by_embedding`) | Optional P3+; stub OK through P2 |
-| Whisper-tiny + Kokoro + VAD; LiveKit same `thread_id` | P2 |
+| Whisper base.en (Colab) + edge-tts + VAD; LiveKit same `thread_id` | P2 |
 | Speech barge-in cancels in-flight TTS / unsafe writes | P2 + P5 scenario |
 | Colab topology (LLM + reranker + STT/TTS gateway) | P2; M1 in [10](./10-open-questions.md) |
 | Decision trace schema writes (bootstrap) | P1 |
@@ -276,7 +276,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 - **P0/P1:** create project API in UI; first **unmute** → ProjectScopeWorker → `update_project_scope`.
 - Recommendations dock: latest response, nudge classes, pending approvals [02 §4](./02-user-experience.md#4-recommendations-dock-default-not-optional).
 - Canvas: unified graph, color by kind, structure-key layout [02 §5](./02-user-experience.md#5-knowledge-canvas--single-graph).
-- Whisper-tiny + Kokoro wired to same `thread_id` [05 §5](./05-models-and-runtime.md#5-speech-pipeline).
+- Whisper base.en + edge-tts wired to same `thread_id` [05 §5](./05-models-and-runtime.md#5-speech-pipeline).
 
 ### Workflows (complete)
 

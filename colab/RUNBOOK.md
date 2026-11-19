@@ -117,6 +117,10 @@ Set Mac/backend `LLM_MODEL_NAME=mistralai/Ministral-3-8B-Reasoning-2512` to matc
 
 ```bash
 cd /content/me-mex/colab
+# STT stays on CPU (no vLLM VRAM). Defaults: base.en + int8; tune with env only:
+# export WHISPER_MODEL=base.en   # or small | Systran/faster-distil-whisper-medium.en
+# export WHISPER_DEVICE=cpu      # do not set cuda on L4 if vLLM owns the GPU
+# export WHISPER_BEAM_SIZE=5
 uvicorn speech_sidecar:app --host 127.0.0.1 --port 7861
 ```
 

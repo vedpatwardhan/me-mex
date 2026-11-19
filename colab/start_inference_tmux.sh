@@ -48,7 +48,7 @@ VLLM_CMD="cd ${COLAB_DIR} && vllm serve ${VLLM_MODEL} \
   --gpu-memory-utilization ${VLLM_UTIL} \
   --enable-prefix-caching 2>&1 | tee -a ${LOG_DIR}/vllm.log"
 
-SPEECH_CMD="cd ${COLAB_DIR} && uvicorn speech_sidecar:app --host 127.0.0.1 --port 7861 \
+SPEECH_CMD="cd ${COLAB_DIR} && export WHISPER_MODEL=\${WHISPER_MODEL:-base.en} WHISPER_DEVICE=\${WHISPER_DEVICE:-cpu} WHISPER_COMPUTE=\${WHISPER_COMPUTE:-int8} WHISPER_BEAM_SIZE=\${WHISPER_BEAM_SIZE:-5} && uvicorn speech_sidecar:app --host 127.0.0.1 --port 7861 \
   2>&1 | tee -a ${LOG_DIR}/speech.log"
 
 GW_CMD="cd ${COLAB_DIR} && export VLLM_BASE=http://127.0.0.1:8000/v1 \
