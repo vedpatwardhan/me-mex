@@ -142,6 +142,15 @@ def _hitl_gate(state: AgentState) -> AgentState:
     if isinstance(decision, dict):
         action = decision.get("action", "dismiss")
     if action != "approve":
+        from app.services.hitl_traces import log_hitl_action
+
+        log_hitl_action(
+            action="dismiss",
+            approval_id=approval_id,
+            thread_id=state["thread_id"],
+            project_id=state["project_id"],
+            approval_type=None,
+        )
         return {**state, "output": {**out, "graph_write": False, "status": "dismissed"}}
     store = get_store()
     result = resume_approval(
@@ -243,16 +252,25 @@ def resume_approval(
     action: str,
     context_json: dict | None = None,
 ) -> dict:
+    from app.services.hitl_traces import append_hitl_label_trace, log_hitl_action
     from app.tools import gist, link, reorg, staging
 
     ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
     item = store.resolve_approval(approval_id, action)
+    log_hitl_action(
+        action=action,
+        approval_id=approval_id,
+        thread_id=thread_id,
+        project_id=project_id,
+        approval_type=item.approval_type,
+    )
     if action != "approve":
         return {"status": "dismissed", "approval_id": approval_id}
     payload = item.payload
     if item.approval_type == "placement":
         root_id = payload["root_id"]
         targets = [c[0] for c in payload.get("candidates", [])[:2]]
+        append_hitl_label_trace(ctx, item, chosen_ids=targets)
         link.create_root_insight_edges(ctx, root_id=root_id, target_ids=targets)
         return {"status": "approved", "edges": targets}
     if item.approval_type == "intra_doc_staging":
@@ -267,6 +285,7 @@ def resume_approval(
             raise ValueError("root_id required to commit staging")
         return staging.commit_intra_doc_graph(ctx, staging_key=staging_key, root_id=root_id)
     if item.approval_type == "reorg":
+        append_hitl_label_trace(ctx, item)
         return reorg.apply_reorg_plan(ctx, proposal_id=payload["proposal_id"])
     if item.approval_type == "gist_root":
         gist.create_or_update_root_gist(

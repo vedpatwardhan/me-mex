@@ -3,9 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.db import ToolContext
-from app.models import NodeKind, Edge, new_id
+from app.models import Edge, NodeKind, new_id
+from app.services.timing import timed_tool
 
 
+@timed_tool
 def write_reorg_proposal(ctx: ToolContext, *, proposal: dict[str, Any]) -> dict:
     key = new_id("reorg_prop")
     ctx.store._db.reorg_proposals.replace_one(
@@ -16,6 +18,7 @@ def write_reorg_proposal(ctx: ToolContext, *, proposal: dict[str, Any]) -> dict:
     return {"proposal_id": key}
 
 
+@timed_tool
 def preview_reorg_diff(ctx: ToolContext, *, proposal_id: str) -> dict:
     doc = ctx.store._db.reorg_proposals.find_one({"_id": proposal_id})
     if not doc:
@@ -27,20 +30,19 @@ def preview_reorg_diff(ctx: ToolContext, *, proposal_id: str) -> dict:
     }
 
 
+@timed_tool
 def apply_reorg_plan(ctx: ToolContext, *, proposal_id: str) -> dict:
     doc = ctx.store._db.reorg_proposals.find_one({"_id": proposal_id})
     if not doc:
         raise ValueError("proposal not found")
     moves = doc.get("moves", [])
     for move in moves:
-        relocate_under_parent(
-            ctx, node_id=move["node_id"], new_parent_id=move["parent_id"]
-        )
+        relocate_under_parent(ctx, node_id=move["node_id"], new_parent_id=move["parent_id"])
     return {"proposal_id": proposal_id, "moved": len(moves)}
 
 
 def split_section(ctx: ToolContext, *, hub_id: str, new_hub_title: str) -> dict:
-    hub = ctx.store.assert_mutable(hub_id)
+    ctx.store.assert_mutable(hub_id)
     new_id_hub = new_id("hub")
     from app.models import Node
 
@@ -75,9 +77,7 @@ def merge_mutable_nodes(ctx: ToolContext, *, source_id: str, target_id: str) -> 
     return {"merged_into": target_id}
 
 
-def relocate_under_parent(
-    ctx: ToolContext, *, node_id: str, new_parent_id: str
-) -> dict:
+def relocate_under_parent(ctx: ToolContext, *, node_id: str, new_parent_id: str) -> dict:
     ctx.store.assert_mutable(node_id)
     eid = new_id("edge")
     ctx.store.add_edge(
@@ -91,9 +91,7 @@ def relocate_under_parent(
     return {"node_id": node_id, "parent_id": new_parent_id}
 
 
-def add_edge(
-    ctx: ToolContext, *, source_id: str, target_id: str, note: str = ""
-) -> dict:
+def add_edge(ctx: ToolContext, *, source_id: str, target_id: str, note: str = "") -> dict:
     eid = new_id("edge")
     ctx.store.add_edge(
         Edge(
@@ -116,9 +114,7 @@ def update_edge_note(ctx: ToolContext, *, edge_id: str, note: str) -> dict:
     doc = ctx.store._db.edges.find_one({"_id": edge_id})
     if not doc:
         raise ValueError("edge not found")
-    ctx.store._db.edges.update_one(
-        {"_id": edge_id}, {"$set": {"note": note, "description": note}}
-    )
+    ctx.store._db.edges.update_one({"_id": edge_id}, {"$set": {"note": note, "description": note}})
     return {"edge_id": edge_id}
 
 

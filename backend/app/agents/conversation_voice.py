@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -17,6 +18,8 @@ from app.agents.worker_registry import worker_handler
 from app.config import settings
 from app.db import ToolContext, get_store
 from app.llm import get_chains
+
+_log = logging.getLogger("memex.v2.voice")
 
 
 def _conversation_prompt_inputs(
@@ -44,6 +47,13 @@ async def astream_conversation_voice(
 ) -> AsyncIterator[dict[str, Any]]:
     ctx_json = dict(context_json or {})
     voice = is_voice_turn(ctx_json)
+    _log.info(
+        "conversation_stream thread_id=%s project_id=%s voice_turn=%s text_len=%d",
+        thread_id,
+        project_id,
+        voice,
+        len(text or ""),
+    )
     store = get_store()
     project = store.get_project(project_id)
 
@@ -101,6 +111,13 @@ async def astream_conversation_voice(
             )
             job_id = job.get("job_id")
             dispatched_worker = worker_kind
+            _log.info(
+                "voice_dispatch job_id=%s worker=%s thread_id=%s project_id=%s",
+                job_id,
+                worker_kind,
+                thread_id,
+                project_id,
+            )
             yield {
                 "type": "custom",
                 "job": job,

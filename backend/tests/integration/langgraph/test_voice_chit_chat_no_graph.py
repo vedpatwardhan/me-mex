@@ -1,6 +1,5 @@
-import json
-
 import pytest
+from tests.sse_util import iter_sse_data
 
 
 @pytest.mark.voice_plane
@@ -14,10 +13,8 @@ def test_chit_chat_no_dispatch(client, voice_context_json, mock_vllm_chat):
         },
     )
     assert r.status_code == 200
-    for line in r.iter_lines():
-        if line.startswith(b"data: "):
-            chunk = json.loads(line[6:])
-            if chunk.get("type") == "turn_end":
-                assert chunk.get("dispatched") is False
-                return
+    for chunk in iter_sse_data(r):
+        if chunk.get("type") == "turn_end":
+            assert chunk.get("dispatched") is False
+            return
     pytest.fail("missing turn_end")

@@ -9,6 +9,7 @@ from app.config import settings
 from app.db import Store, ToolContext
 from app.llm import get_chains
 from app.services.decision_scorer import ScorerNode, get_decision_scorer
+from app.services.decision_trace_context import decision_trace_scope
 from app.tools import dock, gist, link, project, reorg, staging
 from app.tools import fetch as fetch_tool
 
@@ -123,7 +124,8 @@ def link_place_worker(ctx: ToolContext, context: dict) -> dict:
         )
         for n in frontier
     ]
-    probs = get_decision_scorer().score(query, front)
+    with decision_trace_scope(ctx, "placement"):
+        probs = get_decision_scorer().score(query, front)
     ranked = sorted(probs.items(), key=lambda x: x[1], reverse=True)
     approval_id = dock.enqueue_pending_approval(
         ctx,
@@ -166,7 +168,8 @@ def reorg_recommend_worker(ctx: ToolContext) -> dict:
         for nid in neighbor_ids
         if nid in by_id
     ]
-    probs = get_decision_scorer().score(query, front)
+    with decision_trace_scope(ctx, "reorg_neighbor"):
+        probs = get_decision_scorer().score(query, front)
     ranked = sorted(probs.items(), key=lambda x: x[1], reverse=True)[:5]
     prop = reorg.write_reorg_proposal(
         ctx,
@@ -214,7 +217,8 @@ def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
             break
         query = _scorer_node(ctx.store, current)
         front = [_scorer_node(ctx.store, nid) for nid in neighbor_ids]
-        probs = scorer.score(query, front)
+        with decision_trace_scope(ctx, "retrieval_expand"):
+            probs = scorer.score(query, front)
         hop = sorted(probs.items(), key=lambda x: x[1], reverse=True)[:top_k]
         for nid, _ in hop:
             if nid not in visited:

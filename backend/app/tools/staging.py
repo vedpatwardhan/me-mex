@@ -4,8 +4,8 @@ import hashlib
 import time
 
 from app.db import ToolContext
-from app.models import NodeKind, StagingBundle, StagingConcept, Node, new_id
-from app.tools import fetch as fetch_tool
+from app.models import Node, NodeKind, StagingBundle, StagingConcept, new_id
+from app.services.timing import timed_tool
 
 
 def _staging_key(root_id: str | None, url: str | None) -> str:
@@ -14,6 +14,7 @@ def _staging_key(root_id: str | None, url: str | None) -> str:
     return f"staging_url_{hashlib.sha256((url or '').encode()).hexdigest()[:16]}"
 
 
+@timed_tool
 def upsert_staging_bundle(
     ctx: ToolContext,
     *,
@@ -59,6 +60,7 @@ def edit_staging_concept(
     return {"staging_key": staging_key}
 
 
+@timed_tool
 def commit_intra_doc_graph(
     ctx: ToolContext,
     *,
@@ -75,9 +77,7 @@ def commit_intra_doc_graph(
             continue
         cid = new_id("ci")
         passage_id = new_id("pass")
-        ctx.store.upsert_passage(
-            passage_id, root_id, concept.description or concept.title
-        )
+        ctx.store.upsert_passage(passage_id, root_id, concept.description or concept.title)
         node = Node(
             _id=cid,
             title=concept.title,

@@ -189,7 +189,7 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
                 on_chunk=on_chunk,
             )
         except httpx.HTTPError:
-            _log.exception("voice_turn failed")
+            _log.exception("voice_turn failed thread_id=%s", session.thread_id)
             return
         if turn_end:
             await _publish_dock_event(room, turn_end)
@@ -202,7 +202,11 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
                 reliable=True,
             )
         if reply.strip():
-            _log.info("voice_turn reply_len=%d", len(reply.strip()))
+            _log.info(
+                "voice_turn thread_id=%s reply_len=%d",
+                session.thread_id,
+                len(reply.strip()),
+            )
         if reply.strip() and speech_enabled():
             try:
                 wav = await synthesize_wav(reply)

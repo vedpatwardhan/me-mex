@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
 from app.config import settings
+from app.services.decision_trace_context import get_decision_trace_context
+from app.services.decision_trace_writer import (
+    append_decision_trace_row,
+    frontier_from_scorer_nodes,
+    query_node_dict,
+)
+
+logger = logging.getLogger("memex.v2.decision")
 
 
 @dataclass
@@ -54,6 +64,41 @@ class HttpDecisionScorer:
         return probs
 
 
+class TracingDecisionScorer:
+    """Latency logging + optional live JSONL traces."""
+
+    def __init__(self, inner: DecisionScorerProtocol):
+        self._inner = inner
+
+    def score(self, query_node: ScorerNode, frontier: list[ScorerNode]) -> dict[str, float]:
+        meta = get_decision_trace_context()
+        scenario = meta.scenario if meta else "unknown"
+        start = time.perf_counter()
+        probs = self._inner.score(query_node, frontier)
+        ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "decision_hop_ms=%.2f scenario=%s frontier_n=%d project_id=%s thread_id=%s",
+            ms,
+            scenario,
+            len(frontier),
+            meta.project_id if meta else "",
+            meta.thread_id if meta else "",
+        )
+        if meta and settings.DECISION_TRACE_ENABLED and frontier:
+            append_decision_trace_row(
+                meta.project_id,
+                {
+                    "scenario": meta.scenario,
+                    "thread_id": meta.thread_id,
+                    "approval_id": meta.approval_id,
+                    "query_node": query_node_dict(query_node),
+                    "frontier": frontier_from_scorer_nodes(frontier),
+                    "model_relevance_probs": probs,
+                },
+            )
+        return probs
+
+
 _scorer_override: DecisionScorerProtocol | None = None
 
 
@@ -65,6 +110,9 @@ def set_decision_scorer_override(scorer: DecisionScorerProtocol | None) -> None:
 def get_decision_scorer() -> DecisionScorerProtocol:
     if _scorer_override is not None:
         return _scorer_override
+    inner: DecisionScorerProtocol
     if settings.DECISION_SCORER_MODE == "live":
-        return HttpDecisionScorer()
-    return MockDecisionScorer()
+        inner = HttpDecisionScorer()
+    else:
+        inner = MockDecisionScorer()
+    return TracingDecisionScorer(inner)

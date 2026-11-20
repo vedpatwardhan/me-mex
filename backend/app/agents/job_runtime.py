@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -11,6 +12,7 @@ from typing import Any
 from app.agents.jobs import new_job_id
 from app.db import ToolContext
 
+_log = logging.getLogger("memex.v2.jobs")
 _registry_lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
 _by_thread: dict[str, list[str]] = {}
@@ -73,6 +75,16 @@ def _finish_job(job_id: str, output: dict[str, Any], *, project_id: str | None =
         pid = project_id or job.get("project_id")
         tid = job.get("thread_id")
 
+    if job_snapshot:
+        _log.info(
+            "job_status job_id=%s worker=%s status=%s thread_id=%s project_id=%s",
+            job_snapshot.get("job_id"),
+            job_snapshot.get("worker"),
+            job_snapshot.get("status"),
+            job_snapshot.get("thread_id"),
+            pid or job_snapshot.get("project_id"),
+        )
+
     if job_snapshot and pid and tid:
         from app.agents.session_plane import observer_ingest_job
 
@@ -128,6 +140,13 @@ def start_background_worker(
                 project_id=pid,
             )
 
+    _log.info(
+        "job_start job_id=%s worker=%s thread_id=%s project_id=%s",
+        job_id,
+        worker_kind,
+        thread_id,
+        pid,
+    )
     threading.Thread(target=_run, daemon=True).start()
     return dict(record)
 

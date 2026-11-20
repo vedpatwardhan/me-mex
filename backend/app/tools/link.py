@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from app.db import ToolContext
-from app.models import NodeKind, Edge, new_id
+from app.models import Edge, NodeKind, new_id
+from app.services.timing import timed_tool
 
 ROOT_LINK_KINDS = {NodeKind.ROOT}
 INSIGHT_TARGETS = {NodeKind.INSIGHT, NodeKind.CONCEPT_M}
 
 
+@timed_tool
 def create_root_insight_edges(
     ctx: ToolContext,
     *,
@@ -36,11 +38,13 @@ def create_root_insight_edges(
     return {"edge_ids": edge_ids}
 
 
+@timed_tool
 def highlight_nodes(ctx: ToolContext, *, node_ids: list[str]) -> dict:
     ctx.store.set_highlight_ids(ctx.thread_id, node_ids)
     return {"highlighted": node_ids}
 
 
+@timed_tool
 def search_nodes_keyword(ctx: ToolContext, *, query: str, limit: int = 20) -> dict:
     nodes = ctx.store.list_nodes(ctx.project_id)
     q = query.lower()

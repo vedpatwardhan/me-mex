@@ -1,6 +1,5 @@
-import json
-
 import pytest
+from tests.sse_util import iter_sse_data
 
 
 @pytest.mark.voice_plane
@@ -14,10 +13,7 @@ def test_voice_conversation_stream(client, project, voice_context_json, mock_vll
         },
     )
     assert r.status_code == 200
-    chunks = []
-    for line in r.iter_lines():
-        if line.startswith(b"data: "):
-            chunks.append(json.loads(line[6:]))
+    chunks = list(iter_sse_data(r))
     types = {c.get("type") for c in chunks}
     assert "token" in types
     assert "turn_end" in types

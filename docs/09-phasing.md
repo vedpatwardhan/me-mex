@@ -313,6 +313,8 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 
 **Goal:** Continuous routing improvement + UX completeness without weakening HITL.
 
+**Demo-first (shipped):** backend **logs + JSONL** — `decision_hop_ms`, `hitl action`, `job_*`, voice `conversation_stream` / `voice_dispatch`; live append `backend/logs/decision_traces/` on scorer hops and placement/reorg approve. Use [12 §2.5](./12-demo-runbook.md#25-observability-during-demo-phase-4) during the Phase 2 runbook. **Open:** dock done-strip, tool trace expand, canvas legend (below).
+
 - Append **live** `decision_traces/` on user accept/correct (placement, retrieval expand, reorg choices) [05 §3.2](./05-models-and-runtime.md#32-delivery-order-v2--no-fine-tune-gate-for-p2p4).
 - Optional reranker fine-tune cadence (manual or scripted).
 - Complete [07 §3](./07-performance-and-observability.md#3-instrumentation-required) signals not yet wired: interrupt analytics, full token accounting review, OTEL/LangSmith where replacing LLMTracer.

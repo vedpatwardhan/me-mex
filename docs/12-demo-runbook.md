@@ -76,6 +76,35 @@ root_id=
 intent=
 ```
 
+### 2.5 Observability during demo (Phase 4)
+
+Tail while you walk §4–§8:
+
+```bash
+tail -f me-mex/.dev-stack/logs/backend.log me-mex/.dev-stack/logs/agent.log
+```
+
+| Signal | Where to look |
+|--------|----------------|
+| Voice conversation plane | `backend.log`: `conversation_stream thread_id=` · `voice_dispatch job_id=` |
+| Background jobs | `backend.log`: `job_start` · `job_status` |
+| Reranker hops | `backend.log`: `decision_hop_ms=` · `scenario=placement\|reorg_neighbor\|retrieval_expand` |
+| HITL approve/dismiss | `backend.log`: `hitl action=` |
+| Agent voice path | `agent.log`: `voice_turn thread_id=` · `VAD utterance` · `STT utterance` |
+| Live decision dataset | `backend/logs/decision_traces/<project_id>/<date>.jsonl` (append on scorer + placement/reorg approve) |
+| Extract / slow LLM | `backend/logs/llm_traces/` |
+
+Quick greps (another terminal):
+
+```bash
+rg 'conversation_stream|voice_dispatch|decision_hop_ms|hitl action|job_status' me-mex/.dev-stack/logs/backend.log
+rg 'voice_turn|STT utterance|voice_turn failed' me-mex/.dev-stack/logs/agent.log
+```
+
+Set `DECISION_TRACE_ENABLED=false` in `backend/.env` to skip JSONL append during a noisy session.
+
+**2 min smoke** (optional, before §4): run a placement or reorg flow through dock **Approve**; confirm a new line under `backend/logs/decision_traces/<project_id>/` and `hitl action=approve` in `backend.log`. Then proceed with the full Phase 2 script (§4–§8) using the tails/greps above.
+
 ---
 
 ## 3. Pre-flight (2 min)
@@ -295,9 +324,9 @@ If REST works but voice fails, focus debugging on LiveKit + `agent.log` before b
 
 You have validated **workflow + voice + HITL** for a general research project. Reasonable next engineering tracks (see `reports/HANDOFF_2.md` §9):
 
-1. **Harden:** LiveKit room smoke pytest; expand `agent/tests/test_voice_bridge_workflow.py` for steps that failed once.
-2. **Skip:** Bulk markdown import (Phase 3)—deferred; not needed without decision-model fine-tuning. Grow the graph via voice/workflows only.
-3. **Polish:** Phase 4 observability and dock UX when demo narrative is stable ([09 §Phase 4](./09-phasing.md#phase-4--live-traces-reranker-refresh-polish)).
+1. **Phase 2 harden:** LiveKit room smoke pytest; expand `agent/tests/test_voice_bridge_workflow.py` for any §8 FAIL rows.
+2. **Skip:** Bulk markdown import (Phase 3)—deferred; grow the graph via voice/workflows only.
+3. **Phase 4 remainder:** canvas legend, dock done-strip / tool trace UI when the demo narrative is stable ([09 §Phase 4](./09-phasing.md#phase-4--live-traces-reranker-refresh-polish)).
 
 ---
 

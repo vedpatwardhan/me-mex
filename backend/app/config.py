@@ -100,6 +100,14 @@ class Settings:
         "DECISION_TRAINING_DIR",
         str(BACKEND_DIR / "data" / "decision_training"),
     )
+    DECISION_TRACE_DIR: str = os.getenv(
+        "DECISION_TRACE_DIR",
+        str(BACKEND_DIR / "logs" / "decision_traces"),
+    )
+    DECISION_TRACE_ENABLED: bool = _env_bool(
+        "DECISION_TRACE_ENABLED",
+        "true" if os.getenv("TESTING") != "1" else "false",
+    )
 
 
 settings = Settings()

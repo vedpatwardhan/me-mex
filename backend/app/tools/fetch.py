@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 
-from app.tools.search_tools import SearchTools
 from app.db import ToolContext
+from app.services.timing import timed_tool
+from app.tools.search_tools import SearchTools
 
 
+@timed_tool
 def fetch_normalized_text(ctx: ToolContext, url: str) -> dict:
     """Return normalized text + content hash (no LLM)."""
     doc = SearchTools.fetch_document(url)
