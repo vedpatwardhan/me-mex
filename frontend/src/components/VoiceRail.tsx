@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
 
 import type { VoiceContext } from '../services/voiceSession';
 import { VoiceSession } from '../services/voiceSession';
@@ -14,6 +15,59 @@ type Props = {
   onDockStreamEvent?: (ev: Record<string, unknown>) => void;
   onVoiceSession?: (session: VoiceSession | null) => void;
 };
+
+function statusMeta(
+  state: VoiceSessionState,
+  live: boolean,
+  connected: boolean,
+): { label: string; detail: string; dot: string; ring: string } {
+  if (!connected) {
+    return {
+      label: 'Offline',
+      detail: 'Start a session to use the mic',
+      dot: 'bg-slate-500',
+      ring: 'border-slate-600/60 bg-slate-800/40',
+    };
+  }
+  if (state === 'Thinking') {
+    return {
+      label: 'Connecting',
+      detail: 'Joining LiveKit room…',
+      dot: 'bg-sky-400 animate-pulse',
+      ring: 'border-sky-500/40 bg-sky-500/10',
+    };
+  }
+  if (state === 'Speaking') {
+    return {
+      label: 'Speaking',
+      detail: 'Playing assistant audio',
+      dot: 'bg-violet-400',
+      ring: 'border-violet-500/40 bg-violet-500/10',
+    };
+  }
+  if (state === 'Awaiting approval') {
+    return {
+      label: 'Approval',
+      detail: 'Confirm a pending write',
+      dot: 'bg-amber-400',
+      ring: 'border-amber-500/40 bg-amber-500/10',
+    };
+  }
+  if (live) {
+    return {
+      label: 'Listening',
+      detail: 'Mic open — speak naturally',
+      dot: 'bg-emerald-400',
+      ring: 'border-emerald-500/40 bg-emerald-500/10',
+    };
+  }
+  return {
+    label: 'Muted',
+    detail: 'Session active, mic paused',
+    dot: 'bg-amber-500',
+    ring: 'border-amber-500/30 bg-amber-500/10',
+  };
+}
 
 export const VoiceRail: React.FC<Props> = ({
   projectId,
@@ -68,7 +122,6 @@ export const VoiceRail: React.FC<Props> = ({
   useEffect(() => {
     const session = sessionRef.current;
     if (!session?.isReady() || state === 'Thinking') return;
-    // Worker mic gate uses `muted` only; avoid republishing on Speaking (that canceled TTS).
     session.publishContextFireAndForget(contextForWorker(muted));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- republish project/selection/mic
   }, [projectId, selectedNodeId, threadId, muted]);
@@ -81,6 +134,7 @@ export const VoiceRail: React.FC<Props> = ({
       state === 'Awaiting approval' ||
       (muted && state === 'Muted'));
   const live = connected && !muted && state === 'Listening';
+  const status = statusMeta(state, live, connected);
 
   const startSession = async () => {
     if (connecting) return;
@@ -153,76 +207,159 @@ export const VoiceRail: React.FC<Props> = ({
   };
 
   return (
-    <aside className="w-56 shrink-0 border-r border-slate-800 bg-[#0c1018] p-3 flex flex-col gap-3">
-      <div className="text-xs uppercase tracking-wide text-slate-500">Voice rail</div>
-      <div className="text-sm text-slate-300">Project: {projectId || '—'}</div>
-      {!connected ? (
-        <button
-          type="button"
-          disabled={state === 'Thinking'}
-          onClick={() => void startSession()}
-          className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
-        >
-          {state === 'Thinking' ? 'Connecting…' : 'Start voice session'}
-        </button>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            disabled={state === 'Thinking'}
-            onClick={() => setMicMuted(!muted)}
-            className={`rounded-md px-3 py-2 text-sm font-medium text-white ${
-              live ? 'bg-emerald-700 hover:bg-emerald-600' : 'bg-amber-700 hover:bg-amber-600'
-            } disabled:opacity-60`}
-          >
-            {live ? 'Mute mic' : 'Unmute mic'}
-          </button>
-          <button
-            type="button"
-            onClick={() => endSession()}
-            className="rounded-md border border-slate-600 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
-          >
-            End session
-          </button>
+    <aside className="flex w-[17.5rem] shrink-0 flex-col gap-4 border-r border-white/10 bg-[#0c1018]/95 px-4 py-5 overflow-y-auto">
+      <header className="space-y-1">
+        <div className="flex items-center gap-2 text-slate-200">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10">
+            <Radio className="h-4 w-4 text-cyan-400" />
+          </span>
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight">Voice rail</h2>
+            <p className="text-[11px] text-slate-500">LiveKit · same thread as graph</p>
+          </div>
         </div>
-      )}
-      <div className="text-xs text-slate-400">
-        Status: {state}
-        {connected ? (live ? ' · mic on' : ' · mic off (session active)') : ' · not connected'}
+      </header>
+
+      <div className="glass-panel rounded-xl px-3 py-2.5">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          Active project
+        </p>
+        <p className="mt-1 truncate text-sm font-medium text-emerald-300/90">
+          {projectId || '—'}
+        </p>
+        {selectedNodeId ? (
+          <p className="mt-1 truncate text-[11px] text-slate-500" title={selectedNodeId}>
+            Node: {selectedNodeId}
+          </p>
+        ) : null}
       </div>
+
+      <div className={`rounded-xl border px-3 py-2.5 ${status.ring}`}>
+        <div className="flex items-center gap-2">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${status.dot}`} />
+          <span className="text-sm font-medium text-slate-100">{status.label}</span>
+        </div>
+        <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.detail}</p>
+      </div>
+
+      <MotionButtons
+        connected={connected}
+        connecting={connecting}
+        live={live}
+        state={state}
+        onStart={() => void startSession()}
+        onToggleMute={() => setMicMuted(!muted)}
+        onEnd={endSession}
+      />
+
       {connected && muted ? (
         <button
           type="button"
-          className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-200"
+          className="w-full rounded-lg border border-slate-600/80 bg-slate-800/50 px-3 py-2 text-left text-xs text-slate-300 transition hover:border-slate-500 hover:bg-slate-800"
           onClick={() => {
             const s = ensureSession();
             if (s.isReady()) void s.sendAgentTurn('', contextForWorker(true));
           }}
         >
-          Send muted turn (custom fields)
+          Send turn with custom fields only
         </button>
       ) : null}
+
       {!projectIntroduction?.trim() && connected ? (
-        <p className="text-xs text-cyan-400/90">Unmute to set project scope (P1).</p>
+        <p className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-xs leading-relaxed text-cyan-200/90">
+          Unmute once to capture project scope (P1).
+        </p>
       ) : null}
+
       {voiceError ? (
-        <div className="text-xs text-rose-400 break-words" role="alert">
+        <div
+          className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs leading-relaxed text-rose-300"
+          role="alert"
+        >
           {voiceError}
         </div>
       ) : null}
-      <label className="text-xs text-slate-500">Custom fields</label>
-      <textarea
-        className="h-28 w-full rounded border border-slate-700 bg-slate-900 p-2 text-xs text-slate-200"
-        value={customFields}
-        onChange={(e) => {
-          setCustomFields(e.target.value);
-          const ctx = contextForWorker(muted);
-          onContext?.(ctx);
-          const s = ensureSession();
-          if (s.isReady() && state !== 'Thinking') s.publishContextFireAndForget(ctx);
-        }}
-        spellCheck={false}
-      />
+
+      <section className="glass-panel mt-auto flex flex-col gap-2 rounded-xl p-3">
+        <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          Custom fields
+        </label>
+        <p className="text-[11px] leading-snug text-slate-500">
+          Key=value per line. Overrides conflicting STT on each turn.
+        </p>
+        <textarea
+          className="min-h-[7.5rem] w-full resize-y rounded-lg border border-slate-700/80 bg-[#0a0e16] p-2.5 font-mono text-xs leading-relaxed text-slate-200 placeholder:text-slate-600 focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+          value={customFields}
+          onChange={(e) => {
+            setCustomFields(e.target.value);
+            const ctx = contextForWorker(muted);
+            onContext?.(ctx);
+            const s = ensureSession();
+            if (s.isReady() && state !== 'Thinking') s.publishContextFireAndForget(ctx);
+          }}
+          spellCheck={false}
+        />
+      </section>
     </aside>
   );
 };
+
+type MotionProps = {
+  connected: boolean;
+  connecting: boolean;
+  live: boolean;
+  state: VoiceSessionState;
+  onStart: () => void;
+  onToggleMute: () => void;
+  onEnd: () => void;
+};
+
+function MotionButtons({
+  connected,
+  connecting,
+  live,
+  state,
+  onStart,
+  onToggleMute,
+  onEnd,
+}: MotionProps) {
+  if (!connected) {
+    return (
+      <button
+        type="button"
+        disabled={state === 'Thinking' || connecting}
+        onClick={onStart}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-900/30 transition hover:from-indigo-500 hover:to-violet-500 disabled:opacity-60"
+      >
+        <Mic className="h-4 w-4" />
+        {state === 'Thinking' || connecting ? 'Connecting…' : 'Start voice session'}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        disabled={state === 'Thinking'}
+        onClick={onToggleMute}
+        className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-60 ${
+          live
+            ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20 shadow-md'
+            : 'bg-amber-600 hover:bg-amber-500 shadow-md shadow-amber-900/20'
+        }`}
+      >
+        {live ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+        {live ? 'Mute microphone' : 'Unmute microphone'}
+      </button>
+      <button
+        type="button"
+        onClick={onEnd}
+        className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-600/80 bg-slate-800/40 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800/80"
+      >
+        <PhoneOff className="h-4 w-4 text-slate-400" />
+        End session
+      </button>
+    </div>
+  );
+}
