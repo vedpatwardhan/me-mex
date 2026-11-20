@@ -1,5 +1,5 @@
 import pytest
-from me_mex_agent import turn_bridge
+from voice_agent import turn_bridge
 
 
 @pytest.mark.asyncio

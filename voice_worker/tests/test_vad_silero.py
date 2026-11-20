@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from livekit import rtc
-from me_mex_agent.vad_silero import (
+from voice_agent.vad_silero import (
     MIN_UTTERANCE_MS,
     frame_to_mono_rtc_frame,
     vad_frames_to_wav,

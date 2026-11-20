@@ -108,9 +108,17 @@ me-mex/
       services/         # llm_gateway, decision_scorer, checkpoints, …
     tests/              # unit, integration, e2e
   frontend/             # voice rail + recommendations dock + canvas
-  agent/                # LiveKit worker (Phase 2)
+  voice_worker/         # LiveKit voice process (package voice_agent)
   colab/                # gateway, vLLM, speech, training scripts
 ```
+
+**Naming:**
+
+| Path / API | Meaning |
+|------------|---------|
+| `voice_worker/` + `voice_agent` | Separate **LiveKit** process (mic, STT/TTS, room data channel) |
+| `backend/app/agents/` | **LangGraph** orchestration inside FastAPI |
+| `/api/agent/*` | REST **agent turn** API (not the LiveKit package name) |
 
 ---
 
@@ -123,14 +131,14 @@ flowchart TB
   subgraph local [Local_Mac]
     UI[React_v2_UI]
     LK[LiveKit_server]
-    WK[agent_worker]
+    WK[voice_worker]
     API[FastAPI_backend]
     MG[(MongoDB)]
     CP[checkpoints_JSON]
     UI <-->|audio_data| LK
     WK <-->|room| LK
     UI -->|REST_graph| API
-    WK -->|astream_events| LangGraph
+    WK -->|HTTP_SSE| API
     LangGraph[LangGraph_root_graph] --> Workers
     Workers --> Tools[deterministic_tools]
     Tools --> MG
@@ -170,23 +178,23 @@ docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
 
 Set in gitignored `backend/.env`: `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_API_KEY=devkey`, `LIVEKIT_API_SECRET=secret`, plus Colab URLs.
 
-5. **Agent worker** — from repo root (same venv as backend): `PYTHONPATH=backend:agent uv run python -m me_mex_agent.worker dev` (or `./scripts/dev-stack.sh`)
+5. **Voice worker** — from repo root (same venv as backend): `PYTHONPATH=backend:voice_worker uv run python -m voice_agent.worker dev` (or `./scripts/dev-stack.sh`)
 
 6. **Frontend** — `cd frontend && npm install && npm run dev` (`VITE_API_BASE_URL=http://127.0.0.1:8000`).
 
-**Voice path:** browser ↔ local LiveKit ↔ worker ↔ Colab STT/TTS + backend `/api/agent/turn/stream`.
+**Voice path:** browser ↔ local LiveKit ↔ `voice_agent` worker ↔ Colab STT/TTS + backend `/api/voice/conversation/stream` (and optional worker dispatch).
 
 **Verify:** `curl http://localhost:8000/api/livekit/token -X POST -H 'Content-Type: application/json' -d '{"room":"me-mex","identity":"dev"}'`
 
-**Voice VAD** (local Silero on the agent worker): default `VOICE_VAD=silero`; optional `VOICE_MIN_SILENCE_MS` (550), `VOICE_MIN_UTTERANCE_MS`, `VOICE_MAX_UTTERANCE_MS`. Legacy RMS: `VOICE_VAD=rms` — see [agent/.env.example](./agent/.env.example).
+**Voice VAD** (local Silero on the voice worker): default `VOICE_VAD=silero`; optional `VOICE_MIN_SILENCE_MS` (550), `VOICE_MIN_UTTERANCE_MS`, `VOICE_MAX_UTTERANCE_MS`. Legacy RMS: `VOICE_VAD=rms` — see [voice_worker/.env.example](./voice_worker/.env.example).
 
 **Voice E2E smoke** (one sentence, stay connected ~60s after you stop speaking):
 
 | Check | Where |
 |-------|--------|
-| `STT utterance (Xs, …)` with X ≥ ~2 and sensible text | `.dev-stack/logs/agent.log` |
-| `voice_turn reply_len=…` and no `voice_turn failed` / `TTS failed` | `agent.log` |
-| `POST /api/agent/turn/stream` with no trailing ASGI `ERROR` | `backend.log` |
+| `STT utterance (Xs, …)` with X ≥ ~2 and sensible text | `.dev-stack/logs/voice_worker.log` |
+| `voice_turn reply_len=…` and no `voice_turn failed` / `TTS failed` | `voice_worker.log` |
+| `POST /api/voice/conversation/stream` with no trailing ASGI `ERROR` | `backend.log` |
 | `POST /stt/transcribe` 200 | Colab `speech.log` / `gateway.log` |
 | `POST /v1/chat/completions` 200 | Colab `gateway.log` / `vllm.log` |
 | `POST /tts/synthesize` 200 (if TTS enabled) | Colab `speech.log` / `gateway.log` |

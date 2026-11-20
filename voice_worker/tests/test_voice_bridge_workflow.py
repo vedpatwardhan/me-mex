@@ -3,7 +3,7 @@
 from unittest.mock import patch
 
 import pytest
-from me_mex_agent.turn_bridge import run_turn_with_reply
+from voice_agent.turn_bridge import run_turn_with_reply
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_w8_muted_context_shape():
         for c in chunks:
             yield c
 
-    with patch("me_mex_agent.turn_bridge.stream_turn", side_effect=fake_stream):
+    with patch("voice_agent.turn_bridge.stream_turn", side_effect=fake_stream):
         reply, events, turn_end = await run_turn_with_reply(
             text="",
             thread_id="w8",

@@ -1,4 +1,4 @@
-from me_mex_agent.turn_bridge import _use_voice_conversation_stream
+from voice_agent.turn_bridge import _use_voice_conversation_stream
 
 
 def test_use_voice_conversation_stream_flag():

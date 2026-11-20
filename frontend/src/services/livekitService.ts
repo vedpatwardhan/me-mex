@@ -1,5 +1,5 @@
 /**
- * Phase 2: LiveKit room (local Docker SFU). STT/TTS run on Colab via agent worker.
+ * Phase 2: LiveKit room (local Docker SFU). STT/TTS run on Colab via voice_worker process.
  * Browser Xenova path in voiceService.ts is legacy dev-only.
  */
 

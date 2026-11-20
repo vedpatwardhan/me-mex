@@ -129,7 +129,7 @@ LiveKit room (browser mic)
   → edge-tts (TTS, Colab)
 ```
 
-Utterances end on Silero **end-of-speech** (~550 ms trailing silence by default) or **flush on mute** (push-to-talk). Tunables: `VOICE_VAD`, `VOICE_MIN_SILENCE_MS`, `VOICE_MIN_UTTERANCE_MS` on the worker — see [agent/.env.example](../agent/.env.example).
+Utterances end on Silero **end-of-speech** (~550 ms trailing silence by default) or **flush on mute** (push-to-talk). Tunables: `VOICE_VAD`, `VOICE_MIN_SILENCE_MS`, `VOICE_MIN_UTTERANCE_MS` on the worker — see [voice_worker/.env.example](../voice_worker/.env.example).
 
 Barge-in cancels **foreground** stream mid-utterance.
 

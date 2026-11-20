@@ -89,6 +89,8 @@ Read this before [§12](#12-langgraph--langchain-runtime-interactive-agent).
 | **WorkflowObserver** | Deterministic ledger ([§12.4](#124-tracking-what-the-user-asked-for-job-ledger)) |
 | **WorkflowAgent** | Small LLM dock card author ([§12.4b](#124b-workflowagent-dock-recommendations)) |
 | **What LangGraph is not here** | Not a second DB; not the voice Conversation persona |
+| **`voice_worker/`** | LiveKit **process** (`voice_agent` package) — not `backend/app/agents/` |
+| **`/api/agent/*`** | REST turn API — not the LiveKit package name |
 
 **Code map (current `main`):**
 
@@ -97,7 +99,7 @@ Read this before [§12](#12-langgraph--langchain-runtime-interactive-agent).
 | [`backend/app/agents/graph.py`](../backend/app/agents/graph.py) | `build_graph`, `astream_agent_turn`, `_workflow_observer` |
 | [`backend/app/agents/workers.py`](../backend/app/agents/workers.py) | Worker bodies, `route_intent`, `conversation_worker` (REST) |
 | [`backend/app/agents/job_runtime.py`](../backend/app/agents/job_runtime.py) | Background intradoc, job park/resume |
-| [`agent/me_mex_agent/worker.py`](../agent/me_mex_agent/worker.py) | LiveKit → `POST /api/agent/turn/stream` today |
+| [`voice_worker/voice_agent/worker.py`](../voice_worker/voice_agent/worker.py) | LiveKit room → `POST /api/voice/conversation/stream` (`voice_turn`) |
 
 **Target vs today:** voice should **not** route spoken replies through a single synchronous `_worker_node`; see [§12.13](#1213-spec-vs-implementation).
 
@@ -526,7 +528,7 @@ Honest gap table — engineering backlog after this spec:
 
 | Behavior | Spec (this doc) | Code on `main` today |
 |----------|-----------------|----------------------|
-| Conversation outside LangGraph on voice | Yes (plane 1) | No — `/api/agent/turn/stream` is full graph |
+| Conversation outside LangGraph on voice | Yes (plane 1) | Partial — `/api/voice/conversation/stream`; full graph on REST `/api/agent/turn/stream` |
 | Conversation tools on voice | **None** | `conversation_worker` may call LLM only; routing still sync worker |
 | WorkflowObserver always feeds briefing | Yes | Observer runs only after `_worker_node` |
 | WorkflowAgent dock cards | Yes (small LLM) | Not present — workers call `enqueue_pending_approval` directly |

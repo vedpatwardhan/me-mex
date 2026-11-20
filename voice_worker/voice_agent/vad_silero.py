@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from livekit import rtc
 from livekit.agents.vad import VADEventType
 
-from me_mex_agent.audio_util import (
+from voice_agent.audio_util import (
     float32_to_pcm16,
     frame_to_mono_floats,
     pcm16_mono_to_wav,

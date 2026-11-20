@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spin up Me-Mex local voice stack: LiveKit SFU, agent worker, FastAPI, Vite frontend.
+# Spin up Me-Mex local voice stack: LiveKit SFU, voice_worker process, FastAPI, Vite frontend.
 # MongoDB is NOT started here — use your existing local instance (e.g. brew services).
 #
 # Usage:
@@ -51,7 +51,7 @@ kill_pidfile() {
   # shellcheck disable=SC1090
   source "${PID_FILE}"
   local key pid
-  for key in backend agent frontend; do
+  for key in backend voice_worker frontend; do
     pid="${!key:-}"
     if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
       log "Stopping ${key} (pid ${pid})"
@@ -126,7 +126,7 @@ start_backend() {
   log "Backend http://127.0.0.1:${BACKEND_PORT} (log: ${LOG_DIR}/backend.log)"
 }
 
-start_agent() {
+start_voice_worker() {
   load_backend_env
   export ME_MEX_BACKEND_URL="${ME_MEX_BACKEND_URL:-http://127.0.0.1:${BACKEND_PORT}}"
   export LIVEKIT_URL="${LIVEKIT_URL:-ws://127.0.0.1:${LIVEKIT_HTTP_PORT}}"
@@ -137,11 +137,11 @@ start_agent() {
   fi
   (
     cd "${ROOT}"
-    export PYTHONPATH="${ROOT}/backend:${ROOT}/agent${PYTHONPATH:+:${PYTHONPATH}}"
-    exec uv run python -m me_mex_agent.worker dev
-  ) >>"${LOG_DIR}/agent.log" 2>&1 &
-  echo "agent=$!" >>"${PID_FILE}"
-  log "LiveKit agent worker (log: ${LOG_DIR}/agent.log)"
+    export PYTHONPATH="${ROOT}/backend:${ROOT}/voice_worker${PYTHONPATH:+:${PYTHONPATH}}"
+    exec uv run python -m voice_agent.worker dev
+  ) >>"${LOG_DIR}/voice_worker.log" 2>&1 &
+  echo "voice_worker=$!" >>"${PID_FILE}"
+  log "LiveKit voice worker (log: ${LOG_DIR}/voice_worker.log)"
 }
 
 start_frontend() {
@@ -195,7 +195,7 @@ cmd_start() {
   start_livekit_docker
   start_backend
   wait_for_backend
-  start_agent
+  start_voice_worker
   start_frontend
 
   trap shutdown_all INT TERM

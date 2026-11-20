@@ -1,7 +1,7 @@
 import struct
 from types import SimpleNamespace
 
-from me_mex_agent.audio_util import frame_to_mono_floats, should_end_utterance
+from voice_agent.audio_util import frame_to_mono_floats, should_end_utterance
 
 
 def test_frame_to_mono_floats_stereo_interleaved():

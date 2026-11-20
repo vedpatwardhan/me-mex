@@ -22,15 +22,15 @@ except ImportError:  # pragma: no cover
     WorkerOptions = Any
     cli = None
 
-from me_mex_agent.audio_util import (
+from voice_agent.audio_util import (
     float32_to_pcm16,
     frame_to_mono_floats,
     pcm16_mono_to_wav,
     should_end_utterance,
 )
-from me_mex_agent.speech_colab import speech_enabled, synthesize_wav, transcribe_wav
-from me_mex_agent.turn_bridge import post_resume, run_turn_with_reply, stream_session_events
-from me_mex_agent.vad_silero import (
+from voice_agent.speech_colab import speech_enabled, synthesize_wav, transcribe_wav
+from voice_agent.turn_bridge import post_resume, run_turn_with_reply, stream_session_events
+from voice_agent.vad_silero import (
     SileroUtteranceCollector,
     load_silero_vad,
     voice_vad_mode,

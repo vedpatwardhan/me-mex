@@ -30,7 +30,7 @@ Keep a simple log: step id → **PASS** / **FAIL** / **SKIP** + one line of note
 | MongoDB | `mongosh --quiet mongodb://localhost:27017 --eval 'db.runCommand({ ping: 1 })'` → `ok: 1` |
 | Colab stack | Tunnel up per [colab/RUNBOOK.md](../colab/RUNBOOK.md); `curl -sS "$COLAB_INFERENCE_BASE_URL/health"` → 200 |
 | Local env | `backend/.env`: `MONGO_URI`, `DB_NAME`, `COLAB_INFERENCE_BASE_URL`, `CHAT_LLM_MODE=live`, `LIVEKIT_*` |
-| Agent env | `agent/.env` (or inherited): `ME_MEX_BACKEND_URL=http://127.0.0.1:8000`, same Colab URL |
+| Voice worker env | `voice_worker/.env` (or inherited): `ME_MEX_BACKEND_URL=http://127.0.0.1:8000`, same Colab URL |
 
 Do **not** commit real tunnel URLs.
 
@@ -56,7 +56,7 @@ cd me-mex
 
 **Terminal B** — Colab tmux stack if not already running.
 
-Open **http://127.0.0.1:3000** (or the port `dev-stack` prints). Logs: `.dev-stack/logs/backend.log`, `agent.log`, `frontend.log`.
+Open **http://127.0.0.1:3000** (or the port `dev-stack` prints). Logs: `.dev-stack/logs/backend.log`, `voice_worker.log`, `frontend.log`.
 
 ### 2.4 Demo inputs (prepare once)
 
@@ -81,7 +81,7 @@ intent=
 Tail while you walk §4–§8:
 
 ```bash
-tail -f me-mex/.dev-stack/logs/backend.log me-mex/.dev-stack/logs/agent.log
+tail -f me-mex/.dev-stack/logs/backend.log me-mex/.dev-stack/logs/voice_worker.log
 ```
 
 | Signal | Where to look |
@@ -90,7 +90,7 @@ tail -f me-mex/.dev-stack/logs/backend.log me-mex/.dev-stack/logs/agent.log
 | Background jobs | `backend.log`: `job_start` · `job_status` |
 | Reranker hops | `backend.log`: `decision_hop_ms=` · `scenario=placement\|reorg_neighbor\|retrieval_expand` |
 | HITL approve/dismiss | `backend.log`: `hitl action=` |
-| Agent voice path | `agent.log`: `voice_turn thread_id=` · `VAD utterance` · `STT utterance` |
+| Agent voice path | `voice_worker.log`: `voice_turn thread_id=` · `VAD utterance` · `STT utterance` |
 | Live decision dataset | `backend/logs/decision_traces/<project_id>/<date>.jsonl` (append on scorer + placement/reorg approve) |
 | Extract / slow LLM | `backend/logs/llm_traces/` |
 
@@ -98,7 +98,7 @@ Quick greps (another terminal):
 
 ```bash
 rg 'conversation_stream|voice_dispatch|decision_hop_ms|hitl action|job_status' me-mex/.dev-stack/logs/backend.log
-rg 'voice_turn|STT utterance|voice_turn failed' me-mex/.dev-stack/logs/agent.log
+rg 'voice_turn|STT utterance|voice_turn failed' me-mex/.dev-stack/logs/voice_worker.log
 ```
 
 Set `DECISION_TRACE_ENABLED=false` in `backend/.env` to skip JSONL append during a noisy session.
@@ -113,7 +113,7 @@ Set `DECISION_TRACE_ENABLED=false` in `backend/.env` to skip JSONL append during
 |---|--------|----------|---|
 | 3.1 | `curl -sS http://127.0.0.1:8000/api/livekit/token -X POST -H 'Content-Type: application/json' -d '{"room":"me-mex","identity":"demo"}'` | JSON with `token` | |
 | 3.2 | Open UI; confirm canvas + voice rail + recommendations dock visible | No console hard errors | |
-| 3.3 | Tail `agent.log` in another pane | No repeating stack traces | |
+| 3.3 | Tail `voice_worker.log` in another pane | No repeating stack traces | |
 
 ---
 
@@ -142,7 +142,7 @@ Use a **fresh project** name like `Demo — <your topic>` so the graph stays eas
 | B4 | Confirm when agent summarizes scope | Scope text appears in dock; Genesis/description updates after approve if prompted | |
 | B5 | **Mute mic** while assistant finishes / TTS plays | Session **stays** connected (`mic off (session active)`); hear TTS without re-connecting | |
 
-**Logs:** `agent.log` → `STT utterance`, `voice_turn reply_len=…` (no `voice_turn failed`); `backend.log` → `POST /api/voice/conversation/stream` (conversation-first) and optional `dispatch job_id=…`; proactive TTS may log after job `done` / `awaiting_approval` — no trailing ASGI `ERROR`.
+**Logs:** `voice_worker.log` → `STT utterance`, `voice_turn reply_len=…` (no `voice_turn failed`); `backend.log` → `POST /api/voice/conversation/stream` (conversation-first) and optional `dispatch job_id=…`; proactive TTS may log after job `done` / `awaiting_approval` — no trailing ASGI `ERROR`.
 
 **Workflow:** [06 P1](./06-workflows.md#p1--first-voice-project-scope-before-research)
 
@@ -278,7 +278,7 @@ curl -N -X POST http://127.0.0.1:8000/api/agent/turn/stream \
   -d "{\"text\":\"Hello\",\"thread_id\":\"demo-rest\",\"context_json\":{\"active_project_id\":\"$PROJECT_ID\"}}"
 ```
 
-If REST works but voice fails, focus debugging on LiveKit + `agent.log` before blocking on workflow logic.
+If REST works but voice fails, focus debugging on LiveKit + `voice_worker.log` before blocking on workflow logic.
 
 ---
 
@@ -286,8 +286,8 @@ If REST works but voice fails, focus debugging on LiveKit + `agent.log` before b
 
 | Symptom | Likely cause | Where to look |
 |---------|--------------|---------------|
-| No STT / empty utterance | Colab speech or VAD / mute too early | `agent.log` (`VAD utterance ready … flush=silence\|mute`), Colab `speech.log`; speak then pause ~0.5 s or mute after ≥0.4 s speech |
-| Dock never streams | Worker ↔ backend SSE | `agent.log` (`turn_bridge`), `backend.log` |
+| No STT / empty utterance | Colab speech or VAD / mute too early | `voice_worker.log` (`VAD utterance ready … flush=silence\|mute`), Colab `speech.log`; speak then pause ~0.5 s or mute after ≥0.4 s speech |
+| Dock never streams | Worker ↔ backend SSE | `voice_worker.log` (`turn_bridge`), `backend.log` |
 | Rerank / retrieval errors | Gateway `decision/score` | `gateway.log`; run `-m vllm` test |
 | Token / join failure | LiveKit Docker | `docker ps`; `LIVEKIT_*` in `backend/.env` |
 | TTS cuts off | Barge-in on unmute | Mute during playback (by design) |
@@ -324,7 +324,7 @@ If REST works but voice fails, focus debugging on LiveKit + `agent.log` before b
 
 You have validated **workflow + voice + HITL** for a general research project. Reasonable next engineering tracks (see `reports/HANDOFF_2.md` §9):
 
-1. **Phase 2 harden:** LiveKit room smoke pytest; expand `agent/tests/test_voice_bridge_workflow.py` for any §8 FAIL rows.
+1. **Phase 2 harden:** LiveKit room smoke pytest; expand `voice_worker/tests/test_voice_bridge_workflow.py` for any §8 FAIL rows.
 2. **Skip:** Bulk markdown import (Phase 3)—deferred; grow the graph via voice/workflows only.
 3. **Phase 4 remainder:** canvas legend, dock done-strip / tool trace UI when the demo narrative is stable ([09 §Phase 4](./09-phasing.md#phase-4--live-traces-reranker-refresh-polish)).
 

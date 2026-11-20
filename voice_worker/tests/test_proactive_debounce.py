@@ -1,4 +1,4 @@
-from me_mex_agent.worker import RoomSession
+from voice_agent.worker import RoomSession
 
 
 def test_proactive_spoken_set():

@@ -44,8 +44,8 @@ me-mex/
         llm/                     # recorded tool-call transcripts
   frontend/
     tests/                       # Vitest/RTL: dock, filters, canvas structure-key
-  agent/
-    tests/                       # LiveKit worker smoke (Phase 2)
+  voice_worker/
+    tests/                       # LiveKit voice worker smoke (Phase 2)
 ```
 
 **Naming:** `test_<tool_name>.py`, `test_agent_<worker>.py`, `test_workflow_<id>.py` (e.g. `test_workflow_w2_gist_inquiry.py`).
@@ -171,7 +171,7 @@ Default CI: `pytest -m "not vllm and not livekit and not slow"`.
 
 | Stage | Command / action | Gate |
 |-------|------------------|------|
-| **Lint / typecheck** | ruff + mypy (or project standard) on `backend/`, `agent/` | Required in CI |
+| **Lint / typecheck** | ruff + mypy (or project standard) on `backend/`, `voice_worker/` | Required in CI |
 | **Unit** | `pytest tests/unit` | Required in CI |
 | **Integration** | `pytest tests/integration -m "not vllm"` | Required in CI |
 | **E2E workflows** | `pytest tests/e2e/workflows tests/e2e/anti_patterns` | Required in CI |

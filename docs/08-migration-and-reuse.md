@@ -103,7 +103,7 @@ me-mex/
   docs/             # v2 canon (this folder)
   backend/          # v2 remake in place (tag v1 for reference)
   frontend/
-  agent/            # always-on LiveKit + LangGraph worker (separate process preferred)
+  voice_worker/     # always-on LiveKit voice process (separate from FastAPI)
 ```
 
 **No** `backend_v2/` split—replace v1 code in `me-mex` as v2 ships ([10 A3](./10-open-questions.md#6-resolved-decisions-locked)).

@@ -2,7 +2,7 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
-from me_mex_agent.worker import RoomSession, _handle_data
+from voice_agent.worker import RoomSession, _handle_data
 
 
 @pytest.mark.asyncio
@@ -13,8 +13,8 @@ async def test_approve_data_calls_post_resume(monkeypatch):
         calls.append(kwargs)
         return {"status": "approved"}
 
-    monkeypatch.setattr("me_mex_agent.worker.post_resume", fake_post_resume)
-    monkeypatch.setattr("me_mex_agent.worker.speech_enabled", lambda: False)
+    monkeypatch.setattr("voice_agent.worker.post_resume", fake_post_resume)
+    monkeypatch.setattr("voice_agent.worker.speech_enabled", lambda: False)
 
     publish = AsyncMock()
     room = type("Room", (), {"local_participant": type("LP", (), {"publish_data": publish})()})()

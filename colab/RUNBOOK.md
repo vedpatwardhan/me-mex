@@ -485,7 +485,7 @@ Optional thresholds: `data/decision_training/eval_gate.json`.
 |------|--------|
 | STT/TTS weights | Colab `speech_sidecar` + tunnel (`COLAB_INFERENCE_BASE_URL` on Mac) |
 | WebRTC | Local LiveKit Docker `:7880` |
-| Bridge | `agent/me_mex_agent/worker.py` (mic → STT → graph → TTS) |
+| Bridge | `voice_worker/voice_agent/worker.py` (mic → STT → backend SSE → TTS) |
 | UI | Frontend `VoiceRail` + `RecommendationsDock` |
 
 Same tunnel host as `COLAB_INFERENCE_BASE_URL`. LiveKit stays local. Notebook §10.
