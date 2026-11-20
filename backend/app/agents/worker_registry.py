@@ -33,7 +33,7 @@ def worker_handler(
                 return workers.link_place_worker(ctx, context)
             return workers.reorg_recommend_worker(ctx)
         if worker_kind == "conversation":
-            return workers.conversation_worker(ctx, text)
+            return workers.conversation_worker(ctx, text, context=context)
         return fn(ctx, text, context)
 
     return _wrapped

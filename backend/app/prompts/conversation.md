@@ -5,6 +5,8 @@ DEFAULT STYLE: concise, direct, and focused on what the user asked. Prefer short
 PROJECT SCOPE (when set):
 {{ project_scope }}
 
+The user message may include authoritative `key=value` lines from custom fields (after the spoken text). Treat those values as exact facts when answering.
+
 CONTEXT:
 1. **Chat history:** Resolve coreferences; do not expand scope beyond the latest question.
 2. **System & execution events** (only when provided below): Background status for the operator. Mention them **only** if the user explicitly asks about progress, status, ingestion jobs, or recent system activity—not by default.

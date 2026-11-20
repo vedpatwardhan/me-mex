@@ -57,7 +57,6 @@ async def astream_conversation_voice(
     store = get_store()
     project = store.get_project(project_id)
 
-    append_transcript_turn(thread_id, role="user", text=text)
     briefing = build_session_briefing(project_id=project_id, thread_id=thread_id)
 
     worker_kind, effective_text, scope_blocked = resolve_voice_route(
@@ -66,6 +65,7 @@ async def astream_conversation_voice(
         text=text,
         context_json=ctx_json,
     )
+    append_transcript_turn(thread_id, role="user", text=effective_text)
     dispatch = needs_voice_dispatch(
         worker_kind,
         voice_turn=voice,
@@ -77,7 +77,7 @@ async def astream_conversation_voice(
         job_runtime.park_active_jobs(thread_id)
 
     inp = _conversation_prompt_inputs(
-        text=text,
+        text=effective_text,
         briefing=briefing,
         project_scope=project.introduction or "",
     )

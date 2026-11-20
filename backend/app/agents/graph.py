@@ -119,7 +119,7 @@ def _worker_node(state: AgentState) -> AgentState:
     elif w == "scratch":
         out = workers.scratch_worker_with_context(ctx, text, context)
     else:
-        out = workers.conversation_worker(ctx, text)
+        out = workers.conversation_worker(ctx, text, context=context)
     return {**state, "output": out}
 
 

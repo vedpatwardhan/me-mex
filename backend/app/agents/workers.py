@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.agents.context_preprocessor import apply_custom_fields_to_text
 from app.config import settings
 from app.db import Store, ToolContext
 from app.llm import get_chains
@@ -45,12 +46,19 @@ def route_intent(text: str, context: dict, project: Any) -> str:
     return result if isinstance(result, str) else result.worker
 
 
-def conversation_worker(ctx: ToolContext, text: str, *, gist_draft: str | None = None) -> dict:
+def conversation_worker(
+    ctx: ToolContext,
+    text: str,
+    *,
+    context: dict | None = None,
+    gist_draft: str | None = None,
+) -> dict:
     if gist_draft:
         return {"reply": gist_draft, "graph_write": False}
     proj = ctx.store.get_project(ctx.project_id)
+    effective = apply_custom_fields_to_text(text, context)
     reply = get_chains().conversation.invoke(
-        {"text": text, "project_scope": proj.introduction or ""}
+        {"text": effective, "project_scope": proj.introduction or ""}
     )
     return {"reply": reply, "graph_write": False}
 
@@ -67,7 +75,7 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
             gist.attach_source_uri(ctx, root_id=out["root_id"], uri=str(uri))
         return {"reply": "ROOT gist saved.", "result": out, "graph_write": True}
     draft = get_chains().gist_draft.invoke({"text": text, "project_scope": proj.introduction or ""})
-    return conversation_worker(ctx, text, gist_draft=draft)
+    return conversation_worker(ctx, text, context=context, gist_draft=draft)
 
 
 def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
