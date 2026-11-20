@@ -296,8 +296,8 @@ If REST works but voice fails, focus debugging on LiveKit + `agent.log` before b
 You have validated **workflow + voice + HITL** for a general research project. Reasonable next engineering tracks (see `reports/HANDOFF_2.md` §9):
 
 1. **Harden:** LiveKit room smoke pytest; expand `agent/tests/test_voice_bridge_workflow.py` for steps that failed once.
-2. **Defer:** Robotics markdown import / Phase 3 seeding unless you want bulk load for a specific domain later.
-3. **Polish:** Phase 4 observability and dock UX when demo narrative is stable.
+2. **Skip:** Bulk markdown import (Phase 3)—deferred; not needed without decision-model fine-tuning. Grow the graph via voice/workflows only.
+3. **Polish:** Phase 4 observability and dock UX when demo narrative is stable ([09 §Phase 4](./09-phasing.md#phase-4--live-traces-reranker-refresh-polish)).
 
 ---
 

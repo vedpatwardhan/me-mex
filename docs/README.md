@@ -16,7 +16,7 @@ This folder is the **source of truth** for the rebuild after git tag **`v1`**. *
 | [05-models-and-runtime.md](./05-models-and-runtime.md) | Colab gateway — Ministral, cross-encoder reranker, Whisper, Kokoro; notes bootstrap for eval |
 | [06-workflows.md](./06-workflows.md) | End-to-end user workflows and anti-patterns |
 | [07-performance-and-observability.md](./07-performance-and-observability.md) | Latency, tracing, decision datasets |
-| [08-migration-and-reuse.md](./08-migration-and-reuse.md) | Optional v1 reuse (spec wins) + markdown import |
+| [08-migration-and-reuse.md](./08-migration-and-reuse.md) | Optional v1 reuse (spec wins); bulk import deferred |
 | [09-phasing.md](./09-phasing.md) | **Full rollout map** — phases + coverage matrices (spec → delivery) |
 | [10-open-questions.md](./10-open-questions.md) | Unresolved decisions only |
 | [11-testing.md](./11-testing.md) | Unit / integration / e2e matrix, CI, phase test gates |
@@ -32,7 +32,7 @@ This folder is the **source of truth** for the rebuild after git tag **`v1`**. *
 | [`../README.md`](../README.md) | Repo entrypoint — quick start, layout, links here |
 | `git checkout v1` | Reference autonomous codebase ([01-v1-baseline.md](./01-v1-baseline.md)) |
 | `docs/me-mex/*` (cortex-os repo) | Historical rebuild notes (non-canon) |
-| `docs/deeper_read_notes.md` etc. (cortex-os) | Robotics tier **exemplar** for bootstrap JSONL / Phase 3 import |
+| `docs/deeper_read_notes.md` etc. (cortex-os) | Robotics **eval/fixture** exemplar (optional import deferred; see [09 Phase 3](./09-phasing.md#phase-3--optional-bulk-markdown-import-deferred)) |
 
 ---
 

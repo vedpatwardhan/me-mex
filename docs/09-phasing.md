@@ -15,7 +15,7 @@ Phase 1  Mongo schema + all deterministic tools + headless agents + gateway rera
     ↓
 Phase 2  LangGraph interactive runtime + LiveKit + full UX shell + all workflows voice/panel
     ↓
-Phase 3  Markdown import to graph + multi-project seed + decision dataset refresh
+Phase 3  (deferred) optional bulk markdown import — not on v2 critical path
     ↓
 Phase 4  Live decision traces + optional reranker refresh + observability completion + UX polish
     ↓
@@ -40,7 +40,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | [02](./02-user-experience.md) §4 | Recommendations dock (nudges + approvals) | P2 | Polish P4 |
 | [02](./02-user-experience.md) §5 | Canvas, legend, layout perf §5.4 | P2 | Legend polish P4; layout P2 |
 | [02](./02-user-experience.md) §6–7 | Request envelope, UX invariants | P2 | REST mirror P1 |
-| [03](./03-graph-and-memory.md) §2–6 | Tiers, ROOT rule, kinds, edges | P1 schema + tools | Import P3 |
+| [03](./03-graph-and-memory.md) §2–6 | Tiers, ROOT rule, kinds, edges | P1 schema + tools | Bulk import deferred ([§Phase 3](#phase-3--optional-bulk-markdown-import-deferred)) |
 | [03](./03-graph-and-memory.md) §7 | Staging contract | P1 | Staging cache P2+ |
 | [03](./03-graph-and-memory.md) §8–9 | Multi-project, partitions/reorg | P2 / P5 soak | Partitions detail P2 reorg path |
 | [03](./03-graph-and-memory.md) §10 | Nudges vs `decision_traces` | P2 dock nudges; P1/P4 traces | No workflows-graph collection |
@@ -54,7 +54,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | [05](./05-models-and-runtime.md) §7–8 | Latency targets, trace schema | P1 eval; P4 live append | |
 | [06](./06-workflows.md) | P0, P1, W2–W11, anti-patterns | P1–P5 | [§4](#4-user-workflows-06--phases) |
 | [07](./07-performance-and-observability.md) | Perf, instrumentation, caches, load | P2 partial; P4–P5 full | [§8](#8-performance-and-observability-07--phases) |
-| [08](./08-migration-and-reuse.md) | Optional v1 reuse, import, flags | P1 flags; P3 import | No misaligned ports |
+| [08](./08-migration-and-reuse.md) | Optional v1 reuse, import, flags | P1 flags; import **deferred** | No misaligned ports |
 | [10](./10-open-questions.md) | Unresolved | Gates [§12](#12-open-questions--phase-gates) | |
 | [references](./references.md) | Pointers | — | Fixtures for P1/P3 |
 | [11](./11-testing.md) | Unit / integration / e2e / CI | P1–P5 gates | Every tool, agent, workflow |
@@ -152,7 +152,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | Multi-project isolation | [03 §8](./03-graph-and-memory.md#8-multiple-projects) | P1 data; P2 UI; P5 soak |
 | Partitions / crowded sections → reorg rec | [03 §9](./03-graph-and-memory.md#9-partitions-and-crowded-sections) | P2 W5 |
 | Dock nudges (no workflows-graph DB) | [03 §10](./03-graph-and-memory.md#10-nudges-vs-training-traces) | P2; training = `decision_traces` |
-| Three-tier markdown mapping | [03 §11](./03-graph-and-memory.md#11-markdown-habit--graph-corrected) | P3 import |
+| Three-tier markdown mapping | [03 §11](./03-graph-and-memory.md#11-markdown-habit--graph-corrected) | Deferred optional import |
 | Voice rail + custom fields authoritative | [02 §3](./02-user-experience.md#3-voice-rail) | P2 |
 | Dock: latest response + jobs + recommendations | [02 §4](./02-user-experience.md#4-recommendations-dock-default-not-optional) | P2 |
 | Color legend (all kinds) | [02 §5.2](./02-user-experience.md#52-color-and-label-legend-v2) | P2 MVP; P4 polish |
@@ -297,16 +297,15 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 
 ---
 
-## Phase 3 — Markdown import to graph
+## Phase 3 — Optional bulk markdown import (deferred)
 
-**Goal:** Seed Mongo from three-tier notes; expand decision training beyond robotics exemplar.
+**Status:** **Not required** for v2 delivery or Phase 2 exit. The demo runbook and success criteria assume **voice- and workflow-driven** graph growth (W2, placement, HITL commits)—not pre-seeded corpora.
 
-- Import pipelines [08 §5](./08-migration-and-reuse.md#5-markdown-import-robotics--other-projects): `deeper_read_notes` → ROOT+gist; `select_papers` → intra-doc where applicable; `overall_insights` → hubs + insights + ROOT cites.
-- Parallel refresh `decision_training/<project>/*.jsonl` [05 §8](./05-models-and-runtime.md#8-decision-trace-schema-training--eval).
-- Optional fine-tune / per-project reranker [10 M2](./10-open-questions.md#3-models-and-runtime).
-- Parser open items [10 M3](./10-open-questions.md#3-models-and-runtime).
+**Why it existed:** Originally scoped to seed Mongo from three-tier notes and refresh `decision_training/<project>/*.jsonl` ahead of a **fine-tuned decision model**. That path is **superseded** by the Colab gateway **cross-encoder reranker** (no LoRA decision MVP); bootstrap JSONL remains for **eval / offline reranker experiments** only ([05 §3.2](./05-models-and-runtime.md#32-delivery-order-v2--no-fine-tune-gate-for-p2p4)).
 
-**Exit:** Imported graph obeys [03](./03-graph-and-memory.md) tier rules; dataset size and eval documented per imported project.
+**If you ever run it (optional):** Pipelines stay documented in [08 §5](./08-migration-and-reuse.md#5-markdown-import-robotics--other-projects) (`deeper_read_notes`, `select_papers`, `overall_insights`). Robotics markdown in the repo is an **exemplar / fixture**, not a shipping gate.
+
+**Exit (only if pursued):** Imported graph obeys [03](./03-graph-and-memory.md) tier rules; no silent ingest; HITL rules unchanged.
 
 ---
 
@@ -354,6 +353,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 
 ## 10. Deferred (not v2 core)
 
+- **Bulk markdown import / multi-project seed** (former Phase 3)—use workflows instead; see [§Phase 3](#phase-3--optional-bulk-markdown-import-deferred).
 - Full Lean / circuit-tracer engines (math/safety rubric only in MVP).
 - Optional Drex/Laya comparison beyond eval curiosity.
 - Canvas section hulls unless [10 U1](./10-open-questions.md#2-user-experience) closes toward them.
@@ -383,7 +383,7 @@ Reuse is **never required**. When useful and spec-aligned:
 | ID | Status | Blocks or shapes |
 |----|--------|------------------|
 | **U4** | Open | Pinned vs freeform custom fields UX |
-| **M2** | Open | Global vs per-project reranker checkpoint → P3/P4 |
+| **M2** | Open | Global vs per-project reranker checkpoint → P4 optional refresh (not P3 import) |
 | **P2** | Deferred | Non-robotics import importers |
 
 Close remaining items in [10](./10-open-questions.md) → update this section and affected phase bullets.
