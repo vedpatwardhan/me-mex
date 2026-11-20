@@ -36,7 +36,7 @@ Gateway topology: [colab/TOPOLOGY.md](../colab/TOPOLOGY.md).
 
 Heavy extract/consolidation runs only when **IntraDocWorker** is routed—not on every summary.
 
-**Project scope:** When `projects.introduction` (and synced Genesis description) is set, **ContextPreprocessor** prepends it to supervisor and worker system prompts—see [04-agent-orchestration.md](./04-agent-orchestration.md) §7. No `domain_mode` or alternate model profiles.
+**Project scope:** When `projects.introduction` (and synced Genesis description) is set, it is passed into **supervisor** and **worker** chain prompts—see [04-agent-orchestration.md](./04-agent-orchestration.md) §7. No `domain_mode` or alternate model profiles.
 
 ---
 

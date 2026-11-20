@@ -170,7 +170,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 | Bootstrap parser → `decision_training/<project>/*.jsonl` | P1 |
 | Held-out eval on `query_node` + full `frontier` labels | P1 **exit gate** |
 | Gateway `decision/score` (cross-encoder); four-model Colab stack | P1 |
-| ContextPreprocessor project scope in prompts | P2 (after P1 `update_project_scope`) |
+| Project scope in supervisor/worker prompts | P2 (after P1 `update_project_scope`) |
 | Embeddings in agents (`query_nodes_by_embedding`) | Optional P3+; stub OK through P2 |
 | Whisper base.en (Colab) + edge-tts + VAD; LiveKit same `thread_id` | P2 |
 | Speech barge-in cancels in-flight TTS / unsafe writes | P2 + P5 scenario |
@@ -285,7 +285,7 @@ Legend: **P0–P5** = phase; **—** = reference only, no implementation row; **
 ### Models
 
 - LinkPlaceWorker, RetrievalWorker, ReorgRecommendWorker: **HttpDecisionScorer** (gateway reranker) required (no stub in prod).
-- ContextPreprocessor injects scope when `introduction` set [04 §7](./04-agent-orchestration.md#7-project-lifecycle-create-vs-scope).
+- Supervisor `worker` invoke paths inject scope when `introduction` set [04 §7](./04-agent-orchestration.md#7-project-lifecycle-create-vs-scope).
 
 ### Performance (initial)
 

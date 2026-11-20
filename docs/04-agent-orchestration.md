@@ -33,7 +33,7 @@ Primary reference: [assets/scratchpad_2.png](../assets/scratchpad_2.png).
 | **1 — LiveKit voice POC** | When unmuted | **STT → Conversation agent → TTS**; transcript to dock; **no tools** on Conversation |
 | **2a — WorkflowObserver** | Per `thread_id` | Deterministic: merge worker outputs into **`jobs`**, stream progress, refresh nudge **inputs** — **no LLM** |
 | **2b — WorkflowAgent** | Per `thread_id` | Small LLM pass: observer signals → **ranked dock cards** / titles — **no Mongo writes** ([§12.4b](#124b-workflowagent-dock-recommendations)) |
-| **3 — LangGraph workers** | **On dispatch** | `ContextPreprocessor` → `Supervisor` → Gist / IntraDoc / Link / Reorg / Retrieval / ProjectScope … + HITL |
+| **3 — LangGraph workers** | **On dispatch** | Root graph: `supervisor` node → `worker` → Gist / IntraDoc / Link / … + HITL |
 
 ```
 [You] ←audio/data→ LiveKit agent worker
@@ -59,7 +59,7 @@ Primary reference: [assets/scratchpad_2.png](../assets/scratchpad_2.png).
 Diagram below is the **LangGraph worker fan-out** (plane 3). The **Conversation** node in the fan-out is for **REST / pytest harness** ([`conversation_worker`](../backend/app/agents/workers.py)), **not** the voice hot path.
 
 ```
-[LiveKit or REST dispatch] → ContextPreprocessor → Supervisor
+[LiveKit or REST dispatch] → Supervisor (graph node: custom_fields + route_intent)
                               │
         ┌─────────────────────┼─────────────────────┐
         ▼           ▼         ▼         ▼           ▼
@@ -119,14 +119,13 @@ Every turn (voice or REST):
 }
 ```
 
-**ContextPreprocessor** (deterministic, no LLM):
+**Supervisor graph node** (entry; deterministic prep + routing LLM):
 
-- Loads **project introduction / Genesis description** into prompt context (see §7).
-- Merges canvas selection, constraints.
-- **`custom_fields` authoritative** over conflicting STT in `text`.
-- Seeds graph state for supervisor routing.
+- Applies **`context_preprocessor`** helpers: **`custom_fields` authoritative** over conflicting STT in `text` → `effective_text`.
+- **`route_intent`** calls the Supervisor chain ([§8](#8-supervisor-routing-intent--agent)) to pick the worker kind; P1 **scope_blocked** forces `conversation` until introduction is set (see §7).
+- Project introduction is injected into worker/supervisor prompts at invoke time—not inside this node.
 
-See [02-user-experience.md](./02-user-experience.md).
+The module [`context_preprocessor.py`](../backend/app/agents/context_preprocessor.py) is shared with the voice path (`resolve_voice_route`). See [02-user-experience.md](./02-user-experience.md).
 
 ---
 
@@ -251,7 +250,7 @@ Grouped by **effect**. Every entry is safe to call from pytest **without** mocki
 | **Incomplete scope** | **Conversation-only** (ProjectScope / supervisor): *“What is this project about?”* + follow-ups until **scope-complete** |
 | **Scope-complete criteria** (agent judgment, not one-shot): **what** the work is; **where** it sits; **why** / goals; **what kinds of sources** you will explore (papers, topics, mixed paradigm)—enough to steer summaries and placement |
 | **Ready to persist** | Agent proposes scope text → you confirm → **`update_project_scope`** (Mongo project + Genesis description) → *“What would you like next?”* |
-| **Scope present** | Normal routing; **ContextPreprocessor** injects scope into every LLM prefix |
+| **Scope present** | Normal routing; **project introduction** is passed into supervisor/worker LLM prompts at invoke time |
 | **Scope update later** | Same conversation pattern or settings → `update_project_scope` |
 
 Until scope is saved, **no** gist ROOT / intra-doc / link / reorg **writes** (inquiry and gist **talk** in dock OK). Scope does **not** create graph nodes beyond Genesis metadata.
@@ -317,7 +316,7 @@ The user-facing agent must stay **responsive** while **long jobs** (intra-doc ex
 
 | Piece | Role in Me-Mex |
 |-------|----------------|
-| **Root `StateGraph`** | `ContextPreprocessor` → `Supervisor` → worker subgraphs → `WorkflowObserver`; owns **session state**, checkpointer, job ledger |
+| **Root `StateGraph`** | `supervisor` → `worker` → `observer` → `hitl_gate`; owns **session state**, checkpointer, job ledger |
 | **`create_agent` subgraphs** | One compiled graph per worker (Conversation, Gist, IntraDoc, …); **nested** under root; optional **middleware** for project scope injection |
 | **Deterministic tools** | Bound to worker agents only; called from agent nodes after model steps |
 | **LiveKit worker** | `asyncio` loop: `graph.astream_events(..., version="v3")` → token stream to TTS; data channel → dock |

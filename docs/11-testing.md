@@ -89,7 +89,7 @@ me-mex/
 | Feature | Test type |
 |---------|-----------|
 | Recommendations **initiate only** | E2E: tap nudge → preview, **no** Mongo until approve |
-| `custom_fields` override STT | Unit: preprocessor |
+| `custom_fields` override STT | Unit: `context_preprocessor` (+ supervisor node via `route_intent`) |
 | Dock job status from `jobs` + custom stream | Integration LangGraph |
 | Canvas delete (W12) | E2E API + optional Playwright |
 | Structure-key layout | Frontend unit: layout not called on selection-only |

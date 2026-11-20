@@ -1,4 +1,4 @@
-"""Deterministic turn preprocessing: custom_fields override STT text conflicts."""
+"""Deterministic turn prep helpers (custom_fields, P1 scope gate)—used by supervisor graph node and voice dispatch."""
 
 from __future__ import annotations
 

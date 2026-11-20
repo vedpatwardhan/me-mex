@@ -33,7 +33,8 @@ class AgentState(TypedDict, total=False):
     scope_blocked: bool
 
 
-def _preprocess(state: AgentState) -> AgentState:
+def _supervisor(state: AgentState) -> AgentState:
+    """Custom fields, P1 scope gate, and supervisor chain routing (04 §8)."""
     ctx = ToolContext(
         project_id=state["project_id"],
         thread_id=state["thread_id"],
@@ -55,10 +56,6 @@ def _preprocess(state: AgentState) -> AgentState:
         "worker": worker,
         "scope_blocked": scope_blocked,
     }
-
-
-def _supervisor(state: AgentState) -> AgentState:
-    return state
 
 
 def _worker_node(state: AgentState) -> AgentState:
@@ -176,13 +173,11 @@ def _workflow_observer(state: AgentState) -> AgentState:
 
 def build_graph(*, checkpointer=None):
     g = StateGraph(AgentState)
-    g.add_node("preprocess", _preprocess)
     g.add_node("supervisor", _supervisor)
     g.add_node("worker", _worker_node)
     g.add_node("hitl_gate", _hitl_gate)
     g.add_node("observer", _workflow_observer)
-    g.set_entry_point("preprocess")
-    g.add_edge("preprocess", "supervisor")
+    g.set_entry_point("supervisor")
     g.add_edge("supervisor", "worker")
     g.add_edge("worker", "observer")
     g.add_edge("observer", "hitl_gate")
