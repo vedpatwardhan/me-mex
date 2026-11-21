@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO)
 
 SILENCE_RMS = float(os.getenv("VOICE_SILENCE_RMS", "0.008"))
 MIN_UTTERANCE_MS = int(os.getenv("VOICE_MIN_UTTERANCE_MS", "400"))
-MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "20000"))
+MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "60000"))
 END_SILENCE_MS = int(os.getenv("VOICE_END_SILENCE_MS", "1500"))
 
 

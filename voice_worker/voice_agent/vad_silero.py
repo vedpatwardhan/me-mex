@@ -24,7 +24,7 @@ _log = logging.getLogger(__name__)
 
 VOICE_VAD = os.getenv("VOICE_VAD", "silero").strip().lower()
 MIN_UTTERANCE_MS = int(os.getenv("VOICE_MIN_UTTERANCE_MS", "400"))
-MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "20000"))
+MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "60000"))
 MIN_SILENCE_MS = int(os.getenv("VOICE_MIN_SILENCE_MS", "550"))
 
 

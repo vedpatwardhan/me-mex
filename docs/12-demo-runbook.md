@@ -287,6 +287,7 @@ If REST works but voice fails, focus debugging on LiveKit + `voice_worker.log` b
 | Symptom | Likely cause | Where to look |
 |---------|--------------|---------------|
 | No STT / empty utterance | Colab speech or VAD / mute too early | `voice_worker.log` (`VAD utterance ready … flush=silence\|mute`), Colab `speech.log`; speak then pause ~0.5 s or mute after ≥0.4 s speech |
+| Long monologue cut off | `VOICE_MAX_UTTERANCE_MS` (default **60s**) — Silero drops audio after cap | Voice rail **segment timer** turns amber ~85%, red at cap — **mute & unmute** for the next clip; optional `VOICE_MAX_UTTERANCE_MS` in `voice_worker/.env` |
 | Dock never streams | Worker ↔ backend SSE | `voice_worker.log` (`turn_bridge`), `backend.log` |
 | Rerank / retrieval errors | Gateway `decision/score` | `gateway.log`; run `-m vllm` test |
 | Token / join failure | LiveKit Docker | `docker ps`; `LIVEKIT_*` in `backend/.env` |

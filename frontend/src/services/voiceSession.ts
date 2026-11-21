@@ -56,6 +56,10 @@ export class VoiceSession {
     return this.room?.state === ConnectionState.Connected;
   }
 
+  getRoom(): Room | null {
+    return this.room;
+  }
+
   private async waitUntilConnected(room: Room, ms = 20_000): Promise<void> {
     if (room.state === ConnectionState.Connected) return;
     await new Promise<void>((resolve, reject) => {
