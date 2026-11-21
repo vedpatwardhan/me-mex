@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { DockItem } from '../components/RecommendationsDock';
 import {
@@ -8,6 +8,7 @@ import {
   streamAgentTurn,
 } from '../services/dockStreamService';
 import type { VoiceSession } from '../services/voiceSession';
+import { reconcileQueueItems } from '../utils/dockQueueSort';
 import {
   applyStreamEvent,
   emptyDockStreamState,
@@ -21,16 +22,14 @@ export function useDockState(projectId: string, threadId: string) {
 
   const { latestReply, latestUserText, items } = streamState;
 
+  const refreshDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const refreshApprovals = useCallback(async () => {
     const approvals = await fetchApprovals(projectId, threadId);
     const nudges = await fetchNudges(projectId);
     setStreamState((s) => ({
       ...s,
-      items: [
-        ...approvals,
-        ...nudges,
-        ...s.items.filter((i) => i.className === 'job'),
-      ],
+      items: reconcileQueueItems(approvals, nudges, s.items),
     }));
   }, [projectId, threadId]);
 
@@ -38,9 +37,28 @@ export function useDockState(projectId: string, threadId: string) {
     void refreshApprovals();
   }, [refreshApprovals]);
 
-  const applyStreamEventToState = useCallback((ev: Record<string, unknown>) => {
-    setStreamState((prev) => applyStreamEvent(prev, ev));
-  }, []);
+  const scheduleRefreshApprovals = useCallback(() => {
+    if (refreshDebounce.current) clearTimeout(refreshDebounce.current);
+    refreshDebounce.current = setTimeout(() => {
+      void refreshApprovals();
+    }, 300);
+  }, [refreshApprovals]);
+
+  const applyStreamEventToState = useCallback(
+    (ev: Record<string, unknown>) => {
+      setStreamState((prev) => applyStreamEvent(prev, ev));
+      const type = ev.type as string | undefined;
+      const job = ev.job as Record<string, unknown> | undefined;
+      const shouldRefresh =
+        type === 'turn_end' ||
+        type === 'recommendation' ||
+        type === 'approval' ||
+        type === 'awaiting_approval' ||
+        (type === 'job_update' && job?.status === 'awaiting_approval');
+      if (shouldRefresh) scheduleRefreshApprovals();
+    },
+    [scheduleRefreshApprovals],
+  );
 
   const beginTurn = useCallback((userText: string) => {
     setStreamState((prev) => resetTurnState(prev, userText));

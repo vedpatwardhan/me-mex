@@ -1,4 +1,5 @@
 import type { DockItem } from '../components/RecommendationsDock';
+import { formatApprovalReview } from '../utils/approvalPreview';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
@@ -53,12 +54,26 @@ export async function fetchApprovals(projectId: string, threadId: string): Promi
   const res = await fetch(`${API_BASE}/api/agent/approvals?${q}`);
   if (!res.ok) return [];
   const data = await res.json();
-  return (data.items || []).map((item: { id: string; title: string; approval_type: string }) => ({
-    id: item.id,
-    className: 'approval' as const,
-    title: item.title,
-    detail: item.approval_type,
-  }));
+  return (data.items || []).map(
+    (item: {
+      id: string;
+      title: string;
+      approval_type: string;
+      payload?: Record<string, unknown>;
+    }) => {
+      const approvalType = item.approval_type;
+      const payload = item.payload;
+      return {
+        id: item.id,
+        className: 'approval' as const,
+        title: item.title,
+        detail: approvalType,
+        approvalType,
+        payload,
+        reviewMarkdown: formatApprovalReview(approvalType, payload),
+      };
+    },
+  );
 }
 
 export async function fetchNudges(projectId: string): Promise<DockItem[]> {

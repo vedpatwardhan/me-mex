@@ -160,7 +160,7 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
     session.cancel_tts.set()
     session.cancel_turn.clear()
     await room.local_participant.publish_data(
-        json.dumps({"type": "turn_start", "text": text.strip()[:500]}).encode(),
+        json.dumps({"type": "turn_start", "text": text.strip()[:8000]}).encode(),
         reliable=True,
     )
     _ensure_session_events_listener(room, session)

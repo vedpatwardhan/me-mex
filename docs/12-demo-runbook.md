@@ -217,7 +217,7 @@ Pick any **pending approval** from earlier steps, or trigger a small write that 
 
 | # | Action | Expected | ✓ |
 |---|--------|----------|---|
-| H1 | With voice session active, dock shows **Approve** on a pending item | Voice state may show `Awaiting approval` | |
+| H1 | With voice session active, dock **Queue** (top of recommendations dock) shows **Review** / **Approve** on a pending item | Use **Review** to read scope or placement payload before **Approve**; voice state may show `Awaiting approval` | |
 | H2 | Click **Approve** (mic can stay **muted**) | Turn resumes; item clears; graph reflects write | |
 | H3 | Optional: trigger another approval and **Dismiss** | No graph change for dismissed id | |
 

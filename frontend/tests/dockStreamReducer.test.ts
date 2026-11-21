@@ -37,4 +37,55 @@ describe('dockStreamReducer', () => {
     });
     expect(s.items.some((i) => i.id === 'ap-1' && i.className === 'approval')).toBe(true);
   });
+
+  it('maps recommendation approval cards', () => {
+    const s = applyStreamEvent(emptyDockStreamState(), {
+      type: 'recommendation',
+      cards: [
+        {
+          id: 'appr_x',
+          className: 'approval',
+          title: 'Scope proposal',
+          approval_type: 'project_scope',
+          payload: { proposed_introduction: 'My scope' },
+        },
+      ],
+    });
+    const row = s.items.find((i) => i.id === 'appr_x');
+    expect(row?.className).toBe('approval');
+    expect(row?.detail).toBe('project_scope');
+    expect(row?.reviewMarkdown).toContain('My scope');
+  });
+
+  it('upserts approval on job_update awaiting_approval and hides duplicate job', () => {
+    const s = applyStreamEvent(emptyDockStreamState(), {
+      type: 'job_update',
+      job: {
+        job_id: 'job-scope',
+        label: 'Project scope',
+        status: 'awaiting_approval',
+        worker: 'project_scope',
+        approval_id: 'appr_abc',
+      },
+    });
+    expect(s.items.some((i) => i.id === 'appr_abc' && i.className === 'approval')).toBe(true);
+    expect(s.items.some((i) => i.id === 'job-scope' && i.className === 'job')).toBe(false);
+  });
+
+  it('turn_end jobs with approval_id create approval row', () => {
+    const s = applyStreamEvent(emptyDockStreamState(), {
+      type: 'turn_end',
+      reply: 'Done',
+      jobs: [
+        {
+          job_id: 'j1',
+          worker: 'project_scope',
+          status: 'awaiting_approval',
+          approval_id: 'appr_1',
+          label: 'Scope',
+        },
+      ],
+    });
+    expect(s.items.some((i) => i.id === 'appr_1' && i.className === 'approval')).toBe(true);
+  });
 });

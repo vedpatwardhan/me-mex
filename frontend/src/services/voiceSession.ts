@@ -126,7 +126,19 @@ export class VoiceSession {
     room.on(RoomEvent.DataReceived, (payload) => {
       try {
         const msg = JSON.parse(new TextDecoder().decode(payload)) as Record<string, unknown>;
-        const dockTypes = new Set(['dock_event', 'dock_events', 'turn_end', 'turn_start']);
+        const dockTypes = new Set([
+          'dock_event',
+          'dock_events',
+          'turn_end',
+          'turn_start',
+          'recommendation',
+          'job_update',
+          'proactive_reply',
+          'awaiting_approval',
+          'approval',
+          'token',
+          'custom',
+        ]);
         if (dockTypes.has(String(msg.type))) {
           this.onDockEvent?.(msg);
         }

@@ -177,6 +177,23 @@ async def astream_conversation_voice(
                 "source": "dispatch",
             }
 
+    jobs = job_runtime.list_jobs(thread_id)
+    approval_id = None
+    for j in jobs:
+        if j.get("status") != "awaiting_approval":
+            continue
+        aid = j.get("approval_id") or (j.get("output") or {}).get("approval_id")
+        if aid:
+            approval_id = aid
+            break
+    details = {
+        "worker": "conversation_voice",
+        "route": worker_kind,
+        "max_tokens_policy": settings.VOICE_FOREGROUND_MAX_TOKENS,
+    }
+    if approval_id:
+        details["approval_id"] = approval_id
+
     yield {
         "type": "turn_end",
         "reply": reply,
@@ -185,10 +202,6 @@ async def astream_conversation_voice(
         "worker_kind": dispatched_worker,
         "job_id": job_id,
         "source": "conversation",
-        "details": {
-            "worker": "conversation_voice",
-            "route": worker_kind,
-            "max_tokens_policy": settings.VOICE_FOREGROUND_MAX_TOKENS,
-        },
-        "jobs": job_runtime.list_jobs(thread_id),
+        "details": details,
+        "jobs": jobs,
     }
