@@ -165,7 +165,7 @@ flowchart TB
 
 ## Local dev stack (Phase 2)
 
-1. **MongoDB** — `mongodb://localhost:27017` (dev `me-mex`, tests `test-me-mex` or per-xdist `test-me-mex-gw0`).
+1. **MongoDB** — `mongodb://localhost:27017` (dev `me-mex`, tests `test-me-mex` or per-xdist `test-me-mex-gw0`). Full dev wipe (graph, dock, session checkpoints, trace logs → global + genesis only): `./scripts/reset-workspace.sh -y` then restart backend and voice_worker.
 2. **Colab** — [colab/RUNBOOK.md](./colab/RUNBOOK.md) tmux stack (vLLM + gateway + speech + tunnel).
 3. **Backend** — `uv run uvicorn main:app --app-dir backend --reload --port 8000`
 4. **LiveKit server (Docker, local SFU):**
