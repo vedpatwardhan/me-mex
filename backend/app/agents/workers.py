@@ -277,8 +277,19 @@ def scratch_worker_with_context(ctx: ToolContext, text: str, context: dict) -> d
     return scratch_worker(ctx, text)
 
 
-def project_scope_worker(ctx: ToolContext, text: str) -> dict:
+def _looks_like_scope_content(utterance: str) -> bool:
+    t = (utterance or "").strip()
+    if len(t) < 20:
+        return False
+    low = t.lower()
+    if low in {"what's next", "what is next", "whats next"}:
+        return False
+    return not low.startswith(("what ", "how ", "why ", "when ", "where ", "who "))
+
+
+def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = None) -> dict:
     proj = ctx.store.get_project(ctx.project_id)
+    context = context or {}
     if "update_project_scope" in text or "save scope" in text.lower():
         intro = text.split(":", 1)[-1].strip() if ":" in text else text
         project.update_project_scope(ctx, introduction=intro)
@@ -293,4 +304,11 @@ def project_scope_worker(ctx: ToolContext, text: str) -> dict:
             ),
         }
     )
-    return {"reply": reply, "graph_write": False}
+    graph_write = False
+    if context.get("voice_dispatch") and _looks_like_scope_content(text):
+        current = (proj.introduction or "").strip()
+        addition = text.strip()[:2000]
+        merged = f"{current}\n{addition}".strip() if current else addition
+        project.update_project_scope(ctx, introduction=merged)
+        graph_write = True
+    return {"reply": reply, "graph_write": graph_write}

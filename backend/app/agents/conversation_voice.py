@@ -18,6 +18,8 @@ from app.agents.worker_registry import worker_handler
 from app.config import settings
 from app.db import ToolContext, get_store
 from app.llm import get_chains
+from app.prompts import load_prompt
+from app.services.llm_gateway import llm_gateway
 
 _log = logging.getLogger("memex.v2.voice")
 
@@ -36,6 +38,39 @@ def _conversation_prompt_inputs(
         "Respond naturally as voice Conversation only (no tools, no graph writes)."
     )
     return {"text": augmented, "project_scope": scope}
+
+
+def _conversation_openai_messages(inp: dict[str, Any]) -> list[dict[str, Any]]:
+    system = load_prompt("conversation", project_scope=inp.get("project_scope") or "")
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": inp["text"]},
+    ]
+
+
+async def _astream_voice_conversation_reply(
+    inp: dict[str, Any],
+) -> AsyncIterator[str]:
+    """Stream conversation tokens (plane 1 TTS source)."""
+    if settings.CHAT_LLM_MODE != "live":
+        chains = get_chains()
+        reply = chains.conversation.invoke(inp)
+        if not isinstance(reply, str):
+            reply = str(reply)
+        step = max(1, min(32, len(reply) // 4 or 1))
+        for i in range(0, len(reply), step):
+            yield reply[i : i + step]
+        return
+
+    messages = _conversation_openai_messages(inp)
+    async for piece in llm_gateway.stream_chat_completion(
+        messages,
+        max_tokens=settings.VOICE_FOREGROUND_MAX_TOKENS,
+        enable_reasoning=False,
+        caller="Conversation",
+    ):
+        if piece:
+            yield piece
 
 
 async def astream_conversation_voice(
@@ -81,28 +116,13 @@ async def astream_conversation_voice(
         briefing=briefing,
         project_scope=project.introduction or "",
     )
-    chains = get_chains()
-    if worker_kind == "project_scope" and not dispatch:
-        reply = chains.project_scope.invoke(
-            {
-                "payload": json.dumps(
-                    {
-                        "current_scope": project.introduction or "",
-                        "user_message": effective_text,
-                    },
-                    ensure_ascii=False,
-                ),
-            }
-        )
-    else:
-        reply = chains.conversation.invoke(inp)
-    if not isinstance(reply, str):
-        reply = str(reply)
 
-    chunk_size = max(1, min(32, len(reply) // 8 or 1))
-    for i in range(0, len(reply), chunk_size):
-        piece = reply[i : i + chunk_size]
+    tokens: list[str] = []
+    async for piece in _astream_voice_conversation_reply(inp):
+        tokens.append(piece)
         yield {"type": "token", "content": piece, "source": "conversation"}
+
+    reply = "".join(tokens)
 
     append_transcript_turn(thread_id, role="assistant", text=reply)
 

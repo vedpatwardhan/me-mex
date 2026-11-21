@@ -22,6 +22,8 @@ class RecommendationCard(TypedDict, total=False):
 
 class SessionBriefing(TypedDict, total=False):
     project_scope_snippet: str
+    scope_complete: bool
+    voice_phase: str
     active_jobs: list[ActiveJobBrief]
     last_route: str
     pending_approval_count: int

@@ -38,8 +38,7 @@ def needs_voice_dispatch(
     if scope_blocked or worker_kind in VOICE_DIALOGUE_ONLY_WORKERS:
         return False
     if worker_kind == "project_scope":
-        low = text.lower()
-        return "save scope" in low or "update_project_scope" in low
+        return True
     return worker_kind in VOICE_DISPATCH_WORKERS or worker_kind not in VOICE_DIALOGUE_ONLY_WORKERS
 
 

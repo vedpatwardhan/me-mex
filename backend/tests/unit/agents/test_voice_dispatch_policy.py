@@ -17,6 +17,7 @@ def test_needs_voice_dispatch(worker, voice, expected):
 
 
 @pytest.mark.voice_plane
-def test_project_scope_dialogue_only():
-    assert needs_voice_dispatch("project_scope", voice_turn=True, text="what is scope?") is False
+def test_project_scope_always_dispatches_on_voice():
+    assert needs_voice_dispatch("project_scope", voice_turn=True, text="what is scope?") is True
     assert needs_voice_dispatch("project_scope", voice_turn=True, text="save scope: intro") is True
+    assert needs_voice_dispatch("project_scope", voice_turn=False, text="save scope") is False

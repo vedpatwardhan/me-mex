@@ -6,6 +6,7 @@ from typing import Any
 
 from app.agents import job_runtime
 from app.agents.briefing import SessionBriefing
+from app.agents.context_preprocessor import project_scope_complete
 from app.agents.session_events import publish_session_event
 from app.agents.workflow_agent import run_workflow_agent
 from app.db import ToolContext, get_store
@@ -93,8 +94,11 @@ def build_session_briefing(*, project_id: str, thread_id: str) -> SessionBriefin
     active_jobs = list(merged.values())
 
     scope = (project.introduction or "")[:500]
+    complete = project_scope_complete(project.introduction)
     briefing: SessionBriefing = {
         "project_scope_snippet": scope,
+        "scope_complete": complete,
+        "voice_phase": "research" if complete else "p1_scope_onboarding",
         "active_jobs": active_jobs,
         "last_route": str(ckpt.get("last_route") or ""),
         "pending_approval_count": pending_count,

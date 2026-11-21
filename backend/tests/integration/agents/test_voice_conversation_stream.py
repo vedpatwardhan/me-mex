@@ -17,6 +17,10 @@ def test_voice_conversation_stream(client, project, voice_context_json, mock_vll
     types = {c.get("type") for c in chunks}
     assert "token" in types
     assert "turn_end" in types
+    tokens = [c for c in chunks if c.get("type") == "token"]
+    assert len(tokens) >= 1
     end = next(c for c in chunks if c.get("type") == "turn_end")
     assert end.get("source") == "conversation"
     assert end.get("reply")
+    joined = "".join(c.get("content") or "" for c in tokens)
+    assert joined == end.get("reply")
