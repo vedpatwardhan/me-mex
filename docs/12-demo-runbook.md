@@ -139,10 +139,10 @@ Use a **fresh project** name like `Demo — <your topic>` so the graph stays eas
 | B1 | **Start voice session** | Status moves past `Connecting…`; LiveKit connected | |
 | B2 | **Unmute mic** (new project has no scope) | Hint: “Unmute to set project scope (P1)” may show; dock streams assistant | |
 | B3 | Say what the project is about in **your** words (field, goals, source types)—2–3 short answers if the agent asks follow-ups | Conversation only; **no** new paper `ROOT`s yet | |
-| B4 | Confirm when agent summarizes scope | Scope text appears in dock; Genesis/description updates after approve if prompted | |
+| B4 | Confirm when agent summarizes scope | Scope **proposal** stays in dock until you **Approve**; Mongo/Genesis update only after approve (chit-chat does not auto-save scope) | |
 | B5 | **Mute mic** while assistant finishes / TTS plays | Session **stays** connected (`mic off (session active)`); hear TTS without re-connecting | |
 
-**Logs:** `voice_worker.log` → `STT utterance`, `voice_turn reply_len=…` (no `voice_turn failed`); on **long replies** expect several `TTS playback start` lines per turn when `VOICE_TTS_PIPELINED=true` (first sentence may play before `turn_end`); `backend.log` → `POST /api/voice/conversation/stream` with streaming conversation tokens and optional `dispatch job_id=…` (including `project_scope` jobs on P1); proactive TTS may log after job `done` / `awaiting_approval` — no trailing ASGI `ERROR`.
+**Logs:** `voice_worker.log` → `STT utterance`, `voice_turn reply_len=…` (no `voice_turn failed`); on **long replies** expect several `TTS playback start` lines per turn when `VOICE_TTS_PIPELINED=true` (first sentence may play before `turn_end`); `backend.log` → `POST /api/voice/conversation/stream` with streaming conversation tokens and optional `dispatch job_id=…` (including `project_scope` jobs on P1); proactive TTS mainly on `awaiting_approval` dock nudges (not “Finished {STT label}” on scope) — no trailing ASGI `ERROR`.
 
 **Workflow:** [06 P1](./06-workflows.md#p1--first-voice-project-scope-before-research)
 

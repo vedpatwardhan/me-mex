@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.agents.voice_dialogue import is_dialogue_only_utterance
+
 VOICE_DIALOGUE_ONLY_WORKERS = frozenset({"conversation", "scratch"})
 
 VOICE_DISPATCH_WORKERS = frozenset(
@@ -38,7 +40,12 @@ def needs_voice_dispatch(
     if scope_blocked or worker_kind in VOICE_DIALOGUE_ONLY_WORKERS:
         return False
     if worker_kind == "project_scope":
-        return True
+        low = text.lower()
+        if "save scope" in low or "update_project_scope" in low:
+            return True
+        if is_dialogue_only_utterance(text):
+            return False
+        return worker_kind == "project_scope"
     return worker_kind in VOICE_DISPATCH_WORKERS or worker_kind not in VOICE_DIALOGUE_ONLY_WORKERS
 
 
@@ -60,6 +67,14 @@ def resolve_voice_route(
     effective = apply_custom_fields_to_text(text, context_json or {})
     worker = route_intent(effective, context_json or {}, project)
     worker = prioritize_project_scope_until_complete(project.introduction, worker, context_json)
+    if (
+        not (project.introduction or "").strip()
+        and worker in VOICE_DIALOGUE_ONLY_WORKERS
+        and is_voice_turn(context_json)
+        and not is_dialogue_only_utterance(effective)
+        and len(effective.strip()) >= 30
+    ):
+        worker = "project_scope"
     scope_blocked = block_graph_writes_without_scope(project.introduction, worker)
     if scope_blocked:
         worker = "project_scope"

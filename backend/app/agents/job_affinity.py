@@ -1,0 +1,128 @@
+"""Resolve whether a worker dispatch creates or updates an open job (04 §12.4)."""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from app.agents.context_preprocessor import project_scope_complete
+
+_OPEN_STATUSES = frozenset({"running", "paused", "awaiting_approval"})
+
+
+@dataclass
+class JobDispatchPlan:
+    action: Literal["create", "update", "skip"]
+    job_id: str | None = None
+    approval_id: str | None = None
+    affinity_key: str = ""
+    reason: str = ""
+
+
+def affinity_key_for_worker(
+    worker_kind: str,
+    *,
+    project_id: str,
+    context_json: dict[str, Any],
+    introduction: str = "",
+) -> str:
+    fields = context_json.get("custom_fields") or {}
+    if worker_kind == "project_scope":
+        return f"scope:{project_id}"
+    if worker_kind == "intradoc":
+        root = fields.get("root_id") or fields.get("staging_key") or ""
+        return f"intradoc:{root or project_id}"
+    if worker_kind == "gist":
+        root = fields.get("root_id") or ""
+        arxiv = fields.get("arxiv_id") or fields.get("url") or ""
+        token = root or arxiv or project_id
+        if arxiv and not root:
+            token = hashlib.sha256(str(arxiv).encode()).hexdigest()[:12]
+        return f"gist:{token}"
+    if worker_kind in ("link", "reorg", "retrieval"):
+        root = fields.get("root_id") or project_id
+        return f"{worker_kind}:{root}"
+    return f"{worker_kind}:{project_id}"
+
+
+def _open_job_for_affinity(jobs: list[dict[str, Any]], affinity_key: str) -> dict[str, Any] | None:
+    for job in reversed(jobs):
+        if job.get("affinity_key") != affinity_key:
+            continue
+        if job.get("status") in _OPEN_STATUSES:
+            return job
+    return None
+
+
+def _approval_for_type(pending: list, approval_type: str) -> Any | None:
+    for item in pending:
+        if item.approval_type == approval_type and item.status == "pending":
+            return item
+    return None
+
+
+def resolve_job_dispatch(
+    *,
+    thread_id: str,
+    project_id: str,
+    worker_kind: str,
+    effective_text: str,
+    context_json: dict[str, Any],
+    jobs: list[dict[str, Any]],
+    pending_approvals: list,
+    introduction: str = "",
+    dispatch_allowed: bool = True,
+) -> JobDispatchPlan:
+    if not dispatch_allowed or worker_kind in ("conversation", "scratch"):
+        return JobDispatchPlan(action="skip", reason="dialogue_only")
+
+    affinity_key = affinity_key_for_worker(
+        worker_kind,
+        project_id=project_id,
+        context_json=context_json,
+        introduction=introduction,
+    )
+
+    open_job = _open_job_for_affinity(jobs, affinity_key)
+    if open_job:
+        return JobDispatchPlan(
+            action="update",
+            job_id=open_job.get("job_id"),
+            approval_id=open_job.get("recommendation_id") or open_job.get("approval_id"),
+            affinity_key=affinity_key,
+            reason="open_job_match",
+        )
+
+    approval_type_map = {
+        "project_scope": "project_scope",
+        "intradoc": "intra_doc_staging",
+        "link": "placement",
+        "reorg": "reorg",
+        "gist": "gist_root",
+    }
+    atype = approval_type_map.get(worker_kind)
+    if atype:
+        pending = _approval_for_type(pending_approvals, atype)
+        if pending:
+            linked = _open_job_for_affinity(jobs, affinity_key)
+            return JobDispatchPlan(
+                action="update",
+                job_id=linked.get("job_id") if linked else None,
+                approval_id=pending.id,
+                affinity_key=affinity_key,
+                reason="pending_approval_match",
+            )
+
+    if worker_kind == "project_scope" and not project_scope_complete(introduction):
+        return JobDispatchPlan(
+            action="create",
+            affinity_key=affinity_key,
+            reason="new_scope_onboarding",
+        )
+
+    return JobDispatchPlan(
+        action="create",
+        affinity_key=affinity_key,
+        reason="new_task",
+    )

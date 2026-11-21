@@ -245,6 +245,25 @@ class Store:
             PendingApproval(**d) for d in self._db.pending_approvals.find(q).sort("created_at", 1)
         ]
 
+    def update_pending_approval(
+        self,
+        approval_id: str,
+        *,
+        title: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        sets: dict[str, Any] = {}
+        if title is not None:
+            sets["title"] = title
+        if payload is not None:
+            sets["payload"] = payload
+        if not sets:
+            return
+        self._db.pending_approvals.update_one(
+            {"_id": approval_id, "status": "pending"},
+            {"$set": sets},
+        )
+
     def resolve_approval(self, approval_id: str, action: str) -> PendingApproval:
         doc = self._db.pending_approvals.find_one({"_id": approval_id})
         if not doc:

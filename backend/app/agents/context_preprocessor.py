@@ -32,15 +32,24 @@ def block_graph_writes_without_scope(introduction: str | None, worker: str) -> b
     return not project_scope_complete(introduction)
 
 
+_DIALOGUE_WORKERS = frozenset({"conversation", "scratch"})
+
+
 def prioritize_project_scope_until_complete(
     introduction: str | None,
     worker: str,
     context_json: dict[str, Any] | None,
 ) -> str:
-    """Force P1 ProjectScope routing until project introduction is saved (04 §7, 06 P1)."""
+    """Force P1 scope gate for graph writes; keep supervisor dialogue routes (04 §7, 06 P1)."""
     if project_scope_complete(introduction):
         return worker
     fields = (context_json or {}).get("custom_fields") or {}
     if fields.get("resume_job_id"):
         return worker
-    return "project_scope"
+    if fields.get("force_project_scope"):
+        return "project_scope"
+    if worker in _DIALOGUE_WORKERS:
+        return worker
+    if block_graph_writes_without_scope(introduction, worker):
+        return "project_scope"
+    return worker

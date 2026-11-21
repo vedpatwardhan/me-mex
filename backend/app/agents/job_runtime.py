@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from app.agents.job_affinity import JobDispatchPlan
 from app.agents.jobs import new_job_id
 from app.db import ToolContext
 
@@ -71,6 +72,7 @@ def _finish_job(job_id: str, output: dict[str, Any], *, project_id: str | None =
         job["progress"] = output.get("reply", "")
         if output.get("approval_id"):
             job["recommendation_id"] = output.get("approval_id")
+            job["approval_id"] = output.get("approval_id")
         job_snapshot = dict(job)
         pid = project_id or job.get("project_id")
         tid = job.get("thread_id")
@@ -96,7 +98,7 @@ def _finish_job(job_id: str, output: dict[str, Any], *, project_id: str | None =
         )
 
 
-def start_background_worker(
+def dispatch_background_worker(
     *,
     thread_id: str,
     worker_kind: str,
@@ -105,22 +107,42 @@ def start_background_worker(
     context: dict,
     worker_fn: Callable[[ToolContext, str, dict], dict],
     project_id: str | None = None,
-) -> dict[str, Any]:
-    job_id = new_job_id()
+    plan: JobDispatchPlan | None = None,
+) -> dict[str, Any] | None:
+    if plan is not None and plan.action == "skip":
+        return None
+
     pid = project_id or ctx.project_id
-    record: dict[str, Any] = {
-        "job_id": job_id,
-        "kind": worker_kind,
-        "label": (text or worker_kind)[:80],
-        "status": "running",
-        "worker": worker_kind,
-        "thread_id": thread_id,
-        "project_id": pid,
-        "progress": "running",
-    }
-    with _registry_lock:
-        _jobs[job_id] = record
-        _by_thread.setdefault(thread_id, []).append(job_id)
+    affinity_key = (plan.affinity_key if plan else "") or f"{worker_kind}:{pid}"
+    dispatch_ctx = dict(context)
+    if plan and plan.approval_id:
+        dispatch_ctx["approval_id"] = plan.approval_id
+    if plan and plan.action == "update":
+        dispatch_ctx["job_update"] = True
+
+    job_id: str
+    if plan and plan.action == "update" and plan.job_id:
+        job_id = plan.job_id
+        with _registry_lock:
+            job = _jobs.get(job_id)
+            if job:
+                job["status"] = "running"
+                job["label"] = (text or worker_kind)[:80]
+                job["affinity_key"] = affinity_key
+                if plan.approval_id:
+                    job["approval_id"] = plan.approval_id
+                record = dict(job)
+            else:
+                job_id = new_job_id()
+                record = _new_job_record(job_id, worker_kind, thread_id, pid, text, affinity_key)
+                _jobs[job_id] = record
+                _by_thread.setdefault(thread_id, []).append(job_id)
+    else:
+        job_id = new_job_id()
+        record = _new_job_record(job_id, worker_kind, thread_id, pid, text, affinity_key)
+        with _registry_lock:
+            _jobs[job_id] = record
+            _by_thread.setdefault(thread_id, []).append(job_id)
 
     def _run() -> None:
         sleep_s = _sleep_s()
@@ -131,7 +153,7 @@ def start_background_worker(
         if st == "cancelled":
             return
         try:
-            out = worker_fn(ctx, text, context)
+            out = worker_fn(ctx, text, dispatch_ctx)
             _finish_job(job_id, out, project_id=pid)
         except Exception as exc:  # noqa: BLE001
             _finish_job(
@@ -149,6 +171,54 @@ def start_background_worker(
     )
     threading.Thread(target=_run, daemon=True).start()
     return dict(record)
+
+
+def _new_job_record(
+    job_id: str,
+    worker_kind: str,
+    thread_id: str,
+    project_id: str,
+    text: str,
+    affinity_key: str,
+) -> dict[str, Any]:
+    return {
+        "job_id": job_id,
+        "kind": worker_kind,
+        "label": (text or worker_kind)[:80],
+        "status": "running",
+        "worker": worker_kind,
+        "thread_id": thread_id,
+        "project_id": project_id,
+        "progress": "running",
+        "affinity_key": affinity_key,
+    }
+
+
+def start_background_worker(
+    *,
+    thread_id: str,
+    worker_kind: str,
+    ctx: ToolContext,
+    text: str,
+    context: dict,
+    worker_fn: Callable[[ToolContext, str, dict], dict],
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    plan = JobDispatchPlan(
+        action="create", affinity_key=f"{worker_kind}:{project_id or ctx.project_id}"
+    )
+    result = dispatch_background_worker(
+        thread_id=thread_id,
+        worker_kind=worker_kind,
+        ctx=ctx,
+        text=text,
+        context=context,
+        worker_fn=worker_fn,
+        project_id=project_id,
+        plan=plan,
+    )
+    assert result is not None
+    return result
 
 
 def start_background_intradoc(

@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.agents import job_runtime
+from app.agents.job_affinity import resolve_job_dispatch
 from app.agents.session_plane import append_transcript_turn, build_session_briefing
 from app.agents.voice_dispatch import (
     is_voice_turn,
@@ -92,7 +93,11 @@ async def astream_conversation_voice(
     store = get_store()
     project = store.get_project(project_id)
 
-    briefing = build_session_briefing(project_id=project_id, thread_id=thread_id)
+    briefing = build_session_briefing(
+        project_id=project_id,
+        thread_id=thread_id,
+        user_text=text,
+    )
 
     worker_kind, effective_text, scope_blocked = resolve_voice_route(
         store=store,
@@ -128,12 +133,23 @@ async def astream_conversation_voice(
 
     job_id: str | None = None
     dispatched_worker: str | None = None
-    if dispatch:
+    plan = resolve_job_dispatch(
+        thread_id=thread_id,
+        project_id=project_id,
+        worker_kind=worker_kind,
+        effective_text=effective_text,
+        context_json=ctx_json,
+        jobs=job_runtime.list_jobs(thread_id),
+        pending_approvals=store.list_pending(project_id, thread_id),
+        introduction=project.introduction or "",
+        dispatch_allowed=dispatch,
+    )
+    if dispatch and plan.action != "skip":
         fn = worker_handler(worker_kind)
         if fn:
             ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
             ctx_json_dispatch = {**ctx_json, "voice_dispatch": True}
-            job = job_runtime.start_background_worker(
+            job = job_runtime.dispatch_background_worker(
                 thread_id=thread_id,
                 worker_kind=worker_kind,
                 ctx=ctx,
@@ -141,9 +157,13 @@ async def astream_conversation_voice(
                 context=ctx_json_dispatch,
                 worker_fn=fn,
                 project_id=project_id,
+                plan=plan,
             )
-            job_id = job.get("job_id")
-            dispatched_worker = worker_kind
+            if not job:
+                dispatch = False
+            else:
+                job_id = job.get("job_id")
+                dispatched_worker = worker_kind
             _log.info(
                 "voice_dispatch job_id=%s worker=%s thread_id=%s project_id=%s",
                 job_id,

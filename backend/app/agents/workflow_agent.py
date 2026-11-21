@@ -41,13 +41,14 @@ def run_workflow_agent(
             }
         )
 
-    if status == "awaiting_approval":
-        proactive = (
-            f"Your {worker} task is ready for review in the dock."
-            if len(reply) < 20
-            else reply[: settings.WORKFLOW_AGENT_MAX_TOKENS]
-        )
-    elif status == "done":
+    if status == "awaiting_approval" and approval_id:
+        if worker == "project_scope":
+            proactive = "There's a scope update to review in the dock."
+        elif len(reply) >= 20:
+            proactive = reply[: settings.WORKFLOW_AGENT_MAX_TOKENS]
+        else:
+            proactive = f"Your {worker} task is ready for review in the dock."
+    elif status == "done" and worker != "project_scope":
         proactive = f"Finished {label or worker}." if label else f"{worker} is done."
     else:
         proactive = ""

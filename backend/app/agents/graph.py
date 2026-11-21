@@ -111,7 +111,7 @@ def _worker_node(state: AgentState) -> AgentState:
     elif w == "retrieval":
         out = workers.retrieval_worker(ctx, text, context)
     elif w == "project_scope":
-        out = workers.project_scope_worker(ctx, text)
+        out = workers.project_scope_worker(ctx, text, context=context)
     elif w == "scratch":
         out = workers.scratch_worker_with_context(ctx, text, context)
     else:
@@ -247,7 +247,7 @@ def resume_approval(
     context_json: dict | None = None,
 ) -> dict:
     from app.services.hitl_traces import append_hitl_label_trace, log_hitl_action
-    from app.tools import gist, link, reorg, staging
+    from app.tools import gist, link, project, reorg, staging
 
     ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
     item = store.resolve_approval(approval_id, action)
@@ -288,6 +288,10 @@ def resume_approval(
             gist=payload.get("gist", ""),
         )
         return {"status": "approved", "approval_id": approval_id}
+    if item.approval_type == "project_scope":
+        intro = payload.get("proposed_introduction") or payload.get("introduction") or ""
+        project.update_project_scope(ctx, introduction=str(intro))
+        return {"status": "approved", "approval_id": approval_id, "graph_write": True}
     return {"status": "approved", "approval_id": approval_id}
 
 

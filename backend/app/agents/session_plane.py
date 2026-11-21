@@ -7,7 +7,9 @@ from typing import Any
 from app.agents import job_runtime
 from app.agents.briefing import SessionBriefing
 from app.agents.context_preprocessor import project_scope_complete
+from app.agents.scope_proposal import load_scope_proposal
 from app.agents.session_events import publish_session_event
+from app.agents.voice_dialogue import user_asked_for_status
 from app.agents.workflow_agent import run_workflow_agent
 from app.db import ToolContext, get_store
 from app.services.checkpoints import JsonCheckpointStore
@@ -57,7 +59,15 @@ def observer_ingest_job(
         {"type": "job_update", "job": job, "source": "observer"},
     )
     proactive = wa.get("proactive_script") or ""
-    if proactive and job.get("status") in ("done", "awaiting_approval"):
+    worker = job.get("worker") or job.get("kind") or ""
+    should_proactive = bool(proactive) and (
+        (
+            job.get("status") == "awaiting_approval"
+            and (worker_output.get("approval_id") or job.get("approval_id"))
+        )
+        or (job.get("status") == "done" and worker != "project_scope")
+    )
+    if should_proactive:
         publish_session_event(
             thread_id,
             {
@@ -76,7 +86,12 @@ def observer_ingest_job(
         )
 
 
-def build_session_briefing(*, project_id: str, thread_id: str) -> SessionBriefing:
+def build_session_briefing(
+    *,
+    project_id: str,
+    thread_id: str,
+    user_text: str = "",
+) -> SessionBriefing:
     store = get_store()
     project = store.get_project(project_id)
     ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
@@ -95,14 +110,26 @@ def build_session_briefing(*, project_id: str, thread_id: str) -> SessionBriefin
 
     scope = (project.introduction or "")[:500]
     complete = project_scope_complete(project.introduction)
+    draft = load_scope_proposal(thread_id)
+    proposal_preview = str(draft.get("proposed_introduction") or "")[:400]
+    show_worker_snippet = user_asked_for_status(user_text) or complete
+    worker_snippet = ""
+    if show_worker_snippet:
+        worker_snippet = str(ckpt.get("last_worker_result_snippet") or "")[:400]
+
+    affinity_keys = sorted(
+        {str(j.get("affinity_key")) for j in active_jobs if j.get("affinity_key")}
+    )
     briefing: SessionBriefing = {
         "project_scope_snippet": scope,
         "scope_complete": complete,
         "voice_phase": "research" if complete else "p1_scope_onboarding",
         "active_jobs": active_jobs,
+        "active_job_affinity": affinity_keys[-3:],
         "last_route": str(ckpt.get("last_route") or ""),
         "pending_approval_count": pending_count,
-        "worker_result_snippet": str(ckpt.get("last_worker_result_snippet") or "")[:400],
+        "scope_proposal_preview": proposal_preview if not complete else "",
+        "worker_result_snippet": worker_snippet,
         "recommendation_cards": list(ckpt.get("recommendation_cards") or []),
         "proactive_script": str(ckpt.get("proactive_script") or ""),
     }

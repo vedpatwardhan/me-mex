@@ -25,8 +25,10 @@ class SessionBriefing(TypedDict, total=False):
     scope_complete: bool
     voice_phase: str
     active_jobs: list[ActiveJobBrief]
+    active_job_affinity: list[str]
     last_route: str
     pending_approval_count: int
+    scope_proposal_preview: str
     worker_result_snippet: str
     recommendation_cards: list[RecommendationCard]
     proactive_script: str

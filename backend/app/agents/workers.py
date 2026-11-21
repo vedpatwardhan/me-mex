@@ -277,38 +277,63 @@ def scratch_worker_with_context(ctx: ToolContext, text: str, context: dict) -> d
     return scratch_worker(ctx, text)
 
 
-def _looks_like_scope_content(utterance: str) -> bool:
-    t = (utterance or "").strip()
-    if len(t) < 20:
-        return False
-    low = t.lower()
-    if low in {"what's next", "what is next", "whats next"}:
-        return False
-    return not low.startswith(("what ", "how ", "why ", "when ", "where ", "who "))
-
-
 def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = None) -> dict:
+    from app.agents.scope_proposal import (
+        merge_user_turn_into_proposal,
+        upsert_project_scope_approval,
+    )
+
     proj = ctx.store.get_project(ctx.project_id)
     context = context or {}
+    approval_id = context.get("approval_id")
+
     if "update_project_scope" in text or "save scope" in text.lower():
         intro = text.split(":", 1)[-1].strip() if ":" in text else text
-        project.update_project_scope(ctx, introduction=intro)
-        return {"reply": "Scope saved.", "graph_write": True}
+        fields = context.get("custom_fields") or {}
+        if fields.get("force_scope_commit") and not context.get("voice_dispatch"):
+            project.update_project_scope(ctx, introduction=intro)
+            return {"reply": "Scope saved.", "graph_write": True}
+        aid = upsert_project_scope_approval(
+            ctx,
+            proposed_introduction=intro,
+            approval_id=str(approval_id) if approval_id else None,
+            title="Review project scope (save requested)",
+        )
+        return {
+            "reply": "Scope proposal is in the dock—approve when ready.",
+            "graph_write": False,
+            "approval_id": aid,
+            "proposal_preview": intro[:400],
+        }
+
+    committed = (proj.introduction or "").strip()
+    draft = merge_user_turn_into_proposal(ctx.thread_id, text)
     reply = get_chains().project_scope.invoke(
         {
             "payload": json.dumps(
                 {
-                    "current_scope": proj.introduction or "",
+                    "current_scope": committed,
                     "user_message": text,
-                }
+                    "draft_proposal": draft.get("proposed_introduction", ""),
+                },
+                ensure_ascii=False,
             ),
         }
     )
-    graph_write = False
-    if context.get("voice_dispatch") and _looks_like_scope_content(text):
-        current = (proj.introduction or "").strip()
-        addition = text.strip()[:2000]
-        merged = f"{current}\n{addition}".strip() if current else addition
-        project.update_project_scope(ctx, introduction=merged)
-        graph_write = True
-    return {"reply": reply, "graph_write": graph_write}
+    proposed = draft.get("proposed_introduction") or text.strip()
+    if not isinstance(reply, str):
+        reply = str(reply)
+    summary = (reply or "Scope draft updated.")[:200]
+    aid = upsert_project_scope_approval(
+        ctx,
+        proposed_introduction=proposed,
+        approval_id=str(approval_id) if approval_id else None,
+        title="Review project scope",
+    )
+    return {
+        "reply": summary,
+        "graph_write": False,
+        "approval_id": aid,
+        "proposal_preview": proposed[:400],
+        "progress": summary,
+    }

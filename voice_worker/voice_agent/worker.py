@@ -251,6 +251,9 @@ async def _maybe_proactive_tts(
 ) -> None:
     if not text.strip() or session.muted or not speech_enabled():
         return
+    stripped = text.strip()
+    if stripped.startswith("Finished ") and len(stripped) < 120:
+        return
     if job_id in session.proactive_spoken:
         return
     session.proactive_spoken.add(job_id)

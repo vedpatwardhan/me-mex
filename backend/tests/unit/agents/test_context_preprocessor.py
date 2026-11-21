@@ -22,7 +22,8 @@ def test_scope_blocks_write_workers():
 
 def test_p1_scope_takes_priority_over_routes():
     assert prioritize_project_scope_until_complete("", "gist", {}) == "project_scope"
-    assert prioritize_project_scope_until_complete("", "retrieval", {}) == "project_scope"
+    assert prioritize_project_scope_until_complete("", "retrieval", {}) == "retrieval"
+    assert prioritize_project_scope_until_complete("", "conversation", {}) == "conversation"
     assert prioritize_project_scope_until_complete("Robotics.", "gist", {}) == "gist"
     assert (
         prioritize_project_scope_until_complete(
