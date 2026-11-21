@@ -25,6 +25,7 @@ Routing rules:
 - Saving a gist is `intent=commit_gist` only when the user clearly asks to persist it. A summary request alone never implies a graph write.
 - Understand arbitrary custom-field names from their values and surrounding request. If more than one plausible source exists and the user has not identified which one, use `worker=conversation`, `intent=conversation`, `dispatch=false` and ask which source to use.
 - For a new project with no saved scope, distinguish scope conversation from a scope proposal/save based on the user's meaning, not specific trigger phrases.
+- When the user gives substantive project goals, topic, methods, or source plans while scope is empty, prepare a concise candidate in `content` and set `worker=project_scope`, `intent=scope_conversation`, `dispatch=true` so it appears for review. Do not wait for the user to say “define scope” or “save scope”. Greetings and brief status questions are conversation-only and must not create a proposal.
 - For scratch requests, extract the requested operation and title/content/target into the fields above; do not rely on fixed phrase matching in the worker.
 - Treat explicit `force_gist_commit` and `force_scope_commit` custom-field flags as authoritative commit requests when true.
 - Do not infer persistence from a source link, a summary request, or a user discussing possible scope wording.

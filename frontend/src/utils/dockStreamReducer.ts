@@ -14,6 +14,26 @@ export const emptyDockStreamState = (): DockStreamState => ({
   items: [],
 });
 
+export function flattenDockEvents(ev: Record<string, unknown>): Record<string, unknown>[] {
+  if (ev.type === 'dock_event') {
+    const inner = ev.event as Record<string, unknown> | undefined;
+    return inner ? flattenDockEvents(inner) : [];
+  }
+  if (ev.type === 'dock_events' && Array.isArray(ev.events)) {
+    return (ev.events as Record<string, unknown>[]).flatMap(flattenDockEvents);
+  }
+  return [ev];
+}
+
+export function isScopeCommittedEvent(ev: Record<string, unknown>): boolean {
+  const details = ev.details as Record<string, unknown> | undefined;
+  return (
+    ev.type === 'turn_end' &&
+    (details?.scope_committed === true ||
+      (details?.status === 'approved' && details?.approval_type === 'project_scope'))
+  );
+}
+
 function finalizeItems(items: DockItem[]): DockItem[] {
   return sortQueueItems(dedupeApprovalJobs(items));
 }

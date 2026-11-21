@@ -12,6 +12,8 @@ import { reconcileQueueItems } from '../utils/dockQueueSort';
 import {
   applyStreamEvent,
   emptyDockStreamState,
+  flattenDockEvents,
+  isScopeCommittedEvent,
   resetTurnState,
 } from '../utils/dockStreamReducer';
 
@@ -50,20 +52,19 @@ export function useDockState(
 
   const applyStreamEventToState = useCallback(
     (ev: Record<string, unknown>) => {
-      setStreamState((prev) => applyStreamEvent(prev, ev));
-      const type = ev.type as string | undefined;
-      const job = ev.job as Record<string, unknown> | undefined;
-      const details = ev.details as Record<string, unknown> | undefined;
-      if (type === 'turn_end' && details?.scope_committed === true) {
-        onScopeCommitted?.();
+      for (const event of flattenDockEvents(ev)) {
+        setStreamState((prev) => applyStreamEvent(prev, event));
+        const type = event.type as string | undefined;
+        const job = event.job as Record<string, unknown> | undefined;
+        if (isScopeCommittedEvent(event)) onScopeCommitted?.();
+        const shouldRefresh =
+          type === 'turn_end' ||
+          type === 'recommendation' ||
+          type === 'approval' ||
+          type === 'awaiting_approval' ||
+          (type === 'job_update' && job?.status === 'awaiting_approval');
+        if (shouldRefresh) scheduleRefreshApprovals();
       }
-      const shouldRefresh =
-        type === 'turn_end' ||
-        type === 'recommendation' ||
-        type === 'approval' ||
-        type === 'awaiting_approval' ||
-        (type === 'job_update' && job?.status === 'awaiting_approval');
-      if (shouldRefresh) scheduleRefreshApprovals();
     },
     [scheduleRefreshApprovals, onScopeCommitted],
   );

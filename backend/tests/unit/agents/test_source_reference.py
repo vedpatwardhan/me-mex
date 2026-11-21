@@ -113,6 +113,45 @@ def test_supervisor_source_selection_cannot_invent_a_url(project):
     assert "does not match" in (decision.source_error or "")
 
 
+def test_substantive_scope_draft_dispatches_even_if_supervisor_misses_dispatch_bit(empty_project):
+    base = get_chains()
+    decision = WorkerRoute(
+        worker="project_scope",
+        intent="scope_conversation",
+        dispatch=False,
+        content=(
+            "The project studies recursive self-improvement in AI, including autonomous "
+            "changes to algorithms, infrastructure, and research workflows."
+        ),
+    )
+    set_chains_override(replace(base, supervisor=RunnableLambda(lambda _inputs: decision)))
+
+    resolved = workers.route_intent(
+        "My project is about recursive self-improvement in AI and research methods.",
+        {},
+        empty_project,
+    )
+
+    assert resolved.worker == "project_scope"
+    assert resolved.dispatch is True
+
+
+def test_short_scope_chit_chat_does_not_dispatch_approval_job(empty_project):
+    base = get_chains()
+    decision = WorkerRoute(
+        worker="project_scope",
+        intent="scope_conversation",
+        dispatch=False,
+        content="the",
+    )
+    set_chains_override(replace(base, supervisor=RunnableLambda(lambda _inputs: decision)))
+
+    resolved = workers.route_intent("the", {}, empty_project)
+
+    assert resolved.worker == "project_scope"
+    assert resolved.dispatch is False
+
+
 def test_gist_worker_fetches_resolved_source_and_summarizes_extracted_text(
     store, project, monkeypatch
 ):

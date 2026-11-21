@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   applyStreamEvent,
   emptyDockStreamState,
+  flattenDockEvents,
+  isScopeCommittedEvent,
 } from '../src/utils/dockStreamReducer';
 
 describe('dockStreamReducer', () => {
@@ -138,5 +140,20 @@ describe('dockStreamReducer', () => {
     });
     expect(resolved.items).toEqual([]);
     expect(resolved.latestReply).toBe('Thanks for approving the project scope.');
+  });
+
+  it('recognizes scope commits inside LiveKit dock event envelopes', () => {
+    const events = flattenDockEvents({
+      type: 'dock_event',
+      event: {
+        type: 'dock_event',
+        event: {
+          type: 'turn_end',
+          details: { status: 'approved', approval_type: 'project_scope' },
+        },
+      },
+    });
+    expect(events).toHaveLength(1);
+    expect(isScopeCommittedEvent(events[0])).toBe(true);
   });
 });

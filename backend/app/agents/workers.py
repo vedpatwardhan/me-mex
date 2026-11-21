@@ -61,6 +61,17 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
             dispatch=worker not in {"conversation"},
         )
 
+    # A substantive scope proposal is itself the input to the approval workflow.
+    # Treat a generated proposal as dispatchable even if the Supervisor forgets
+    # to set the dispatch bit; short chit-chat without a candidate stays in Convo.
+    scope_candidate = str(decision.content or "").strip()
+    if (
+        decision.worker == "project_scope"
+        and decision.intent == "scope_conversation"
+        and len(scope_candidate) >= 100
+    ):
+        decision = decision.model_copy(update={"dispatch": True})
+
     needs_source = decision.intent in {"source_summary", "source_analysis"} or (
         decision.intent == "commit_gist" and not (decision.content or fields.get("gist"))
     )
