@@ -29,6 +29,18 @@ describe('dockStreamReducer', () => {
     expect(s.latestReply).toBe('');
   });
 
+  it('keeps proactive approval notices out of the latest transcript', () => {
+    const s0 = applyStreamEvent(emptyDockStreamState(), {
+      type: 'token',
+      content: 'Let me know more about the project.',
+    });
+    const s1 = applyStreamEvent(s0, {
+      type: 'proactive_reply',
+      text: "There's a scope update to review in the dock.",
+    });
+    expect(s1.latestReply).toBe('Let me know more about the project.');
+  });
+
   it('adds approval on turn_end', () => {
     const s = applyStreamEvent(emptyDockStreamState(), {
       type: 'turn_end',

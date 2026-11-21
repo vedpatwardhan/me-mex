@@ -72,12 +72,26 @@ export const RecommendationsDock: React.FC<Props> = ({
             <h2 className="text-sm font-semibold tracking-tight text-slate-100">
               Recommendations
             </h2>
-            <p className="text-[11px] text-slate-500">Queue, last turn, committed scope</p>
+            <p className="text-[11px] text-slate-500">Project scope, queue, latest turn</p>
           </div>
         </div>
       </header>
 
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
+        {projectScope ? (
+          <section className="glass-panel rounded-xl p-3 pb-4">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+              Committed project scope
+            </div>
+            <p className="text-sm leading-relaxed text-slate-300">{projectScope}</p>
+          </section>
+        ) : (
+          <section className="rounded-xl border border-dashed border-slate-700/80 px-3 py-3 text-xs text-slate-500">
+            No committed scope yet. Approve a scope proposal in the queue to commit.
+          </section>
+        )}
+
         <section className="flex flex-col gap-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
             Queue ({items.length})
@@ -179,19 +193,6 @@ export const RecommendationsDock: React.FC<Props> = ({
           </div>
         </section>
 
-        {projectScope ? (
-          <section className="glass-panel rounded-xl p-3 pb-4">
-            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-              Committed project scope
-            </div>
-            <p className="text-sm leading-relaxed text-slate-300">{projectScope}</p>
-          </section>
-        ) : (
-          <section className="rounded-xl border border-dashed border-slate-700/80 px-3 py-3 text-xs text-slate-500">
-            No committed scope yet. Approve a scope proposal in the queue to commit.
-          </section>
-        )}
       </div>
     </aside>
   );

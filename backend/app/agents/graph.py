@@ -220,14 +220,15 @@ def run_agent_turn(
     out = values.get("output") or {}
     jobs = list(values.get("jobs") or []) + job_runtime.list_jobs(thread_id)
     if checkpointer:
-        checkpointer.save(
-            thread_id,
+        checkpoint_state = checkpointer.load(thread_id) or {}
+        checkpoint_state.update(
             {
                 "last_worker": values.get("worker"),
                 "last_output": out,
                 "jobs": jobs,
-            },
+            }
         )
+        checkpointer.save(thread_id, checkpoint_state)
     return {
         "worker": values.get("worker"),
         "reply": out.get("reply", ""),

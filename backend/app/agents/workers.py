@@ -279,7 +279,8 @@ def scratch_worker_with_context(ctx: ToolContext, text: str, context: dict) -> d
 
 def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = None) -> dict:
     from app.agents.scope_proposal import (
-        merge_user_turn_into_proposal,
+        record_scope_turn,
+        update_scope_proposal,
         upsert_project_scope_approval,
     )
 
@@ -307,23 +308,25 @@ def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = Non
         }
 
     committed = (proj.introduction or "").strip()
-    draft = merge_user_turn_into_proposal(ctx.thread_id, text)
+    draft = record_scope_turn(ctx.thread_id, text)
     reply = get_chains().project_scope.invoke(
         {
             "payload": json.dumps(
                 {
                     "current_scope": committed,
-                    "user_message": text,
+                    "latest_user_message": text,
                     "draft_proposal": draft.get("proposed_introduction", ""),
+                    "conversation_turns": draft.get("conversation_turns", []),
                 },
                 ensure_ascii=False,
             ),
         }
     )
-    proposed = draft.get("proposed_introduction") or text.strip()
-    if not isinstance(reply, str):
-        reply = str(reply)
-    summary = (reply or "Scope draft updated.")[:200]
+    proposed = str(reply or "").strip()
+    if not proposed:
+        proposed = draft.get("proposed_introduction") or text.strip()
+    update_scope_proposal(ctx.thread_id, proposed)
+    summary = "Project scope proposal updated. Review it in the dock."
     aid = upsert_project_scope_approval(
         ctx,
         proposed_introduction=proposed,

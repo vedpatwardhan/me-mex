@@ -26,17 +26,35 @@ def save_scope_proposal(thread_id: str, draft: dict[str, Any]) -> None:
     _checkpoint.save(thread_id, state)
 
 
-def merge_user_turn_into_proposal(thread_id: str, user_turn: str) -> dict[str, Any]:
-    draft = load_scope_proposal(thread_id)
+def record_scope_turn(thread_id: str, user_turn: str) -> dict[str, Any]:
+    state = _checkpoint_for(thread_id)
+    draft = dict(state.get("scope_proposal") or {})
     turns: list[str] = list(draft.get("turns") or [])
     if user_turn.strip():
         turns.append(user_turn.strip()[:2000])
-    proposed = "\n".join(turns).strip()
+    transcript = [
+        {
+            "role": str(turn.get("role") or "user"),
+            "text": str(turn.get("text") or "")[:2000],
+        }
+        for turn in (state.get("transcript") or [])[-50:]
+        if str(turn.get("text") or "").strip()
+    ]
     draft = {
         "turns": turns[-30:],
-        "proposed_introduction": proposed,
+        "conversation_turns": transcript
+        or [{"role": "user", "text": turn} for turn in turns[-30:]],
+        "proposed_introduction": draft.get("proposed_introduction", ""),
         "updated_at": time.time(),
     }
+    save_scope_proposal(thread_id, draft)
+    return draft
+
+
+def update_scope_proposal(thread_id: str, proposed_introduction: str) -> dict[str, Any]:
+    draft = load_scope_proposal(thread_id)
+    draft["proposed_introduction"] = proposed_introduction.strip()[:8000]
+    draft["updated_at"] = time.time()
     save_scope_proposal(thread_id, draft)
     return draft
 

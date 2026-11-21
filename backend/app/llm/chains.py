@@ -23,8 +23,8 @@ from app.llm.schemas import (
     ConsolidateResult,
     PassageConcept,
     PassageExtractResult,
-    WorkerRoute,
     WorkerName,
+    WorkerRoute,
 )
 from app.models import Project
 from app.prompts import load_prompt
@@ -98,9 +98,7 @@ def _live_supervisor() -> Runnable:
             ("human", "{payload}"),
         ]
     )
-    return prompt | structured_llm(
-        WorkerRoute, caller="Supervisor.classify", max_tokens=256
-    )
+    return prompt | structured_llm(WorkerRoute, caller="Supervisor.classify", max_tokens=256)
 
 
 def _live_conversation() -> Runnable:
@@ -110,9 +108,7 @@ def _live_conversation() -> Runnable:
             ("human", "{text}"),
         ]
     )
-    return prompt | chat_llm(
-        caller="Conversation", max_tokens=settings.CHAT_COMPLETION_MAX_TOKENS
-    )
+    return prompt | chat_llm(caller="Conversation", max_tokens=settings.CHAT_COMPLETION_MAX_TOKENS)
 
 
 def _live_gist_draft() -> Runnable:
@@ -248,7 +244,15 @@ def _stub_gist_draft() -> Runnable:
 
 
 def _stub_scope() -> Runnable:
-    return RunnableLambda(lambda inp: "Tell me what / where / why for this project.")
+    def _run(inp: dict) -> str:
+        payload = inp.get("payload") or "{}"
+        try:
+            parsed = json.loads(payload)
+        except (TypeError, json.JSONDecodeError):
+            return ""
+        return str(parsed.get("latest_user_message") or "").strip()
+
+    return RunnableLambda(_run)
 
 
 def _stub_retrieval() -> Runnable:
