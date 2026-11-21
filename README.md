@@ -8,12 +8,12 @@ The monolithic v1 stack (orchestrator ingest, `/api/chat`) is preserved only on 
 
 ## What this repo is (and is not)
 
-| In scope on `main` | Not on `main` |
-|--------------------|---------------|
-| Workflow-driven writes + explicit approve | URL → auto ingest + link + reorg |
+| In scope on `main` | Not on `main` / not yet complete |
+|--------------------|---------------------------------|
+| Workflow-driven writes + explicit approval | URL → auto ingest + link + reorg |
 | Deterministic tools + LangGraph workers | v1 `ExecutiveOrchestrator` |
-| Headless REST + pytest (`/api/*`) | Phase 2 voice shell (LiveKit + dock) on `main` |
-| Agents call `get_chains().invoke` / `get_decision_scorer()` (mock in CI) | **Colab four-model stack** for prod routing (`pytest -m vllm` gateway smoke) |
+| Headless REST + interactive voice/dock MVP (LiveKit, canvas, HITL) | Formal Phase 2 exit: manual demo sign-off and full voice-workflow parity |
+| Agents call `get_chains().invoke` / `get_decision_scorer()` (mock in CI) | Production Colab stack is optional for local/default tests; live gateway smoke uses `pytest -m vllm` |
 
 Canon: **[`docs/`](./docs/)** — [docs/README.md](./docs/README.md), [docs/09-phasing.md](./docs/09-phasing.md), [docs/11-testing.md](./docs/11-testing.md).
 
