@@ -84,7 +84,7 @@ export const RecommendationsDock: React.FC<Props> = ({
               <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
               Committed project scope
             </div>
-            <p className="text-sm leading-relaxed text-slate-300">{projectScope}</p>
+            <DockMarkdown>{projectScope}</DockMarkdown>
           </section>
         ) : (
           <section className="rounded-xl border border-dashed border-slate-700/80 px-3 py-3 text-xs text-slate-500">

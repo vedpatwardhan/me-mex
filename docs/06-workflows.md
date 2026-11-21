@@ -67,14 +67,16 @@ Revisit scope later via conversation + `update_project_scope` or settings ([02](
 
 ## 2. W2 — Gist inquiry (no ROOT yet)
 
-**Example:** You put an arXiv link in **custom fields**, unmute: *“I added this link—what’s the gist? What does it say about the plot?”*
+**Example:** You provide a paper/article link in a custom field—under any field name—and ask for a short summary, brief overview, main idea, or gist.
 
-1. **Conversation agent** (+ `fetch_normalized_text` if needed): **2–4 line gist** in the dock—**no** `ROOT` in Mongo.
-2. You discuss the paper as long as you want; thread **updates the working gist** in session (agent tracks refinements).
-3. **Recommendation** (when gist looks stable): e.g. *“Create ROOT with this gist?”* — shows title + gist preview; **you** tap/voice approve → **`create_or_update_root_gist`** + optional `attach_source_uri`.
-4. Alternate recommendations: *“Update gist text”* (still no ROOT until you commit).
+1. Supervisor routes to **GistWorker**; the worker resolves the supplied source reference from the message and custom-field values, fetches that document, and creates a concise summary from its extracted text.
+2. Conversation acknowledges that it is processing the source and does not guess at its contents. While the job runs, you can keep talking; when the worker finishes, Conversation returns a concise follow-up based only on the worker's summary. An unreadable source produces an explicit error instead of a substitute-paper summary.
+3. This inquiry does **not** create a `ROOT` in Mongo. You may discuss the result and refine your understanding.
+4. **Explicit commit only:** *“Create ROOT with this gist”* → review/approval as required → **`create_or_update_root_gist`** + optional `attach_source_uri`.
 
-**Direct path (no recommendation):** arXiv in fields + *“Create ROOT titled X; gist is …”* → GistWorker writes Mongo immediately (small commits may skip a card).
+**Detailed analysis is W3, not W2:** *“Analyze this paper in detail,” “deep read,”* or requests for concept extraction route to IntraDocWorker, which stages concepts for review and approval.
+
+**Direct commit path:** arXiv in fields + *“Create ROOT titled X; gist is …”* → GistWorker writes Mongo only because you explicitly asked it to.
 
 ---
 

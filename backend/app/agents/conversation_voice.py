@@ -30,11 +30,18 @@ def _conversation_prompt_inputs(
     text: str,
     briefing: dict[str, Any],
     project_scope: str,
+    worker_kind: str = "conversation",
+    dispatch_pending: bool = False,
 ) -> dict[str, Any]:
     briefing_note = json.dumps(briefing, ensure_ascii=False)[:4000]
     scope = project_scope or ""
+    task_state = json.dumps(
+        {"worker": worker_kind, "background_job_starting": dispatch_pending},
+        ensure_ascii=False,
+    )
     augmented = (
         f"[session_briefing]{briefing_note}[/session_briefing]\n"
+        f"[task_state]{task_state}[/task_state]\n"
         f"User: {text}\n"
         "Respond naturally as voice Conversation only (no tools, no graph writes)."
     )
@@ -113,13 +120,15 @@ async def astream_conversation_voice(
         scope_blocked=scope_blocked,
     )
 
-    if voice:
+    if voice and worker_kind != "conversation":
         job_runtime.park_active_jobs(thread_id)
 
     inp = _conversation_prompt_inputs(
         text=effective_text,
         briefing=briefing,
         project_scope=project.introduction or "",
+        worker_kind=worker_kind,
+        dispatch_pending=dispatch,
     )
 
     tokens: list[str] = []

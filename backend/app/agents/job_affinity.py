@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from app.agents.context_preprocessor import project_scope_complete
+from app.agents.source_reference import resolve_source_reference
 
 _OPEN_STATUSES = frozenset({"running", "paused", "awaiting_approval"})
 
@@ -35,10 +36,10 @@ def affinity_key_for_worker(
         return f"intradoc:{root or project_id}"
     if worker_kind == "gist":
         root = fields.get("root_id") or ""
-        arxiv = fields.get("arxiv_id") or fields.get("url") or ""
-        token = root or arxiv or project_id
-        if arxiv and not root:
-            token = hashlib.sha256(str(arxiv).encode()).hexdigest()[:12]
+        source = resolve_source_reference("", fields).url or ""
+        token = root or source or project_id
+        if source and not root:
+            token = hashlib.sha256(source.encode()).hexdigest()[:12]
         return f"gist:{token}"
     if worker_kind in ("link", "reorg", "retrieval"):
         root = fields.get("root_id") or project_id

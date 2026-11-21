@@ -102,6 +102,9 @@ export function applyStreamEvent(
   // Proactive notices (e.g. an approval is ready) are status updates, not
   // assistant transcript content for the latest conversational turn.
   if (type === 'proactive_reply') return state;
+  if (type === 'assistant_followup' && typeof ev.text === 'string') {
+    return { ...state, latestReply: ev.text };
+  }
   if (type === 'job_update') {
     const jobPatch = ev.job as Record<string, unknown> | undefined;
     if (jobPatch) return { ...state, items: upsertJob(state.items, jobPatch) };

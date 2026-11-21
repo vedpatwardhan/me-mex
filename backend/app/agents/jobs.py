@@ -13,6 +13,7 @@ class JobRecord(TypedDict, total=False):
     worker: str
     recommendation_id: str
     progress: str
+    request_text: str
 
 
 def new_job_id() -> str:

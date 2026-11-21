@@ -114,10 +114,13 @@ def _live_conversation() -> Runnable:
 def _live_gist_draft() -> Runnable:
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", load_prompt("conversation", project_scope="{project_scope}")),
+            ("system", load_prompt("gist_draft", project_scope="{project_scope}")),
             (
                 "human",
-                "Draft a short ROOT gist (not saved). User:\n{text}",
+                (
+                    "Summary stage: {summary_stage}\nSource title: {source_title}\n"
+                    "Source URL: {source_url}\n\nExtracted source text:\n{text}"
+                ),
             ),
         ]
     )
@@ -240,7 +243,7 @@ def _stub_conversation() -> Runnable:
 
 
 def _stub_gist_draft() -> Runnable:
-    return RunnableLambda(lambda _: "Here's a gist draft in thread only.")
+    return RunnableLambda(lambda inp: (inp.get("text") or "")[:400])
 
 
 def _stub_scope() -> Runnable:

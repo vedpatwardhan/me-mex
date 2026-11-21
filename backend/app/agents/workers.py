@@ -5,10 +5,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 from app.agents.context_preprocessor import apply_custom_fields_to_text
+from app.agents.source_reference import resolve_source_reference, source_request_worker
 from app.config import settings
 from app.db import Store, ToolContext
 from app.llm import get_chains
+from app.llm.budget import passage_chunk_size_chars
 from app.services.decision_scorer import ScorerNode, get_decision_scorer
 from app.services.decision_trace_context import decision_trace_scope
 from app.tools import dock, gist, link, project, reorg, staging
@@ -32,6 +36,9 @@ def route_intent(text: str, context: dict, project: Any) -> str:
         return "conversation"
     if fields.get("force_project_scope") and not (project.introduction or "").strip():
         return "project_scope"
+    source_worker = source_request_worker(text, context)
+    if source_worker:
+        return source_worker
     intro = (project.introduction or "").strip()
     payload = json.dumps({"text": text, "context": context}, ensure_ascii=False)
     result = get_chains().supervisor.invoke(
@@ -66,31 +73,124 @@ def conversation_worker(
 def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     fields = context.get("custom_fields") or {}
     proj = ctx.store.get_project(ctx.project_id)
-    if "create root" in text.lower() or fields.get("force_gist_commit"):
-        title = fields.get("title") or "Untitled source"
-        gist_text = fields.get("gist") or text
+    source = resolve_source_reference(text, fields)
+    if source.error:
+        return {
+            "reply": source.error,
+            "source_error": source.error,
+            "graph_write": False,
+            "error": True,
+        }
+
+    source_text = str(fields.get("raw_text") or "").strip()
+    source_title = str(fields.get("title") or "").strip()
+    if source.url:
+        fetched = fetch_tool.fetch_normalized_text(ctx, source.url)
+        source_text = (fetched.get("text") or "").strip()
+        if not source_text:
+            return {
+                "reply": (
+                    "I couldn't extract readable text from that source, so I haven't made a "
+                    "summary. Please check the link or send the document text."
+                ),
+                "source_url": source.url,
+                "source_error": fetched.get("error") or "empty_document",
+                "graph_write": False,
+                "error": True,
+            }
+        source_title = source_title or _document_title(source_text)
+
+    if source_text:
+        gist_text = _summarize_source(
+            source_text,
+            source_title=source_title,
+            source_url=source.url or "",
+            project_scope=(proj.introduction or "")[:1000],
+        )
+        if not gist_text:
+            return {
+                "reply": "I couldn't produce a grounded summary from the extracted source text.",
+                "source_url": source.url,
+                "source_error": "empty_summary",
+                "graph_write": False,
+                "error": True,
+            }
+    else:
+        gist_text = ""
+
+    lower = text.lower()
+    explicit_commit = fields.get("force_gist_commit") or any(
+        phrase in lower for phrase in ("create root", "save gist", "save that gist", "commit gist")
+    )
+    if explicit_commit:
+        title = fields.get("title") or source_title or "Untitled source"
+        gist_text = fields.get("gist") or gist_text or text
         out = gist.create_or_update_root_gist(ctx, title=title, gist=gist_text)
-        uri = fields.get("url") or fields.get("arxiv_id")
+        uri = source.url or fields.get("url") or fields.get("arxiv_id")
         if uri and out.get("root_id"):
             gist.attach_source_uri(ctx, root_id=out["root_id"], uri=str(uri))
-        return {"reply": "ROOT gist saved.", "result": out, "graph_write": True}
-    draft = get_chains().gist_draft.invoke({"text": text, "project_scope": proj.introduction or ""})
-    return conversation_worker(ctx, text, context=context, gist_draft=draft)
+        return {
+            "reply": "ROOT gist saved.",
+            "result": out,
+            "source_summary": gist_text,
+            "source_title": title,
+            "source_url": source.url,
+            "gist_saved": True,
+            "graph_write": True,
+        }
+
+    if not gist_text:
+        return {
+            "reply": "Share a document link or excerpt and I'll summarize that source.",
+            "graph_write": False,
+            "error": True,
+        }
+    return {
+        "reply": gist_text,
+        "source_summary": gist_text,
+        "source_title": source_title,
+        "source_url": source.url,
+        "graph_write": False,
+    }
 
 
 def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     fields = context.get("custom_fields") or {}
     root_id = fields.get("root_id")
-    url = fields.get("url")
+    source = resolve_source_reference(text, fields)
+    if source.error:
+        return {
+            "reply": source.error,
+            "source_error": source.error,
+            "graph_write": False,
+            "error": True,
+        }
+    url = source.url
     title = fields.get("title") or "Document"
-    doc_text = ""
+    doc_text = str(fields.get("raw_text") or "").strip()
     content_hash = ""
     if url:
         fetched = fetch_tool.fetch_normalized_text(ctx, url)
         doc_text = fetched.get("text") or ""
         content_hash = fetched["content_hash"]
+        if not doc_text.strip():
+            return {
+                "reply": (
+                    "I couldn't extract readable text from that source, so I haven't staged an "
+                    "analysis. Please check the link or send the document text."
+                ),
+                "source_url": url,
+                "source_error": fetched.get("error") or "empty_document",
+                "graph_write": False,
+                "error": True,
+            }
+        title = fields.get("title") or _document_title(doc_text) or title
     if not doc_text.strip():
-        doc_text = fields.get("raw_text") or text
+        return {
+            "reply": "Share a document link or excerpt and I'll analyze that source.",
+            "graph_write": False,
+            "error": True,
+        }
 
     concepts = get_chains().intradoc.invoke(
         {"text": doc_text, "doc_title": title, "user_intent": text}
@@ -111,8 +211,74 @@ def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     return {
         "reply": "Staging ready for review.",
         "approval_id": approval_id,
+        "source_url": url,
         "graph_write": False,
     }
+
+
+def _document_title(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            return stripped.lstrip("# ").strip()
+    return ""
+
+
+def _summarize_source(
+    text: str,
+    *,
+    source_title: str,
+    source_url: str,
+    project_scope: str,
+) -> str:
+    """Summarize long documents hierarchically within the configured LLM context budget."""
+    chain = get_chains().gist_draft
+    chunk_size = max(2000, passage_chunk_size_chars())
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=min(300, chunk_size // 10),
+    )
+    chunks = splitter.split_text(text)
+
+    def summarize(part: str, stage: str) -> str:
+        result = chain.invoke(
+            {
+                "text": part,
+                "project_scope": project_scope,
+                "source_title": source_title,
+                "source_url": source_url,
+                "summary_stage": stage,
+            }
+        )
+        return str(result or "").strip()
+
+    if len(chunks) == 1:
+        return summarize(chunks[0], "Summarize the complete source document.")
+
+    summaries = [
+        summarize(chunk, f"Summarize source excerpt {index + 1} of {len(chunks)}.")
+        for index, chunk in enumerate(chunks)
+    ]
+    summaries = [summary for summary in summaries if summary]
+    if not summaries:
+        return ""
+
+    while len("\n\n".join(summaries)) > chunk_size:
+        groups = splitter.split_text("\n\n".join(summaries))
+        summaries = [
+            summary
+            for summary in (
+                summarize(group, "Consolidate these source-derived section summaries.")
+                for group in groups
+            )
+            if summary
+        ]
+        if len(summaries) <= 1:
+            break
+    return summarize(
+        "\n\n".join(summaries),
+        "Synthesize these source-derived section summaries into one concise whole-document gist.",
+    )
 
 
 def link_place_worker(ctx: ToolContext, context: dict) -> dict:

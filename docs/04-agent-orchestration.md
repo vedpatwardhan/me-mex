@@ -162,7 +162,7 @@ The module [`context_preprocessor.py`](../backend/app/agents/context_preprocesso
 | **Supervisor** | Turn routing on **dispatch path** | Delegates to workers |
 | **Conversation (voice, plane 1)** | Dialogue, interim ack, status from briefing — **TTS script** | **No tools** — dispatch workers for fetch/retrieval/gist/scoring |
 | **Conversation (REST harness)** | Inquiry, summary (legacy monolithic turn) | `fetch_normalized_text`, `open_passages`, `get_suggested_next_actions` until harness converges |
-| **GistWorker** | Optional gist phrasing from your text | `create_or_update_root_gist`, `attach_source_uri`, `create_note`, `create_todo`, `promote_todo_to_concept_m` |
+| **GistWorker** | Resolve a user-supplied source reference from utterance/custom-field values; fetch and produce a concise source-grounded summary (chunk/reduce for long documents) | `fetch_normalized_text`; `create_or_update_root_gist` / `attach_source_uri` only on explicit commit |
 | **IntraDocWorker** | Chunk → extract → consolidate **LLM loop** (v1 prompts) | `fetch_normalized_text`, `upsert_staging_bundle`, `edit_staging_concept`, `enqueue_pending_approval`, `commit_intra_doc_graph` |
 | **LinkPlaceWorker** | `query_node` = `ROOT`; frontier = hub/`INSIGHT` shortlist; full prob vector → dock | `enqueue_pending_approval`, `create_root_insight_edges` on approve |
 | **ReorgRecommendWorker** | `query_node` = mutable node in question; frontier = relocation/split targets; full probs | `write_reorg_proposal`, `preview_reorg_diff`, `enqueue_pending_approval` |
@@ -266,8 +266,8 @@ Until scope is saved, **no** gist ROOT / intra-doc / link / reorg **writes** (in
 | User intent (examples) | Agent | Graph write? | Voice foreground (plane 1) |
 |------------------------|-------|--------------|----------------------------|
 | Unmute on empty scope (P1) | ProjectScope worker (on dispatch) | No (until `update_project_scope`) | Convo dialogue; dispatch scope worker when persisting |
-| arXiv + “what’s the gist?” (W2) | GistWorker or RetrievalWorker + fetch in worker | No (ROOT via recommendation or command) | Convo ack → async worker; gist talk in Convo only |
-| “Summarize this link” | RetrievalWorker (+ `fetch_normalized_text` in worker) | No | Convo: *“pulling that up…”* → dispatch |
+| Short summary / brief overview of a supplied paper or post (W2; “gist” wording optional) | GistWorker → resolve supplied source → fetch exact document → concise summary | No (ROOT only on explicit commit) | Convo acknowledges processing; completed worker summary returns as a separate Conversation follow-up |
+| Deep read, detailed analysis, concept extraction, or intra-doc graph of supplied source | IntraDocWorker → fetch → chunk/extract/consolidate → staging | Only after staging approval | Convo acknowledges processing; staging/approval arrives asynchronously |
 | “Save that as gist” | GistWorker | Yes (ROOT) via tool | Convo ack → async GistWorker |
 | “Deepen this ROOT / build concept graph” | IntraDocWorker (LLM extract) → staging tools | Yes (after `commit_intra_doc_graph` approve) | Convo ack → async IntraDoc job |
 | “Where does this fit?” | LinkPlaceWorker (DecisionScorer) → dock → `create_root_insight_edges` | Only after approve | Convo ack → async LinkPlace |
@@ -489,10 +489,10 @@ Barge-in → cancel foreground TTS/stream only; debounce proactive TTS per job_i
 
 1. **LiveKit path:** STT → **Conversation endpoint** (contract TBD: backend stream or Colab hop) with `context_json.voice_turn = true`.
 2. **Dialogue only:** Conversation has **no tools** on voice — no `fetch`, `open_passages`, or retrieval. Facts → **dispatch** plane 3 ([§8](#8-supervisor-routing-intent--agent)).
-3. **Interim contract:** While `jobs[].status == running`, Convo explains wait; **status questions** use briefing/`jobs` only.
+3. **Interim contract:** For an information task dispatched in the current turn, Convo acknowledges that the supplied source is being processed and makes no source-specific claims until worker output is available. While `jobs[].status == running`, it can continue normal conversation and accurately use briefing/`jobs` for status questions.
 4. **Token budget:** Conversation uses low `max_tokens` (policy env e.g. `VOICE_FOREGROUND_MAX_TOKENS` — default TBD [10](./10-open-questions.md)).
 5. **Phase from briefing:** e.g. incomplete scope → P1 onboarding copy; running intra-doc → offer status; pending approvals → short reminder (not full staging JSON aloud).
-6. **Dispatch:** Same utterance: Convo reply **first**, then async worker; worker `reply` must **not** replace Convo on the STT→TTS hot path.
+6. **Dispatch:** Same utterance: Convo reply **first**, then async worker; worker `reply` must **not** replace Convo on the STT→TTS hot path. On completed Gist jobs, Observer passes the source-grounded summary to Conversation for a concise follow-up on the same thread.
 7. **`session_briefing`** shape (Observer → Convo each call):
 
 ```json
@@ -513,8 +513,8 @@ Barge-in → cancel foreground TTS/stream only; debounce proactive TTS per job_i
 |------|--------|
 | Trigger | Job `done` or `awaiting_approval` after Observer ingests worker output |
 | Dock | WorkflowAgent creates/updates recommendation row **always** |
-| Voice | **Always** one short TTS line through Conversation when session active (not muted); barge-in **cancels** proactive TTS |
-| Style | 1–3 sentences; reference user goal; point to dock for detail — no full extract narration |
+| Voice | Unsolicited status/proactive lines only when unmuted; requested completed Gist answers are delivered to the dock and may be spoken even while the mic is muted |
+| Style | 1–3 concise sentences; source-result follow-ups paraphrase only worker-provided evidence, without long quotations or unsupported facts |
 | Spam guard | Debounce proactive speech per `job_id` |
 | Status on ask | Convo reads `jobs` / briefing — no new worker |
 

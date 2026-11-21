@@ -26,7 +26,10 @@ def test_w3_staging_then_commit(client, store, project_scoped):
             "thread_id": "w3",
             "context_json": {
                 "active_project_id": pid,
-                "custom_fields": {"root_id": root_id},
+                "custom_fields": {
+                    "root_id": root_id,
+                    "raw_text": "A source excerpt describing the paper's method and results.",
+                },
             },
         },
     )

@@ -128,6 +128,7 @@ def dispatch_background_worker(
             if job:
                 job["status"] = "running"
                 job["label"] = (text or worker_kind)[:80]
+                job["request_text"] = (text or "")[:4000]
                 job["affinity_key"] = affinity_key
                 if plan.approval_id:
                     job["approval_id"] = plan.approval_id
@@ -185,6 +186,7 @@ def _new_job_record(
         "job_id": job_id,
         "kind": worker_kind,
         "label": (text or worker_kind)[:80],
+        "request_text": (text or "")[:4000],
         "status": "running",
         "worker": worker_kind,
         "thread_id": thread_id,

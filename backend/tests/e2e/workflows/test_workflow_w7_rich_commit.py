@@ -26,7 +26,10 @@ def test_w7_root_then_staging_commit(client, store, project_scoped):
             "thread_id": "w7",
             "context_json": {
                 "active_project_id": pid,
-                "custom_fields": {"root_id": root_id},
+                "custom_fields": {
+                    "root_id": root_id,
+                    "raw_text": "A source excerpt describing the paper's method and results.",
+                },
             },
         },
     )

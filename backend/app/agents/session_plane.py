@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any
 
 from app.agents import job_runtime
@@ -12,10 +14,12 @@ from app.agents.session_events import publish_session_event
 from app.agents.voice_dialogue import user_asked_for_status
 from app.agents.workflow_agent import run_workflow_agent
 from app.db import ToolContext, get_store
+from app.llm import get_chains
 from app.services.checkpoints import JsonCheckpointStore
 from app.tools import dock as dock_tools
 
 _checkpoint = JsonCheckpointStore()
+_log = logging.getLogger("memex.v2.session")
 
 
 def _checkpoint_for(thread_id: str) -> dict[str, Any]:
@@ -52,12 +56,35 @@ def observer_ingest_job(
     wa = run_workflow_agent(job=job, worker_output=worker_output)
     state["recommendation_cards"] = wa.get("recommendation_cards") or []
     state["proactive_script"] = wa.get("proactive_script") or ""
+    gist_followup = None
+    if (
+        (job.get("worker") or job.get("kind")) == "gist"
+        and job.get("status") == "done"
+        and (
+            worker_output.get("source_summary")
+            or worker_output.get("source_error")
+            or worker_output.get("error")
+        )
+    ):
+        gist_followup = _compose_gist_followup(project_id, job, worker_output)
+        state["last_worker_result_snippet"] = gist_followup[:400]
     _checkpoint.save(thread_id, state)
 
     publish_session_event(
         thread_id,
         {"type": "job_update", "job": job, "source": "observer"},
     )
+    if gist_followup:
+        append_transcript_turn(thread_id, role="assistant", text=gist_followup)
+        publish_session_event(
+            thread_id,
+            {
+                "type": "assistant_followup",
+                "job_id": jid,
+                "worker": "gist",
+                "text": gist_followup,
+            },
+        )
     proactive = wa.get("proactive_script") or ""
     worker = job.get("worker") or job.get("kind") or ""
     should_proactive = bool(proactive) and (
@@ -65,7 +92,7 @@ def observer_ingest_job(
             job.get("status") == "awaiting_approval"
             and (worker_output.get("approval_id") or job.get("approval_id"))
         )
-        or (job.get("status") == "done" and worker != "project_scope")
+        or (job.get("status") == "done" and worker != "project_scope" and not gist_followup)
     )
     if should_proactive:
         publish_session_event(
@@ -84,6 +111,57 @@ def observer_ingest_job(
                 "cards": wa.get("recommendation_cards") or [],
             },
         )
+
+
+def _compose_gist_followup(
+    project_id: str,
+    job: dict[str, Any],
+    worker_output: dict[str, Any],
+) -> str:
+    """Turn a completed, source-grounded gist (or fetch error) into the user reply."""
+    store = get_store()
+    project = store.get_project(project_id)
+    source_summary = str(worker_output.get("source_summary") or "").strip()
+    source_error = str(
+        worker_output.get("source_error")
+        or (
+            "The source could not be fetched or extracted."
+            if worker_output.get("error")
+            else worker_output.get("reply")
+        )
+        or ""
+    ).strip()
+    payload = {
+        "user_request": job.get("request_text") or job.get("label") or "Summarize the source.",
+        "source_title": worker_output.get("source_title") or "",
+        "source_url": worker_output.get("source_url") or "",
+        "source_summary": source_summary,
+        "source_error": source_error if not source_summary else "",
+        "gist_saved": worker_output.get("gist_saved") is True,
+    }
+    instruction = (
+        "A background source-gist job has finished. Give the user a concise, natural answer "
+        "to their original request using only the worker's source_summary. Paraphrase it in "
+        "2–4 short sentences, avoid verbatim quotes, and do not add facts from memory. "
+        "If gist_saved is true, briefly confirm it was saved; otherwise do not imply persistence. "
+        "If source_error is present and source_summary is empty, explain briefly that the "
+        "source could not be read and ask for a readable link or excerpt. Do not imply an "
+        "error case has a summary. Completed worker result:\n"
+        + json.dumps(payload, ensure_ascii=False)
+    )
+    try:
+        reply = get_chains().conversation.invoke(
+            {"text": instruction, "project_scope": project.introduction or ""}
+        )
+        text = str(reply or "").strip()
+        if text:
+            return text
+    except Exception as exc:  # noqa: BLE001 - fall back to the worker's grounded summary
+        _log.warning("gist follow-up generation failed; using worker summary: %s", exc)
+    if source_summary:
+        title = str(worker_output.get("source_title") or "the source")
+        return f"Here's a concise summary of {title}: {source_summary}"
+    return source_error or "I couldn't read the source. Please share a readable link or excerpt."
 
 
 def build_session_briefing(

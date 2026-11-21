@@ -237,8 +237,9 @@ async def _maybe_proactive_tts(
     *,
     job_id: str,
     text: str,
+    allow_muted: bool = False,
 ) -> None:
-    if not text.strip() or session.muted or not speech_enabled():
+    if not text.strip() or (session.muted and not allow_muted) or not speech_enabled():
         return
     stripped = text.strip()
     if stripped.startswith("Finished ") and len(stripped) < 120:
@@ -273,6 +274,27 @@ async def _consume_session_events(room: rtc.Room, session: RoomSession) -> None:
                     json.dumps({"type": "proactive_reply", "text": line, "job_id": jid}).encode(),
                     reliable=True,
                 )
+            elif ev.get("type") == "assistant_followup":
+                jid = str(ev.get("job_id") or "")
+                text = str(ev.get("text") or "")
+                await room.local_participant.publish_data(
+                    json.dumps(
+                        {
+                            "type": "assistant_followup",
+                            "text": text,
+                            "job_id": jid,
+                        }
+                    ).encode(),
+                    reliable=True,
+                )
+                async with session.turn_lock:
+                    await _maybe_proactive_tts(
+                        room,
+                        session,
+                        job_id=jid or text[:32],
+                        text=text,
+                        allow_muted=True,
+                    )
             elif ev.get("type") in ("job_update", "recommendation"):
                 await room.local_participant.publish_data(
                     json.dumps({"type": ev["type"], **ev}).encode(),

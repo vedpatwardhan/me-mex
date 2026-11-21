@@ -41,6 +41,15 @@ describe('dockStreamReducer', () => {
     expect(s1.latestReply).toBe('Let me know more about the project.');
   });
 
+  it('shows the completed background gist follow-up as the latest assistant turn', () => {
+    const state = applyStreamEvent(emptyDockStreamState(), {
+      type: 'assistant_followup',
+      job_id: 'job-gist',
+      text: 'The paper proposes a new predictive model.',
+    });
+    expect(state.latestReply).toBe('The paper proposes a new predictive model.');
+  });
+
   it('adds approval on turn_end', () => {
     const s = applyStreamEvent(emptyDockStreamState(), {
       type: 'turn_end',

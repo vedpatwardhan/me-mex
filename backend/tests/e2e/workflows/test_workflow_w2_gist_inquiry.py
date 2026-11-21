@@ -13,14 +13,14 @@ def test_gist_inquiry_no_root(client, store, project):
     assert len(roots) == 0
 
 
-def test_direct_gist_commit(client, store, project):
+def test_direct_gist_commit(client, store, project_scoped):
     r = client.post(
         "/api/agent/turn",
         json={
             "text": "create root",
             "thread_id": "w2b",
             "context_json": {
-                "active_project_id": project.id,
+                "active_project_id": project_scoped.id,
                 "custom_fields": {
                     "title": "ERA",
                     "gist": "Embodied rollout",

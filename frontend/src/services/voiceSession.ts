@@ -134,6 +134,7 @@ export class VoiceSession {
           'recommendation',
           'job_update',
           'proactive_reply',
+          'assistant_followup',
           'awaiting_approval',
           'approval',
           'token',
