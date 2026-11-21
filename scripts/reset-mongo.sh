@@ -2,8 +2,8 @@
 # Reset Me-Mex MongoDB (and optional local session files) for dev / e2e debugging.
 #
 # Usage (from repo root):
-#   ./scripts/reset-mongo.sh              # interactive confirm, clear v2 collections
-#   ./scripts/reset-mongo.sh -y           # same, no prompt
+#   ./scripts/reset-mongo.sh              # interactive confirm, clear v2 collections, seed global project
+#   ./scripts/reset-mongo.sh -y           # same, no prompt (+ global genesis workspace)
 #   ./scripts/reset-mongo.sh --drop-db -y # drop entire DB_NAME database
 #   ./scripts/reset-mongo.sh -y --checkpoints --traces
 #   ./scripts/reset-mongo.sh -y --test-db # use test-me-mex (pytest default)
@@ -151,5 +151,22 @@ if [[ "${CLEAR_TRACES}" -eq 1 ]]; then
     log "No trace dir at ${trace_dir} (skipped)."
   fi
 fi
+
+seed_global_project() {
+  local py=""
+  if [[ -x "${ROOT}/backend/.venv/bin/python" ]]; then
+    py="${ROOT}/backend/.venv/bin/python"
+  elif command -v poetry >/dev/null 2>&1 && [[ -f "${ROOT}/backend/pyproject.toml" ]]; then
+    (cd "${ROOT}/backend" && poetry run python "${ROOT}/scripts/seed-global-project.py")
+    return
+  else
+    py="python3"
+  fi
+  PYTHONPATH="${ROOT}/backend" MONGO_URI="${MONGO_URI}" DB_NAME="${DB_NAME}" \
+    "${py}" "${ROOT}/scripts/seed-global-project.py"
+}
+
+log "Seeding default global project (genesis node, empty scope)..."
+seed_global_project
 
 log "Done. Restart backend/voice_worker if they cache store state in-process."

@@ -15,14 +15,12 @@ export const Navbar: React.FC = () => {
 
   const [showNewProjModal, setShowNewProjModal] = useState(false);
   const [projName, setProjName] = useState('');
-  const [projDesc, setProjDesc] = useState('');
 
   const handleCreateProject = (e: React.FormEvent) => {
     e.preventDefault();
     if (!projName.trim()) return;
-    createProjectWorkspace(projName.trim(), projDesc.trim());
+    createProjectWorkspace(projName.trim());
     setProjName('');
-    setProjDesc('');
     setShowNewProjModal(false);
   };
 
@@ -111,8 +109,8 @@ export const Navbar: React.FC = () => {
 
       {/* Create New Project Modal */}
       {showNewProjModal && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-[#121824] border border-white/10 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-[100] flex items-start justify-center overflow-y-auto p-4 pt-[max(1rem,10vh)] pb-8">
+          <div className="bg-[#121824] border border-white/10 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl shrink-0">
             <div className="flex items-center justify-between border-b border-white/10 pb-3.5">
               <h3 className="font-display font-bold text-base text-slate-100 flex items-center gap-2">
                 <FolderGit2 className="w-5 h-5 text-emerald-400" /> Create Project Workspace
@@ -139,18 +137,10 @@ export const Navbar: React.FC = () => {
                 />
               </div>
 
-              <div>
-                <label className="text-[11px] font-mono text-slate-400 font-bold uppercase tracking-wider block mb-1.5">
-                  Description
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="Brief description of research scope..."
-                  value={projDesc}
-                  onChange={(e) => setProjDesc(e.target.value)}
-                  className="w-full bg-[#090d16] text-slate-200 p-3 rounded-xl border border-slate-700/80 focus:border-emerald-400 focus:outline-none text-xs resize-none font-medium leading-relaxed"
-                />
-              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Research scope is set later through voice or the project-scope worker — not at
+                create time.
+              </p>
 
               <div className="flex items-center justify-end gap-2.5 pt-2">
                 <button

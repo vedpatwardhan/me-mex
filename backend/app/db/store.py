@@ -21,6 +21,8 @@ from app.models import (
 )
 
 GENESIS_TITLE = "Genesis"
+GLOBAL_PROJECT_ID = "global"
+GLOBAL_PROJECT_NAME = "Global Graph"
 MUTABLE_KINDS = {NodeKind.CONCEPT_M, NodeKind.INSIGHT, NodeKind.NOTE, NodeKind.TODO}
 
 
@@ -65,6 +67,16 @@ class Store:
             {"$push": {"node_ids": genesis_id}},
         )
         return project
+
+    def ensure_global_project(self) -> Project:
+        """Idempotent default workspace (empty scope, genesis node only)."""
+        try:
+            return self.get_project(GLOBAL_PROJECT_ID)
+        except NotFoundError:
+            return self.create_project(
+                name=GLOBAL_PROJECT_NAME,
+                project_id=GLOBAL_PROJECT_ID,
+            )
 
     def get_project(self, project_id: str) -> Project:
         doc = self._db.projects.find_one({"_id": project_id})

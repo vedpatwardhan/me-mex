@@ -28,7 +28,7 @@ interface MemexState {
   fetchChatHistory: () => Promise<void>;
   clearChatHistory: () => Promise<void>;
   sendMessage: (text: string, isVoice?: boolean) => Promise<void>;
-  createProjectWorkspace: (name: string, description: string) => Promise<void>;
+  createProjectWorkspace: (name: string) => Promise<void>;
   deleteNode: (nodeId: string) => Promise<boolean>;
   updateNodeDescription: (nodeId: string, description: string) => Promise<boolean>;
 }
@@ -449,22 +449,16 @@ export const useMemexStore = create<MemexState>((set, get) => ({
     }
   },
 
-  createProjectWorkspace: async (name, description) => {
-    const projId = `proj_${Date.now()}`;
-    const newProj: ProjectWorkspace = {
-      id: projId,
-      name,
-      description,
-      node_ids: [],
-      edge_ids: [],
-      created_at: new Date().toISOString()
-    };
-    await fetch('/api/projects', {
+  createProjectWorkspace: async (name) => {
+    const res = await fetch(`/api/projects?name=${encodeURIComponent(name)}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newProj)
     });
+    if (!res.ok) {
+      console.error('Failed to create project:', await res.text());
+      return;
+    }
+    const body = (await res.json()) as { project_id: string };
     await get().fetchProjects();
-    await get().setActiveProjectId(projId);
+    await get().setActiveProjectId(body.project_id);
   }
 }));

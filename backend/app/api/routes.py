@@ -73,8 +73,6 @@ def list_projects():
 
 @router.get("/graph")
 def get_project_graph(project_id: str = Query(..., min_length=1)):
-    if project_id == "global":
-        return {"nodes": [], "edges": []}
     store = get_store()
     nodes = [_node_to_frontend(n) for n in store.list_nodes(project_id)]
     edges = [_edge_to_frontend(e) for e in store.list_edges(project_id)]
