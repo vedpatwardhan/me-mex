@@ -7,7 +7,6 @@ import type { VoiceContext } from '../services/voiceSession';
 import { VoiceSession } from '../services/voiceSession';
 import type { VoiceSessionState } from '../services/livekitService';
 import { parseCustomFields } from '../utils/dockUtils';
-import type { Room } from 'livekit-client';
 
 type Props = {
   projectId?: string;
@@ -59,7 +58,7 @@ function statusMeta(
   if (live) {
     return {
       label: 'Listening',
-      detail: 'Mic open — speak naturally',
+      detail: 'Mic open — mute when done to send',
       dot: 'bg-emerald-400',
       ring: 'border-emerald-500/40 bg-emerald-500/10',
     };
@@ -87,7 +86,6 @@ export const VoiceRail: React.FC<Props> = ({
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const sessionRef = useRef<VoiceSession | null>(null);
   const [connecting, setConnecting] = useState(false);
-  const [liveKitRoom, setLiveKitRoom] = useState<Room | null>(null);
   const setVoiceStateRef = useRef(setState);
   useEffect(() => {
     setVoiceStateRef.current = setState;
@@ -139,7 +137,7 @@ export const VoiceRail: React.FC<Props> = ({
       (muted && state === 'Muted'));
   const live = connected && !muted && state === 'Listening';
   const status = statusMeta(state, live, connected);
-  const speechTimer = useSpeechSegmentTimer(liveKitRoom, live);
+  const speechTimer = useSpeechSegmentTimer(live);
 
   const startSession = async () => {
     if (connecting) return;
@@ -169,7 +167,6 @@ export const VoiceRail: React.FC<Props> = ({
       onMuteToggle?.(false);
       session.publishContextFireAndForget({ ...scopeCtx, muted: false });
       await session.setMicrophoneEnabled(true);
-      setLiveKitRoom(session.getRoom());
     } catch (err) {
       const raw = err instanceof Error ? err.message : 'Voice connection failed';
       const message =
@@ -189,7 +186,6 @@ export const VoiceRail: React.FC<Props> = ({
   const setMicMuted = (micMuted: boolean) => {
     const session = ensureSession();
     if (!session.isReady()) return;
-    setLiveKitRoom(session.getRoom());
     const ctx = contextForWorker(micMuted);
     onContext?.(ctx);
     setVoiceError(null);
@@ -210,7 +206,6 @@ export const VoiceRail: React.FC<Props> = ({
     setState('Muted');
     setMuted(true);
     onMuteToggle?.(true);
-    setLiveKitRoom(null);
     if (session) void session.disconnect();
   };
 

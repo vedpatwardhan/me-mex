@@ -22,28 +22,17 @@ except ImportError:  # pragma: no cover
     WorkerOptions = Any
     cli = None
 
-from voice_agent.audio_util import (
-    float32_to_pcm16,
-    frame_to_mono_floats,
-    pcm16_mono_to_wav,
-    should_end_utterance,
-)
+from voice_agent.audio_util import float32_to_pcm16, frame_to_mono_floats
 from voice_agent.speech_colab import speech_enabled, synthesize_wav, transcribe_wav
 from voice_agent.tts_pipeline import TtsPipeline, pipelined_tts_enabled
 from voice_agent.turn_bridge import post_resume, run_turn_with_reply, stream_session_events
-from voice_agent.vad_silero import (
-    SileroUtteranceCollector,
-    load_silero_vad,
-    voice_vad_mode,
-)
+from voice_agent.vad_silero import PushToTalkBuffer, load_silero_vad, voice_vad_mode
 
 _log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-SILENCE_RMS = float(os.getenv("VOICE_SILENCE_RMS", "0.008"))
 MIN_UTTERANCE_MS = int(os.getenv("VOICE_MIN_UTTERANCE_MS", "400"))
 MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "60000"))
-END_SILENCE_MS = int(os.getenv("VOICE_END_SILENCE_MS", "1500"))
 
 
 @dataclass
@@ -58,7 +47,7 @@ class RoomSession:
     tts_track: Any = None
     audio_consumer_started: bool = False
     peak_rms: float = 0.0
-    utterance_collector: SileroUtteranceCollector | None = None
+    ptt_buffer: PushToTalkBuffer | None = None
     stt_semaphore: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
     vad: Any = None
     proactive_spoken: set[str] = field(default_factory=set)
@@ -374,8 +363,10 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
             session.thread_id = msg["thread_id"]
         was_muted = session.muted
         new_muted = bool(msg.get("muted", session.muted))
-        if was_muted != new_muted and new_muted and session.utterance_collector is not None:
-            await session.utterance_collector.flush_mute()
+        if was_muted != new_muted and new_muted and session.ptt_buffer is not None:
+            await session.ptt_buffer.flush_mute()
+        if was_muted != new_muted and not new_muted and session.ptt_buffer is not None:
+            session.ptt_buffer.clear()
         session.muted = new_muted
         # Barge-in only when the user actually un-mutes, not on duplicate context_update.
         if not session.muted and was_muted:
@@ -434,65 +425,22 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
                 _log.exception("STT failed")
 
 
-async def _consume_audio_track_rms(
+async def _consume_audio_track(
     track: rtc.Track,
     room: rtc.Room,
     session: RoomSession,
 ) -> None:
-    stream = rtc.AudioStream(track)
-    buffer: list[float] = []
-    sample_rate = 48000
-    silent_ms = 0
-    speaking_ms = 0
-    async for event in stream:
-        if session.muted:
-            buffer.clear()
-            silent_ms = 0
-            speaking_ms = 0
-            continue
-        frame = event.frame
-        sample_rate = frame.sample_rate
-        floats, frame_ms = frame_to_mono_floats(frame)
-        if not floats:
-            continue
-        rms = _rms(floats)
-        session.peak_rms = max(session.peak_rms, rms)
-        if rms > SILENCE_RMS:
-            buffer.extend(floats)
-            speaking_ms += frame_ms
-            silent_ms = 0
-        else:
-            if buffer:
-                silent_ms += frame_ms
-        if should_end_utterance(
-            speaking_ms=speaking_ms,
-            silent_ms=silent_ms,
-            buffer_nonempty=bool(buffer),
-            min_utterance_ms=MIN_UTTERANCE_MS,
-            max_utterance_ms=MAX_UTTERANCE_MS,
-            end_silence_ms=END_SILENCE_MS,
-        ):
-            duration_s = len(buffer) / float(sample_rate) if sample_rate else 0.0
-            pcm = float32_to_pcm16(buffer)
-            wav = pcm16_mono_to_wav(pcm, sample_rate=sample_rate)
-            buffer.clear()
-            silent_ms = 0
-            speaking_ms = 0
-            _schedule_stt_pipeline(room, session, wav, duration_s, "rms")
+    """Push-to-talk: buffer while unmuted; STT only after user mutes (context_update)."""
 
-
-async def _consume_audio_track_silero(
-    track: rtc.Track,
-    room: rtc.Room,
-    session: RoomSession,
-    vad: Any,
-) -> None:
     async def on_utterance(wav: bytes, duration_s: float, reason: str) -> None:
         _schedule_stt_pipeline(room, session, wav, duration_s, reason)
 
-    collector = SileroUtteranceCollector(vad, on_utterance)
-    session.utterance_collector = collector
-    await collector.start()
+    buffer = PushToTalkBuffer(
+        on_utterance,
+        min_utterance_ms=MIN_UTTERANCE_MS,
+        max_utterance_ms=MAX_UTTERANCE_MS,
+    )
+    session.ptt_buffer = buffer
     stream = rtc.AudioStream(track)
     try:
         async for event in stream:
@@ -502,25 +450,10 @@ async def _consume_audio_track_silero(
             floats, _ = frame_to_mono_floats(frame)
             if floats:
                 session.peak_rms = max(session.peak_rms, _rms(floats))
-            collector.push_frame(frame)
+            buffer.push_frame(frame)
     finally:
-        await collector.aclose()
-        session.utterance_collector = None
-
-
-async def _consume_audio_track(
-    track: rtc.Track,
-    room: rtc.Room,
-    session: RoomSession,
-) -> None:
-    if voice_vad_mode() == "rms":
-        await _consume_audio_track_rms(track, room, session)
-        return
-    vad = session.vad
-    if vad is None:
-        _log.error("Silero VAD missing on session — set VOICE_VAD=rms or fix worker prewarm")
-        return
-    await _consume_audio_track_silero(track, room, session, vad)
+        await buffer.aclose()
+        session.ptt_buffer = None
 
 
 def _start_audio_consumer(

@@ -80,8 +80,57 @@ def vad_frames_to_wav(frames: list[rtc.AudioFrame]) -> tuple[bytes, float]:
 UtteranceCallback = Callable[[bytes, float, str], Awaitable[None]]
 
 
+class PushToTalkBuffer:
+    """Accumulate mic audio while unmuted; emit wav only on explicit flush (mute)."""
+
+    def __init__(
+        self,
+        on_utterance: UtteranceCallback,
+        *,
+        min_utterance_ms: int = MIN_UTTERANCE_MS,
+        max_utterance_ms: int = MAX_UTTERANCE_MS,
+    ) -> None:
+        self._on_utterance = on_utterance
+        self._min_utterance_s = min_utterance_ms / 1000.0
+        self._max_utterance_s = max_utterance_ms / 1000.0
+        self._frames: list[rtc.AudioFrame] = []
+        self._duration_s = 0.0
+        self._closed = False
+
+    def clear(self) -> None:
+        self._frames = []
+        self._duration_s = 0.0
+
+    def push_frame(self, frame: rtc.AudioFrame) -> None:
+        if self._closed:
+            return
+        mono = frame_to_mono_rtc_frame(frame)
+        self._frames.append(mono)
+        rate = mono.sample_rate or 48000
+        self._duration_s += len(mono.data) / 2.0 / float(rate)
+        while self._duration_s > self._max_utterance_s and self._frames:
+            dropped = self._frames.pop(0)
+            dr = dropped.sample_rate or rate
+            self._duration_s -= len(dropped.data) / 2.0 / float(dr)
+
+    async def flush_mute(self) -> None:
+        if self._closed or not self._frames:
+            self.clear()
+            return
+        frames = list(self._frames)
+        self.clear()
+        wav, duration_s = vad_frames_to_wav(frames)
+        if duration_s < self._min_utterance_s or not wav:
+            return
+        await self._on_utterance(wav, duration_s, "mute")
+
+    async def aclose(self) -> None:
+        self._closed = True
+        self.clear()
+
+
 class SileroUtteranceCollector:
-    """Feeds Silero VAD; emits wav on END_OF_SPEECH or explicit flush (mute)."""
+    """Legacy Silero VAD collector (tests); production uses PushToTalkBuffer."""
 
     def __init__(
         self,
@@ -110,7 +159,6 @@ class SileroUtteranceCollector:
                     self._speech_frames = list(ev.frames)
                 elif ev.type == VADEventType.END_OF_SPEECH:
                     self._in_speech = False
-                    await self._maybe_emit(ev.frames, "silence")
                     self._speech_frames = []
         except asyncio.CancelledError:
             raise
