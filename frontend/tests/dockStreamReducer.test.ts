@@ -100,4 +100,34 @@ describe('dockStreamReducer', () => {
     });
     expect(s.items.some((i) => i.id === 'appr_1' && i.className === 'approval')).toBe(true);
   });
+
+  it('removes a resolved approval instead of showing the status as a queue item', () => {
+    const pending = applyStreamEvent(
+      applyStreamEvent(emptyDockStreamState(), {
+        type: 'job_update',
+        job: {
+          job_id: 'job-scope',
+          worker: 'project_scope',
+          status: 'awaiting_approval',
+          approval_id: 'appr_scope',
+        },
+      }),
+      {
+        type: 'awaiting_approval',
+        approval_id: 'appr_scope',
+        title: 'Review project scope',
+      },
+    );
+    const resolved = applyStreamEvent(pending, {
+      type: 'turn_end',
+      reply: 'Thanks for approving the project scope.',
+      details: {
+        approval_id: 'appr_scope',
+        status: 'approved',
+        scope_committed: true,
+      },
+    });
+    expect(resolved.items).toEqual([]);
+    expect(resolved.latestReply).toBe('Thanks for approving the project scope.');
+  });
 });

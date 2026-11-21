@@ -238,7 +238,15 @@ def agent_resume(body: AgentResumeRequest):
                 "status": out.get("status", "resumed"),
                 "graph_write": out.get("graph_write", False),
             }
-            for key in ("concept_ids", "edges", "approval_id", "root_id"):
+            for key in (
+                "concept_ids",
+                "edges",
+                "approval_id",
+                "root_id",
+                "reply",
+                "approval_type",
+                "scope_committed",
+            ):
                 if key in out:
                     payload[key] = out[key]
             return payload

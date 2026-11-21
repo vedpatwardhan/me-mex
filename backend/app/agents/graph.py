@@ -16,6 +16,7 @@ from app.agents.context_preprocessor import (
     prioritize_project_scope_until_complete,
 )
 from app.agents.jobs import job_from_worker_turn
+from app.config import settings
 from app.db import ToolContext, get_store
 from app.services.checkpoints import JsonCheckpointStore
 
@@ -292,8 +293,42 @@ def resume_approval(
     if item.approval_type == "project_scope":
         intro = payload.get("proposed_introduction") or payload.get("introduction") or ""
         project.update_project_scope(ctx, introduction=str(intro))
-        return {"status": "approved", "approval_id": approval_id, "graph_write": True}
+        return {
+            "status": "approved",
+            "approval_id": approval_id,
+            "approval_type": item.approval_type,
+            "scope_committed": True,
+            "graph_write": True,
+            "reply": _scope_approval_reply(str(intro)),
+        }
     return {"status": "approved", "approval_id": approval_id}
+
+
+def _scope_approval_reply(introduction: str) -> str:
+    fallback = (
+        "Thanks for approving the project scope. I’ll use it to guide our research and help us "
+        "decide what to explore next. What would you like to start with?"
+    )
+    if settings.CHAT_LLM_MODE != "live":
+        return fallback
+    try:
+        from app.llm import get_chains
+
+        reply = get_chains().conversation.invoke(
+            {
+                "text": (
+                    "The user has just approved the project's scope. Thank them naturally, "
+                    "briefly acknowledge what the project will focus on using the scope context, "
+                    "and transition toward a concrete next step. Do not reply with only an approval "
+                    "status or repeat the approval title. Keep it to two short sentences."
+                ),
+                "project_scope": introduction,
+            }
+        )
+        text = str(reply or "").strip()
+        return text or fallback
+    except Exception:  # noqa: BLE001 - scope is committed before optional acknowledgement generation
+        return fallback
 
 
 async def astream_agent_turn(

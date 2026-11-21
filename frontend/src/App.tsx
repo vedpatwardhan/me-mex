@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { useMemexStore } from './store/useMemexStore';
 import { Navbar } from './components/Navbar';
 import { GraphCanvas } from './components/GraphCanvas';
@@ -12,7 +12,10 @@ export const App: React.FC = () => {
     useMemexStore();
 
   const threadId = useMemo(() => `voice-${activeProjectId}`, [activeProjectId]);
-  const dock = useDockState(activeProjectId, threadId);
+  const refreshProjects = useCallback(() => {
+    void fetchProjects();
+  }, [fetchProjects]);
+  const dock = useDockState(activeProjectId, threadId, refreshProjects);
 
   const projectScope = projects.find((p) => p.id === activeProjectId)?.description || '';
 

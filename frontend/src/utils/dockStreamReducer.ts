@@ -141,8 +141,19 @@ export function applyStreamEvent(
     for (const job of (ev.jobs as Record<string, unknown>[]) || []) {
       items = upsertJob(items, job);
     }
-    const approvalId = (ev.details as { approval_id?: string } | undefined)?.approval_id;
-    if (approvalId) {
+    const details = ev.details as
+      | { approval_id?: string; status?: string }
+      | undefined;
+    const approvalId = details?.approval_id;
+    if (approvalId && (details?.status === 'approved' || details?.status === 'dismissed')) {
+      const resolvedApproval = items.find((item) => item.id === approvalId);
+      items = items.filter(
+        (item) =>
+          item.id !== approvalId &&
+          item.id !== resolvedApproval?.linkedJobId &&
+          item.approvalId !== approvalId,
+      );
+    } else if (approvalId) {
       items = upsertApproval(items, {
         approval_id: approvalId,
         title: reply || 'Pending approval',
@@ -154,7 +165,7 @@ export function applyStreamEvent(
     return resetTurnState(state, ev.text);
   }
   if (type === 'dock_events' && Array.isArray(ev.events)) {
-    return (ev.events as Record<string, unknown>[]).reduce(
+    return (ev.events as Record<string, unknown>[]).reduce<DockStreamState>(
       (acc, chunk) => applyStreamEvent(acc, chunk),
       state,
     );

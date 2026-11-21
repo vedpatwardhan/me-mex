@@ -15,7 +15,11 @@ import {
   resetTurnState,
 } from '../utils/dockStreamReducer';
 
-export function useDockState(projectId: string, threadId: string) {
+export function useDockState(
+  projectId: string,
+  threadId: string,
+  onScopeCommitted?: () => void,
+) {
   const [streamState, setStreamState] = useState(emptyDockStreamState);
   const [projectScope, setProjectScope] = useState('');
   const [voiceSession, setVoiceSession] = useState<VoiceSession | null>(null);
@@ -49,6 +53,10 @@ export function useDockState(projectId: string, threadId: string) {
       setStreamState((prev) => applyStreamEvent(prev, ev));
       const type = ev.type as string | undefined;
       const job = ev.job as Record<string, unknown> | undefined;
+      const details = ev.details as Record<string, unknown> | undefined;
+      if (type === 'turn_end' && details?.scope_committed === true) {
+        onScopeCommitted?.();
+      }
       const shouldRefresh =
         type === 'turn_end' ||
         type === 'recommendation' ||
@@ -57,7 +65,7 @@ export function useDockState(projectId: string, threadId: string) {
         (type === 'job_update' && job?.status === 'awaiting_approval');
       if (shouldRefresh) scheduleRefreshApprovals();
     },
-    [scheduleRefreshApprovals],
+    [scheduleRefreshApprovals, onScopeCommitted],
   );
 
   const beginTurn = useCallback((userText: string) => {
@@ -93,23 +101,25 @@ export function useDockState(projectId: string, threadId: string) {
 
   const approve = useCallback(
     async (approvalId: string, contextJson: Record<string, unknown>) => {
+      let result: Record<string, unknown> | undefined;
       if (voiceSession?.isReady()) {
         await voiceSession.sendApproval(approvalId, 'approve', voiceCtx(contextJson));
       } else {
-        await resumeApproval({
+        result = await resumeApproval({
           thread_id: threadId,
           approval_id: approvalId,
           action: 'approve',
           context_json: contextJson,
         });
       }
+      if (result?.scope_committed === true) onScopeCommitted?.();
       setStreamState((s) => ({
         ...s,
         items: s.items.filter((i) => i.id !== approvalId),
       }));
       await refreshApprovals();
     },
-    [threadId, refreshApprovals, voiceSession, voiceCtx],
+    [threadId, refreshApprovals, voiceSession, voiceCtx, onScopeCommitted],
   );
 
   const dismiss = useCallback(

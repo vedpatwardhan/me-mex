@@ -79,6 +79,9 @@ def test_p1_approve_scope_commits(client, store, project):
         },
     )
     assert r2.status_code == 200
+    assert r2.json()["scope_committed"] is True
+    assert r2.json()["reply"] != "approved"
+    assert "Thanks for approving" in r2.json()["reply"]
     intro = store.get_project(project.id).introduction or ""
     assert "sim-to-real" in intro or "Warehouse" in intro
 
