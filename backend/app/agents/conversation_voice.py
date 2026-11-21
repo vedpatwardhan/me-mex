@@ -100,23 +100,22 @@ async def astream_conversation_voice(
     store = get_store()
     project = store.get_project(project_id)
 
-    briefing = build_session_briefing(
-        project_id=project_id,
-        thread_id=thread_id,
-        user_text=text,
-    )
-
-    worker_kind, effective_text, scope_blocked = resolve_voice_route(
+    decision, effective_text, scope_blocked = resolve_voice_route(
         store=store,
         project_id=project_id,
         text=text,
         context_json=ctx_json,
     )
+    worker_kind = decision.worker
+    briefing = build_session_briefing(
+        project_id=project_id,
+        thread_id=thread_id,
+        include_worker_result=decision.intent == "status",
+    )
     append_transcript_turn(thread_id, role="user", text=effective_text)
     dispatch = needs_voice_dispatch(
-        worker_kind,
+        decision,
         voice_turn=voice,
-        text=effective_text,
         scope_blocked=scope_blocked,
     )
 
@@ -147,7 +146,7 @@ async def astream_conversation_voice(
         project_id=project_id,
         worker_kind=worker_kind,
         effective_text=effective_text,
-        context_json=ctx_json,
+        context_json={**ctx_json, "supervisor_decision": decision.model_dump()},
         jobs=job_runtime.list_jobs(thread_id),
         pending_approvals=store.list_pending(project_id, thread_id),
         introduction=project.introduction or "",
@@ -157,7 +156,11 @@ async def astream_conversation_voice(
         fn = worker_handler(worker_kind)
         if fn:
             ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
-            ctx_json_dispatch = {**ctx_json, "voice_dispatch": True}
+            ctx_json_dispatch = {
+                **ctx_json,
+                "voice_dispatch": True,
+                "supervisor_decision": decision.model_dump(),
+            }
             job = job_runtime.dispatch_background_worker(
                 thread_id=thread_id,
                 worker_kind=worker_kind,

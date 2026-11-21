@@ -11,7 +11,6 @@ from app.agents.briefing import SessionBriefing
 from app.agents.context_preprocessor import project_scope_complete
 from app.agents.scope_proposal import load_scope_proposal
 from app.agents.session_events import publish_session_event
-from app.agents.voice_dialogue import user_asked_for_status
 from app.agents.workflow_agent import run_workflow_agent
 from app.db import ToolContext, get_store
 from app.llm import get_chains
@@ -168,7 +167,7 @@ def build_session_briefing(
     *,
     project_id: str,
     thread_id: str,
-    user_text: str = "",
+    include_worker_result: bool = False,
 ) -> SessionBriefing:
     store = get_store()
     project = store.get_project(project_id)
@@ -190,7 +189,7 @@ def build_session_briefing(
     complete = project_scope_complete(project.introduction)
     draft = load_scope_proposal(thread_id)
     proposal_preview = str(draft.get("proposed_introduction") or "")[:400]
-    show_worker_snippet = user_asked_for_status(user_text) or complete
+    show_worker_snippet = include_worker_result or complete
     worker_snippet = ""
     if show_worker_snippet:
         worker_snippet = str(ckpt.get("last_worker_result_snippet") or "")[:400]

@@ -30,6 +30,7 @@ class AgentState(TypedDict, total=False):
     project_id: str
     thread_id: str
     worker: str
+    supervisor_decision: dict
     output: dict
     jobs: Annotated[list[dict[str, Any]], operator.add]
     scope_blocked: bool
@@ -45,15 +46,31 @@ def _supervisor(state: AgentState) -> AgentState:
     project = ctx.store.get_project(ctx.project_id)
     effective = apply_custom_fields_to_text(state["text"], state.get("context_json") or {})
     context = state.get("context_json") or {}
-    worker = workers.route_intent(effective, context, project)
-    worker = prioritize_project_scope_until_complete(project.introduction, worker, context)
+    decision = workers.route_intent(effective, context, project)
+    worker = prioritize_project_scope_until_complete(project.introduction, decision.worker, context)
+    if worker != decision.worker:
+        decision = decision.model_copy(
+            update={
+                "worker": worker,
+                "intent": "scope_conversation",
+                "dispatch": True,
+            }
+        )
     scope_blocked = block_graph_writes_without_scope(project.introduction, worker)
     if scope_blocked:
         worker = "project_scope"
+        decision = decision.model_copy(
+            update={
+                "worker": worker,
+                "intent": "scope_conversation",
+                "dispatch": True,
+            }
+        )
     return {
         **state,
         "effective_text": effective,
         "worker": worker,
+        "supervisor_decision": decision.model_dump(),
         "scope_blocked": scope_blocked,
     }
 
@@ -65,7 +82,8 @@ def _worker_node(state: AgentState) -> AgentState:
         store=get_store(),
     )
     text = state.get("effective_text") or state["text"]
-    context = state.get("context_json") or {}
+    context = dict(state.get("context_json") or {})
+    context["supervisor_decision"] = state.get("supervisor_decision") or {}
     w = state.get("worker", "conversation")
     fields = context.get("custom_fields") or {}
     resume_job_id = fields.get("resume_job_id")

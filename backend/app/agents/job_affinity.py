@@ -36,7 +36,16 @@ def affinity_key_for_worker(
         return f"intradoc:{root or project_id}"
     if worker_kind == "gist":
         root = fields.get("root_id") or ""
-        source = resolve_source_reference("", fields).url or ""
+        decision = context_json.get("supervisor_decision") or {}
+        source = (
+            resolve_source_reference(
+                "",
+                fields,
+                selected_reference=decision.get("source_reference"),
+                selected_field=decision.get("source_field"),
+            ).url
+            or ""
+        )
         token = root or source or project_id
         if source and not root:
             token = hashlib.sha256(source.encode()).hexdigest()[:12]

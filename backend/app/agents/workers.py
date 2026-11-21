@@ -8,11 +8,12 @@ from typing import Any
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.agents.context_preprocessor import apply_custom_fields_to_text
-from app.agents.source_reference import resolve_source_reference, source_request_worker
+from app.agents.source_reference import resolve_source_reference
 from app.config import settings
 from app.db import Store, ToolContext
 from app.llm import get_chains
 from app.llm.budget import passage_chunk_size_chars
+from app.llm.schemas import WorkerRoute
 from app.services.decision_scorer import ScorerNode, get_decision_scorer
 from app.services.decision_trace_context import decision_trace_scope
 from app.tools import dock, gist, link, project, reorg, staging
@@ -30,15 +31,16 @@ def _scorer_node(store: Store, node_id: str) -> ScorerNode:
     )
 
 
-def route_intent(text: str, context: dict, project: Any) -> str:
+def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
     fields = context.get("custom_fields") or {}
     if fields.get("resume_job_id"):
-        return "conversation"
+        return WorkerRoute(worker="conversation", intent="status", dispatch=False)
     if fields.get("force_project_scope") and not (project.introduction or "").strip():
-        return "project_scope"
-    source_worker = source_request_worker(text, context)
-    if source_worker:
-        return source_worker
+        return WorkerRoute(
+            worker="project_scope",
+            intent="scope_conversation",
+            dispatch=True,
+        )
     intro = (project.introduction or "").strip()
     payload = json.dumps({"text": text, "context": context}, ensure_ascii=False)
     result = get_chains().supervisor.invoke(
@@ -50,7 +52,43 @@ def route_intent(text: str, context: dict, project: Any) -> str:
             "payload": payload,
         }
     )
-    return result if isinstance(result, str) else result.worker
+    if isinstance(result, WorkerRoute):
+        decision = result.model_copy(update={"source_error": None})
+    else:
+        worker = str(result if isinstance(result, str) else result.worker)
+        decision = WorkerRoute(
+            worker=worker,
+            dispatch=worker not in {"conversation"},
+        )
+
+    needs_source = decision.intent in {"source_summary", "source_analysis"} or (
+        decision.intent == "commit_gist" and not (decision.content or fields.get("gist"))
+    )
+    has_raw_source = bool(str(fields.get("raw_text") or "").strip())
+    if needs_source and not (decision.source_reference or decision.source_field or has_raw_source):
+        return decision.model_copy(
+            update={
+                "source_error": "I couldn't identify which supplied source to use. Please select or resend its link."
+            }
+        )
+
+    source = resolve_source_reference(
+        text,
+        fields,
+        selected_reference=decision.source_reference,
+        selected_field=decision.source_field,
+    )
+    if source.error:
+        return decision.model_copy(update={"source_reference": None, "source_error": source.error})
+    if source.url:
+        return decision.model_copy(update={"source_reference": source.url})
+    if needs_source and not has_raw_source:
+        return decision.model_copy(
+            update={
+                "source_error": "The selected source field doesn't contain a readable link or arXiv ID."
+            }
+        )
+    return decision
 
 
 def conversation_worker(
@@ -72,8 +110,21 @@ def conversation_worker(
 
 def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     fields = context.get("custom_fields") or {}
+    decision = context.get("supervisor_decision") or {}
     proj = ctx.store.get_project(ctx.project_id)
-    source = resolve_source_reference(text, fields)
+    source = resolve_source_reference(
+        text,
+        fields,
+        selected_reference=decision.get("source_reference"),
+        selected_field=decision.get("source_field"),
+    )
+    if decision.get("source_error"):
+        return {
+            "reply": decision["source_error"],
+            "source_error": decision["source_error"],
+            "graph_write": False,
+            "error": True,
+        }
     if source.error:
         return {
             "reply": source.error,
@@ -83,7 +134,7 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
         }
 
     source_text = str(fields.get("raw_text") or "").strip()
-    source_title = str(fields.get("title") or "").strip()
+    source_title = str(decision.get("title") or fields.get("title") or "").strip()
     if source.url:
         fetched = fetch_tool.fetch_normalized_text(ctx, source.url)
         source_text = (fetched.get("text") or "").strip()
@@ -118,13 +169,10 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     else:
         gist_text = ""
 
-    lower = text.lower()
-    explicit_commit = fields.get("force_gist_commit") or any(
-        phrase in lower for phrase in ("create root", "save gist", "save that gist", "commit gist")
-    )
+    explicit_commit = decision.get("intent") == "commit_gist" or fields.get("force_gist_commit")
     if explicit_commit:
-        title = fields.get("title") or source_title or "Untitled source"
-        gist_text = fields.get("gist") or gist_text or text
+        title = decision.get("title") or fields.get("title") or source_title or "Untitled source"
+        gist_text = fields.get("gist") or decision.get("content") or gist_text or text
         out = gist.create_or_update_root_gist(ctx, title=title, gist=gist_text)
         uri = source.url or fields.get("url") or fields.get("arxiv_id")
         if uri and out.get("root_id"):
@@ -156,8 +204,21 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
 
 def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     fields = context.get("custom_fields") or {}
+    decision = context.get("supervisor_decision") or {}
     root_id = fields.get("root_id")
-    source = resolve_source_reference(text, fields)
+    source = resolve_source_reference(
+        text,
+        fields,
+        selected_reference=decision.get("source_reference"),
+        selected_field=decision.get("source_field"),
+    )
+    if decision.get("source_error"):
+        return {
+            "reply": decision["source_error"],
+            "source_error": decision["source_error"],
+            "graph_write": False,
+            "error": True,
+        }
     if source.error:
         return {
             "reply": source.error,
@@ -420,31 +481,35 @@ def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     }
 
 
-def scratch_worker(ctx: ToolContext, text: str) -> dict:
-    t = text.lower()
-    if "create note" in t or "add note" in t:
-        title = text.split(":", 1)[-1].strip() if ":" in text else "Note"
-        out = gist.create_note(ctx, title=title, body="")
-        return {"reply": "Note created.", "result": out, "graph_write": True}
-    if "create todo" in t or "add todo" in t:
-        title = text.split(":", 1)[-1].strip() if ":" in text else "Todo"
-        out = gist.create_todo(ctx, title=title, body="")
-        return {"reply": "Todo created.", "result": out, "graph_write": True}
-    if "promote todo" in t:
-        return {"reply": "Set todo_id in custom_fields.", "graph_write": False}
-    return conversation_worker(ctx, text)
-
-
 def scratch_worker_with_context(ctx: ToolContext, text: str, context: dict) -> dict:
     fields = context.get("custom_fields") or {}
-    if fields.get("promote_todo_id"):
-        out = gist.promote_todo_to_concept_m(ctx, todo_id=fields["promote_todo_id"])
+    decision = context.get("supervisor_decision") or {}
+    intent = decision.get("intent")
+    if intent == "create_note":
+        title = str(decision.get("title") or "Note")
+        body = str(decision.get("content") or "")
+        out = gist.create_note(ctx, title=title, body=body)
+        return {"reply": "Note created.", "result": out, "graph_write": True}
+    if intent == "create_todo":
+        title = str(decision.get("title") or "ToDo")
+        body = str(decision.get("content") or "")
+        out = gist.create_todo(ctx, title=title, body=body)
+        return {"reply": "Todo created.", "result": out, "graph_write": True}
+    if intent == "promote_todo":
+        todo_id = fields.get("promote_todo_id") or decision.get("target_id")
+        if not todo_id:
+            return {"reply": "Select the ToDo you want to promote.", "graph_write": False}
+        out = gist.promote_todo_to_concept_m(ctx, todo_id=str(todo_id))
         return {"reply": "Todo promoted.", "result": out, "graph_write": True}
-    return scratch_worker(ctx, text)
+    return {
+        "reply": "I couldn't determine which note or ToDo action you want.",
+        "graph_write": False,
+    }
 
 
 def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = None) -> dict:
     from app.agents.scope_proposal import (
+        load_scope_proposal,
         record_scope_turn,
         update_scope_proposal,
         upsert_project_scope_approval,
@@ -453,10 +518,34 @@ def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = Non
     proj = ctx.store.get_project(ctx.project_id)
     context = context or {}
     approval_id = context.get("approval_id")
+    decision = context.get("supervisor_decision") or {}
+    fields = context.get("custom_fields") or {}
 
-    if "update_project_scope" in text or "save scope" in text.lower():
-        intro = text.split(":", 1)[-1].strip() if ":" in text else text
-        fields = context.get("custom_fields") or {}
+    if decision.get("intent") == "scope_save":
+        draft = load_scope_proposal(ctx.thread_id)
+        intro = str(decision.get("content") or draft.get("proposed_introduction") or "").strip()
+        if not intro:
+            recorded = record_scope_turn(ctx.thread_id, text)
+            response = get_chains().project_scope.invoke(
+                {
+                    "payload": json.dumps(
+                        {
+                            "current_scope": (proj.introduction or "").strip(),
+                            "latest_user_message": text,
+                            "draft_proposal": recorded.get("proposed_introduction", ""),
+                            "conversation_turns": recorded.get("conversation_turns", []),
+                        },
+                        ensure_ascii=False,
+                    )
+                }
+            )
+            intro = str(response or "").strip()
+        if not intro:
+            return {
+                "reply": "I don't have a complete scope proposal to save yet. Tell me what to revise.",
+                "graph_write": False,
+            }
+        update_scope_proposal(ctx.thread_id, intro)
         if fields.get("force_scope_commit") and not context.get("voice_dispatch"):
             project.update_project_scope(ctx, introduction=intro)
             return {"reply": "Scope saved.", "graph_write": True}

@@ -4,20 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agents.voice_dialogue import is_dialogue_only_utterance
-
-VOICE_DIALOGUE_ONLY_WORKERS = frozenset({"conversation", "scratch"})
-
-VOICE_DISPATCH_WORKERS = frozenset(
-    {
-        "gist",
-        "intradoc",
-        "link",
-        "reorg",
-        "retrieval",
-        "project_scope",
-    }
-)
+from app.llm.schemas import WorkerRoute
 
 
 def is_voice_turn(context_json: dict[str, Any] | None) -> bool:
@@ -29,24 +16,14 @@ def is_voice_turn(context_json: dict[str, Any] | None) -> bool:
 
 
 def needs_voice_dispatch(
-    worker_kind: str,
+    decision: WorkerRoute,
     *,
     voice_turn: bool,
-    text: str = "",
     scope_blocked: bool = False,
 ) -> bool:
-    if not voice_turn:
-        return False
-    if scope_blocked or worker_kind in VOICE_DIALOGUE_ONLY_WORKERS:
-        return False
-    if worker_kind == "project_scope":
-        low = text.lower()
-        if "save scope" in low or "update_project_scope" in low:
-            return True
-        if is_dialogue_only_utterance(text):
-            return False
-        return worker_kind == "project_scope"
-    return worker_kind in VOICE_DISPATCH_WORKERS or worker_kind not in VOICE_DIALOGUE_ONLY_WORKERS
+    return bool(
+        voice_turn and not scope_blocked and decision.dispatch and decision.worker != "conversation"
+    )
 
 
 def resolve_voice_route(
@@ -55,7 +32,7 @@ def resolve_voice_route(
     project_id: str,
     text: str,
     context_json: dict[str, Any],
-) -> tuple[str, str, bool]:
+) -> tuple[WorkerRoute, str, bool]:
     from app.agents.context_preprocessor import (
         apply_custom_fields_to_text,
         block_graph_writes_without_scope,
@@ -65,17 +42,28 @@ def resolve_voice_route(
 
     project = store.get_project(project_id)
     effective = apply_custom_fields_to_text(text, context_json or {})
-    worker = route_intent(effective, context_json or {}, project)
-    worker = prioritize_project_scope_until_complete(project.introduction, worker, context_json)
-    if (
-        not (project.introduction or "").strip()
-        and worker in VOICE_DIALOGUE_ONLY_WORKERS
-        and is_voice_turn(context_json)
-        and not is_dialogue_only_utterance(effective)
-        and len(effective.strip()) >= 30
-    ):
-        worker = "project_scope"
+    decision = route_intent(effective, context_json or {}, project)
+    worker = prioritize_project_scope_until_complete(
+        project.introduction,
+        decision.worker,
+        context_json,
+    )
+    if worker != decision.worker:
+        decision = decision.model_copy(
+            update={
+                "worker": worker,
+                "intent": "scope_conversation",
+                "dispatch": True,
+            }
+        )
     scope_blocked = block_graph_writes_without_scope(project.introduction, worker)
     if scope_blocked:
         worker = "project_scope"
-    return worker, effective, scope_blocked
+        decision = decision.model_copy(
+            update={
+                "worker": worker,
+                "intent": "scope_conversation",
+                "dispatch": True,
+            }
+        )
+    return decision, effective, scope_blocked

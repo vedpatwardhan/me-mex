@@ -1,17 +1,20 @@
 from dataclasses import replace
 
 from app.agents import workers
-from app.agents.source_reference import resolve_source_reference, source_request_worker
+from app.agents.source_reference import resolve_source_reference
 from app.agents.workers import _summarize_source
 from app.db import ToolContext
 from app.llm import get_chains, set_chains_override
+from app.llm.schemas import WorkerRoute
 from langchain_core.runnables import RunnableLambda
 
 
 def test_source_reference_uses_url_value_independent_of_custom_field_name():
     ref = resolve_source_reference(
         "Give me a short summary of the linked paper.",
-        {"paper": "https://arxiv.org/abs/2605.11550"},
+        {"reading_material": "https://arxiv.org/abs/2605.11550"},
+        selected_reference="https://arxiv.org/abs/2605.11550",
+        selected_field="reading_material",
     )
     assert ref.url == "https://arxiv.org/pdf/2605.11550"
     assert ref.error is None
@@ -31,18 +34,83 @@ def test_source_reference_reports_multiple_links():
     assert "multiple" in (ref.error or "")
 
 
-def test_short_source_summary_routes_to_gist_and_detailed_analysis_to_intradoc():
-    context = {"custom_fields": {"paper": "https://arxiv.org/pdf/2605.11550"}}
-    assert source_request_worker("Give me a short summary of this paper", context) == "gist"
-    assert source_request_worker("Analyze this paper in detail", context) == "intradoc"
-    assert source_request_worker("Analyze this paper", context) == "intradoc"
-    assert source_request_worker("Tell me about this paper", context) == "gist"
+def test_supervisor_selected_reference_must_be_user_supplied():
+    ref = resolve_source_reference(
+        "Summarize the attached paper.",
+        {"reading_material": "https://example.org/paper.pdf"},
+        selected_reference="https://example.org/other-paper.pdf",
+        selected_field="reading_material",
+    )
+    assert ref.url is None
+    assert "does not match" in (ref.error or "")
 
 
 def test_supervisor_route_resolves_summary_and_deep_analysis_intents(project):
     gist_context = {"custom_fields": {"paper": "https://arxiv.org/pdf/2605.11550"}}
-    assert workers.route_intent("Give me a brief summary", gist_context, project) == "gist"
-    assert workers.route_intent("Give me a detailed analysis", gist_context, project) == "intradoc"
+    summary = workers.route_intent("Give me a brief summary", gist_context, project)
+    detailed = workers.route_intent("Give me a detailed analysis", gist_context, project)
+    assert (summary.worker, summary.intent, summary.dispatch) == ("gist", "source_summary", True)
+    assert summary.source_field == "paper"
+    assert summary.source_reference == "https://arxiv.org/pdf/2605.11550"
+    assert (detailed.worker, detailed.intent, detailed.dispatch) == (
+        "intradoc",
+        "source_analysis",
+        True,
+    )
+
+
+def test_supervisor_source_selection_is_validated_against_arbitrary_custom_field(
+    project,
+):
+    base = get_chains()
+    source_url = "https://example.org/selected.pdf"
+    set_chains_override(
+        replace(
+            base,
+            supervisor=RunnableLambda(
+                lambda _inputs: WorkerRoute(
+                    worker="gist",
+                    intent="source_summary",
+                    dispatch=True,
+                    source_field="background_reading",
+                    source_reference=source_url,
+                )
+            ),
+        )
+    )
+    decision = workers.route_intent(
+        "Please summarize the paper I attached.",
+        {"custom_fields": {"background_reading": source_url}},
+        project,
+    )
+    assert decision.source_field == "background_reading"
+    assert decision.source_reference == source_url
+    assert decision.source_error is None
+
+
+def test_supervisor_source_selection_cannot_invent_a_url(project):
+    base = get_chains()
+    set_chains_override(
+        replace(
+            base,
+            supervisor=RunnableLambda(
+                lambda _inputs: WorkerRoute(
+                    worker="gist",
+                    intent="source_summary",
+                    dispatch=True,
+                    source_field="reading_material",
+                    source_reference="https://example.org/invented.pdf",
+                )
+            ),
+        )
+    )
+    decision = workers.route_intent(
+        "Summarize the attached paper.",
+        {"custom_fields": {"reading_material": "https://example.org/supplied.pdf"}},
+        project,
+    )
+    assert decision.source_reference is None
+    assert "does not match" in (decision.source_error or "")
 
 
 def test_gist_worker_fetches_resolved_source_and_summarizes_extracted_text(

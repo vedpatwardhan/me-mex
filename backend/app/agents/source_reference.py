@@ -1,4 +1,4 @@
-"""Resolve user-provided document references from text and custom-field values."""
+"""Validate Supervisor-selected source references against user-supplied input."""
 
 from __future__ import annotations
 
@@ -16,71 +16,81 @@ _TRAILING_URL_PUNCTUATION = ".,;:!?)]}>\"'`"
 class SourceReference:
     url: str | None = None
     error: str | None = None
+    field_name: str | None = None
 
 
 def resolve_source_reference(
     text: str,
     custom_fields: dict[str, Any] | None = None,
+    *,
+    selected_reference: str | None = None,
+    selected_field: str | None = None,
 ) -> SourceReference:
-    """Find a single supplied URL or arXiv identifier without relying on field names."""
-    values = [text or ""]
-    values.extend(str(value) for value in (custom_fields or {}).values() if value is not None)
+    """Validate the Supervisor's selection; recognize URL syntax only for checking it."""
+    fields = custom_fields or {}
+    if selected_field is not None and selected_field not in fields:
+        return SourceReference(error="The selected source field is not present in the request.")
 
+    supplied: dict[str, set[str]] = {"$utterance": _references_in(text or "")}
+    for name, value in fields.items():
+        if name == "raw_text" or value is None:
+            continue
+        supplied[str(name)] = _references_in(str(value))
+
+    field_candidates = supplied.get(selected_field, set()) if selected_field else set()
+    if selected_reference:
+        selected_candidates = _references_in(selected_reference)
+        if len(selected_candidates) != 1:
+            return SourceReference(
+                error="The selected source reference is not a single URL or arXiv ID."
+            )
+        selected = next(iter(selected_candidates))
+        allowed = field_candidates if selected_field else set().union(*supplied.values())
+        if selected not in allowed:
+            return SourceReference(
+                error="The selected source reference does not match a link or arXiv ID the user supplied."
+            )
+        field_name = selected_field or _unique_field_for(selected, supplied)
+        return SourceReference(url=selected, field_name=field_name)
+
+    candidates = field_candidates if selected_field else set().union(*supplied.values())
+    if not candidates:
+        return SourceReference(field_name=selected_field)
+    if len(candidates) > 1:
+        return SourceReference(
+            error="I found multiple possible source references. Please specify which one to use."
+        )
+    selected = next(iter(candidates))
+    field_name = selected_field or _unique_field_for(selected, supplied)
+    return SourceReference(url=selected, field_name=field_name)
+
+
+def _unique_field_for(reference: str, supplied: dict[str, set[str]]) -> str | None:
+    fields = [
+        name
+        for name, candidates in supplied.items()
+        if name != "$utterance" and reference in candidates
+    ]
+    return fields[0] if len(fields) == 1 else None
+
+
+def _references_in(value: str) -> set[str]:
+    """Extract candidate URL syntax for validation, not semantic source selection."""
     urls: set[str] = set()
     arxiv_ids: set[str] = set()
-    for value in values:
-        for match in _URL.findall(value):
-            candidate = match.rstrip(_TRAILING_URL_PUNCTUATION)
-            parts = urlsplit(candidate)
-            if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
-                continue
-            if "arxiv.org" in parts.netloc.lower():
-                parts = _arxiv_pdf_url(parts)
-                candidate = urlunsplit(parts)
-            urls.add(candidate)
-        arxiv_ids.update(match.group(1) for match in _ARXIV_ID.finditer(value))
-
-    if len(urls) > 1:
-        return SourceReference(
-            error="I found multiple source links. Please specify which one to use."
-        )
+    for match in _URL.findall(value):
+        candidate = match.rstrip(_TRAILING_URL_PUNCTUATION)
+        parts = urlsplit(candidate)
+        if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+            continue
+        if "arxiv.org" in parts.netloc.lower():
+            parts = _arxiv_pdf_url(parts)
+            candidate = urlunsplit(parts)
+        urls.add(candidate)
     if urls:
-        return SourceReference(url=next(iter(urls)))
-    if len(arxiv_ids) > 1:
-        return SourceReference(
-            error="I found multiple arXiv IDs. Please specify which paper to use."
-        )
-    if arxiv_ids:
-        arxiv_id = next(iter(arxiv_ids))
-        return SourceReference(url=f"https://arxiv.org/pdf/{arxiv_id}")
-    return SourceReference()
-
-
-def source_request_worker(text: str, context: dict[str, Any]) -> str | None:
-    """Route short source summaries to gist and detailed source work to intradoc."""
-    fields = context.get("custom_fields") or {}
-    source = resolve_source_reference(text, fields)
-    if not source.url and not source.error and not str(fields.get("raw_text") or "").strip():
-        return None
-
-    lower = text.lower()
-    detailed = re.search(
-        r"\b(deep[ -]?read|deep dive|intra[ -]?doc|detailed|in[- ]depth|in detail|"
-        r"comprehensive|thorough|analysis|analy[sz]e|walk (?:me )?through|"
-        r"extract (?:the )?concepts?|concept graph)\b",
-        lower,
-    )
-    if detailed:
-        return "intradoc"
-
-    short_summary = re.search(
-        r"\b(gist|summary|summaries|summari[sz](?:e|es|ed|ing|ation)|recap|"
-        r"(?:quick|short|brief) summary|brief overview|quick overview|executive summary|"
-        r"in a few sentences|overview|main idea|key takeaways?|what.{0,30}about|"
-        r"tell me (?:briefly )?about|explain (?:the )?(?:paper|article|source))\b",
-        lower,
-    )
-    return "gist" if short_summary else None
+        return urls
+    arxiv_ids.update(match.group(1) for match in _ARXIV_ID.finditer(value))
+    return {f"https://arxiv.org/pdf/{arxiv_id}" for arxiv_id in arxiv_ids}
 
 
 def _arxiv_pdf_url(parts):

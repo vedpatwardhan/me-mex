@@ -16,10 +16,33 @@ WorkerName = Literal[
     "scratch",
     "project_scope",
 ]
+WorkerIntent = Literal[
+    "conversation",
+    "source_summary",
+    "source_analysis",
+    "commit_gist",
+    "create_note",
+    "create_todo",
+    "promote_todo",
+    "scope_conversation",
+    "scope_save",
+    "link",
+    "reorg",
+    "retrieval",
+    "status",
+]
 
 
 class WorkerRoute(BaseModel):
     worker: WorkerName
+    intent: WorkerIntent
+    dispatch: bool
+    source_field: str | None = None
+    source_reference: str | None = None
+    source_error: str | None = None
+    title: str | None = None
+    content: str | None = None
+    target_id: str | None = None
 
 
 class PassageConcept(BaseModel):

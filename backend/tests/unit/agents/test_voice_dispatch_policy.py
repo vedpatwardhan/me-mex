@@ -1,31 +1,26 @@
 import pytest
 from app.agents.voice_dispatch import needs_voice_dispatch
+from app.llm.schemas import WorkerRoute
 
 
 @pytest.mark.voice_plane
 @pytest.mark.parametrize(
-    "worker,voice,expected",
+    "decision,voice,expected",
     [
-        ("conversation", True, False),
-        ("retrieval", True, True),
-        ("intradoc", True, True),
-        ("conversation", False, False),
+        (WorkerRoute(worker="conversation", intent="conversation", dispatch=False), True, False),
+        (WorkerRoute(worker="retrieval", intent="retrieval", dispatch=True), True, True),
+        (WorkerRoute(worker="intradoc", intent="source_analysis", dispatch=True), True, True),
+        (WorkerRoute(worker="conversation", intent="conversation", dispatch=False), False, False),
     ],
 )
-def test_needs_voice_dispatch(worker, voice, expected):
-    assert needs_voice_dispatch(worker, voice_turn=voice) is expected
+def test_needs_voice_dispatch(decision, voice, expected):
+    assert needs_voice_dispatch(decision, voice_turn=voice) is expected
 
 
 @pytest.mark.voice_plane
-def test_project_scope_conditional_voice_dispatch():
-    assert (
-        needs_voice_dispatch(
-            "project_scope",
-            voice_turn=True,
-            text="Robotics manipulation and sim-to-real transfer.",
-        )
-        is True
-    )
-    assert needs_voice_dispatch("project_scope", voice_turn=True, text="how's your day") is False
-    assert needs_voice_dispatch("project_scope", voice_turn=True, text="save scope: intro") is True
-    assert needs_voice_dispatch("project_scope", voice_turn=False, text="save scope") is False
+def test_project_scope_dispatch_comes_from_supervisor_decision():
+    proposal = WorkerRoute(worker="project_scope", intent="scope_save", dispatch=True)
+    conversation = WorkerRoute(worker="project_scope", intent="scope_conversation", dispatch=False)
+    assert needs_voice_dispatch(proposal, voice_turn=True) is True
+    assert needs_voice_dispatch(conversation, voice_turn=True) is False
+    assert needs_voice_dispatch(proposal, voice_turn=False) is False
