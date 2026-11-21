@@ -1,6 +1,7 @@
 from app.agents.context_preprocessor import (
     apply_custom_fields_to_text,
     block_graph_writes_without_scope,
+    prioritize_project_scope_until_complete,
 )
 
 
@@ -17,3 +18,17 @@ def test_scope_blocks_write_workers():
     assert block_graph_writes_without_scope("", "gist") is True
     assert block_graph_writes_without_scope("Robotics.", "gist") is False
     assert block_graph_writes_without_scope("", "conversation") is False
+
+
+def test_p1_scope_takes_priority_over_routes():
+    assert prioritize_project_scope_until_complete("", "gist", {}) == "project_scope"
+    assert prioritize_project_scope_until_complete("", "retrieval", {}) == "project_scope"
+    assert prioritize_project_scope_until_complete("Robotics.", "gist", {}) == "gist"
+    assert (
+        prioritize_project_scope_until_complete(
+            "",
+            "intradoc",
+            {"custom_fields": {"resume_job_id": "j1"}},
+        )
+        == "intradoc"
+    )

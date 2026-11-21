@@ -82,7 +82,20 @@ async def astream_conversation_voice(
         project_scope=project.introduction or "",
     )
     chains = get_chains()
-    reply = chains.conversation.invoke(inp)
+    if worker_kind == "project_scope" and not dispatch:
+        reply = chains.project_scope.invoke(
+            {
+                "payload": json.dumps(
+                    {
+                        "current_scope": project.introduction or "",
+                        "user_message": effective_text,
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        )
+    else:
+        reply = chains.conversation.invoke(inp)
     if not isinstance(reply, str):
         reply = str(reply)
 

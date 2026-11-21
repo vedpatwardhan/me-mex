@@ -53,16 +53,15 @@ def resolve_voice_route(
     from app.agents.context_preprocessor import (
         apply_custom_fields_to_text,
         block_graph_writes_without_scope,
+        prioritize_project_scope_until_complete,
     )
     from app.agents.workers import route_intent
 
     project = store.get_project(project_id)
     effective = apply_custom_fields_to_text(text, context_json or {})
     worker = route_intent(effective, context_json or {}, project)
+    worker = prioritize_project_scope_until_complete(project.introduction, worker, context_json)
     scope_blocked = block_graph_writes_without_scope(project.introduction, worker)
-    fields = (context_json or {}).get("custom_fields") or {}
-    if fields.get("force_gist_commit") and worker == "gist":
-        scope_blocked = False
     if scope_blocked:
-        worker = "conversation"
+        worker = "project_scope"
     return worker, effective, scope_blocked

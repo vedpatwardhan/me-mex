@@ -13,6 +13,7 @@ from app.agents import job_runtime, workers
 from app.agents.context_preprocessor import (
     apply_custom_fields_to_text,
     block_graph_writes_without_scope,
+    prioritize_project_scope_until_complete,
 )
 from app.agents.jobs import job_from_worker_turn
 from app.db import ToolContext, get_store
@@ -42,14 +43,12 @@ def _supervisor(state: AgentState) -> AgentState:
     )
     project = ctx.store.get_project(ctx.project_id)
     effective = apply_custom_fields_to_text(state["text"], state.get("context_json") or {})
-    worker = workers.route_intent(effective, state.get("context_json") or {}, project)
     context = state.get("context_json") or {}
-    fields = context.get("custom_fields") or {}
+    worker = workers.route_intent(effective, context, project)
+    worker = prioritize_project_scope_until_complete(project.introduction, worker, context)
     scope_blocked = block_graph_writes_without_scope(project.introduction, worker)
-    if fields.get("force_gist_commit") and worker == "gist":
-        scope_blocked = False
     if scope_blocked:
-        worker = "conversation"
+        worker = "project_scope"
     return {
         **state,
         "effective_text": effective,
