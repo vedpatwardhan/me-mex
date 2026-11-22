@@ -113,3 +113,54 @@ def test_live_supervisor_routes_natural_cancel_to_the_active_job():
     assert decision.intent == "job_control"
     assert decision.job_action == "cancel"
     assert decision.target_id == "job-active-gist"
+
+
+@pytest.mark.live_llm
+def test_live_supervisor_resolves_recent_node_pronoun_for_link():
+    if settings.CHAT_LLM_MODE != "live":
+        pytest.skip("run with ME_MEX_RUN_LIVE_LLM_TESTS=1 and CHAT_LLM_MODE=live")
+
+    decision = route_intent(
+        "Connect it with the Genesis node.",
+        {
+            "custom_fields": {},
+            "graph_candidates": [
+                {"id": "genesis_global", "title": "Genesis", "node_kind": "CONCEPT_M"},
+                {
+                    "id": "root_dawn",
+                    "title": "The DAWN paper",
+                    "node_kind": "ROOT",
+                },
+            ],
+            "routing_memory": {
+                "summary": "gist_root ROOT 'The DAWN paper' (id=root_dawn)",
+                "recent_graph_changes": [
+                    {
+                        "operation": "gist_root",
+                        "nodes": [
+                            {
+                                "id": "root_dawn",
+                                "title": "The DAWN paper",
+                                "node_kind": "ROOT",
+                            }
+                        ],
+                    }
+                ],
+                "recent_turns": [
+                    {
+                        "role": "assistant",
+                        "text": "The DAWN paper gist was approved and added to the graph as a ROOT.",
+                    }
+                ],
+            },
+        },
+        Project(
+            _id="live-link-routing",
+            name="Live link routing",
+            introduction="Research project.",
+        ),
+    )
+
+    assert decision.worker == "link"
+    assert decision.root_id == "root_dawn"
+    assert decision.target_ids == ["genesis_global"]

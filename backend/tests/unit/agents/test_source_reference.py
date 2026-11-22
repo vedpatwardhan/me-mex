@@ -180,6 +180,8 @@ def test_committed_scope_state_and_prompt_disambiguate_acknowledgement_from_revi
     prompt = load_prompt("worker_route")
     assert "Acknowledging that scope is complete" in prompt
     assert "what comes next" in prompt
+    assert "context.routing_memory.recent_turns" in prompt
+    assert "never reverse source and target roles" in prompt
 
 
 def test_supervisor_failure_falls_back_to_conversation_only(project):

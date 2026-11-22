@@ -50,6 +50,9 @@ def _supervisor(state: AgentState) -> AgentState:
     project = ctx.store.get_project(ctx.project_id)
     effective = apply_custom_fields_to_text(state["text"], state.get("context_json") or {})
     context = dict(state.get("context_json") or {})
+    from app.agents.session_plane import build_routing_memory
+
+    context["routing_memory"] = build_routing_memory(state["thread_id"])
     context["graph_candidates"] = graph_candidates_for_supervisor(ctx.store, ctx.project_id)
     context["scope_approval_pending"] = any(
         item.approval_type == "project_scope"
@@ -77,6 +80,7 @@ def _supervisor(state: AgentState) -> AgentState:
         )
     return {
         **state,
+        "context_json": context,
         "effective_text": effective,
         "worker": worker,
         "supervisor_decision": decision.model_dump(),
@@ -303,6 +307,16 @@ def resume_approval(
 
     def _resolved(result: dict) -> dict:
         job_runtime.resolve_approval_job(thread_id, approval_id, action)
+        from app.agents.session_plane import record_recent_graph_change
+
+        record_recent_graph_change(
+            store=store,
+            project_id=project_id,
+            thread_id=thread_id,
+            operation=item.approval_type,
+            payload=item.payload,
+            result=result,
+        )
         result.setdefault("status", "approved")
         result.setdefault("approval_id", approval_id)
         result.setdefault("approval_type", item.approval_type)

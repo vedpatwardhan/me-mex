@@ -3,9 +3,11 @@ import time
 from dataclasses import replace
 
 import pytest
+from app.agents import session_plane
 from app.db import ToolContext
 from app.llm import get_chains, set_chains_override
 from app.llm.schemas import WorkerRoute
+from app.services.checkpoints import JsonCheckpointStore
 from app.tools import gist
 from langchain_core.runnables import RunnableLambda
 from tests.sse_util import iter_sse_data
@@ -256,10 +258,12 @@ def test_voice_job_control_cancels_selected_job_without_dispatching_new_work(
 
 @pytest.mark.voice_plane
 def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
-    client, store, project_scoped
+    client, store, project_scoped, tmpdir_checkpoint, monkeypatch
 ):
     base = get_chains()
     seen = {}
+    thread_id = "voice-link-targets"
+    monkeypatch.setattr(session_plane, "_checkpoint", JsonCheckpointStore(str(tmpdir_checkpoint)))
     ctx = ToolContext(
         project_id=project_scoped.id,
         thread_id="voice-link-targets",
@@ -271,9 +275,34 @@ def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
         gist="Source gist.",
     )
     genesis_id = store.get_project(project_scoped.id).genesis_node_id
+    session_plane.append_transcript_turn(
+        thread_id,
+        role="user",
+        text="Please add the DAWN paper gist to this project.",
+    )
+    session_plane.append_transcript_turn(
+        thread_id,
+        role="assistant",
+        text="The DAWN paper gist was approved and added to the graph as a ROOT.",
+    )
+    session_plane.record_recent_graph_change(
+        store=store,
+        project_id=project_scoped.id,
+        thread_id=thread_id,
+        operation="gist_root",
+        payload={},
+        result={"result": {"root_id": dawn["root_id"]}},
+    )
 
     def supervisor(inputs):
         seen.update(inputs)
+        memory = inputs["context"]["routing_memory"]
+        assert any("approved and added" in turn["text"] for turn in memory["recent_turns"])
+        assert any(
+            node["id"] == dawn["root_id"]
+            for change in memory["recent_graph_changes"]
+            for node in change["nodes"]
+        )
         return WorkerRoute(
             worker="link",
             intent="link",
@@ -283,11 +312,10 @@ def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
         )
 
     set_chains_override(replace(base, supervisor=RunnableLambda(supervisor)))
-    thread_id = "voice-link-targets"
     response = client.post(
         "/api/voice/conversation/stream",
         json={
-            "text": "Connect the Dawn node to the Genesis node.",
+            "text": "Connect it with the Genesis node.",
             "thread_id": thread_id,
             "context_json": {
                 "voice_turn": True,
@@ -328,3 +356,9 @@ def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
     )
     assert approved.status_code == 200
     assert genesis_id in store.neighbors(dawn["root_id"])
+    latest_change = session_plane.build_routing_memory(thread_id)["recent_graph_changes"][-1]
+    assert latest_change["operation"] == "placement"
+    assert {node["id"] for node in latest_change["nodes"]} == {
+        dawn["root_id"],
+        genesis_id,
+    }

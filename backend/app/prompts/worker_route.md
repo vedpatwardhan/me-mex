@@ -35,11 +35,13 @@ Routing rules:
 - For true scope edits, do not classify incremental versus replace; the ProjectScope LLM does that using the active baseline and full conversation. Pass through `custom_fields.force_scope_rewrite` unchanged as an explicit override.
 - For scratch requests, extract the requested operation and title/content/target into the fields above; do not rely on fixed phrase matching in the worker.
 - For “connect X to Y” / placement requests, resolve X and Y against `context.graph_candidates` and return their ids in `root_id` and `target_ids`. If either node cannot be identified unambiguously, ask a concise clarification with `worker=conversation`, `dispatch=false`; do not dispatch a link job that cannot perform the requested connection.
+- Use `context.routing_memory.recent_turns` to resolve references such as “it”, “that paper”, or “the one we just approved”. Use `context.routing_memory.recent_graph_changes` and its summary to identify recently committed graph nodes; these records include exact IDs and node kinds. For a follow-up like “connect it with Genesis”, use the uniquely referenced recent ROOT as `root_id` and Genesis as a target. IDs and kinds in `context.graph_candidates` / `recent_graph_changes` are authoritative; never reverse source and target roles. If the referent is not unique, ask a concise clarification instead of guessing.
 - Treat explicit `force_gist_commit` and `force_scope_commit` custom-field flags as authoritative commit requests when true.
 - Do not infer persistence from a source link, a summary request, or a user discussing possible scope wording.
 
 Project scope status is included in `context.project_scope_status` (`unset` or `committed`), and whether a draft approval exists is included in `context.scope_approval_pending`.
 The current project's candidate graph nodes are included in `context.graph_candidates` as `{{id, title, node_kind}}` records for link-target resolution.
+`context.routing_memory` contains a bounded rolling summary of recent graph changes and recent user/assistant turns for resolving follow-up references.
 
 Project scope text (may be empty):
 {{ project_scope }}

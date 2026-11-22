@@ -11,6 +11,7 @@ from app.agents.scope_proposal import load_scope_proposal
 from app.agents.session_events import publish_session_event
 from app.agents.workflow_agent import run_workflow_agent
 from app.db import ToolContext, get_store
+from app.errors import NotFoundError
 from app.services.checkpoints import JsonCheckpointStore
 from app.tools import dock as dock_tools
 
@@ -26,6 +27,83 @@ def append_transcript_turn(thread_id: str, *, role: str, text: str) -> None:
     transcript: list[dict[str, str]] = list(state.get("transcript") or [])
     transcript.append({"role": role, "text": (text or "")[:2000]})
     state["transcript"] = transcript[-50:]
+    _checkpoint.save(thread_id, state)
+
+
+def build_routing_memory(thread_id: str) -> dict[str, Any]:
+    """Return bounded recent dialogue and graph facts for Supervisor coreference."""
+    state = _checkpoint_for(thread_id)
+    turns = [
+        {
+            "role": str(turn.get("role") or ""),
+            "text": str(turn.get("text") or "")[:500],
+        }
+        for turn in (state.get("transcript") or [])[-6:]
+        if turn.get("role") in {"user", "assistant"} and turn.get("text")
+    ]
+    graph_changes = list(state.get("recent_graph_changes") or [])[-4:]
+    summary = "; ".join(
+        f"{change.get('operation', 'updated')} {node.get('node_kind', 'node')} "
+        f"'{node.get('title', '')}' (id={node.get('id')})"
+        for change in graph_changes
+        for node in change.get("nodes", [])
+    )
+    return {
+        "summary": summary[:1200],
+        "recent_graph_changes": graph_changes,
+        "recent_turns": turns,
+    }
+
+
+def record_recent_graph_change(
+    *,
+    store,
+    project_id: str,
+    thread_id: str,
+    operation: str,
+    payload: dict[str, Any] | None,
+    result: dict[str, Any],
+) -> None:
+    """Persist exact graph node references from an approved graph change."""
+    payload = payload or {}
+    node_ids: list[str] = []
+    if operation == "placement":
+        node_ids.extend([payload.get("root_id"), *(result.get("edges") or [])])
+    else:
+        created = result.get("result") or result
+        root_id = created.get("root_id")
+        if root_id:
+            node_ids.append(root_id)
+        node_ids.extend(created.get("node_ids") or [])
+        node_ids.extend(created.get("concept_ids") or [])
+        node_ids.extend(
+            created.get(key)
+            for key in ("node_id", "parent_id", "new_hub_id", "merged_into", "target_id")
+            if created.get(key)
+        )
+
+    nodes: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for node_id in node_ids:
+        if not node_id or str(node_id) in seen:
+            continue
+        seen.add(str(node_id))
+        try:
+            node = store.get_node(str(node_id))
+        except NotFoundError:  # Stale/deleted graph references should not break approval.
+            continue
+        if node.project_id != project_id:
+            continue
+        nodes.append({"id": node.id, "title": node.title[:180], "node_kind": node.node_kind.value})
+        if len(nodes) == 8:
+            break
+    if not nodes:
+        return
+
+    state = _checkpoint_for(thread_id)
+    changes = list(state.get("recent_graph_changes") or [])
+    changes.append({"operation": operation, "nodes": nodes})
+    state["recent_graph_changes"] = changes[-4:]
     _checkpoint.save(thread_id, state)
 
 
@@ -118,6 +196,16 @@ def observer_ingest_job(
         gist_followup = _compose_gist_followup(job, worker_output)
         state["last_worker_result_snippet"] = gist_followup[:400]
     _checkpoint.save(thread_id, state)
+
+    if job.get("status") == "done" and worker_output.get("graph_write"):
+        record_recent_graph_change(
+            store=get_store(),
+            project_id=project_id,
+            thread_id=thread_id,
+            operation=str(job.get("worker") or job.get("kind") or "graph_update"),
+            payload=worker_output.get("payload"),
+            result=worker_output,
+        )
 
     publish_session_event(
         thread_id,

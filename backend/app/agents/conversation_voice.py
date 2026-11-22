@@ -9,7 +9,11 @@ from typing import Any
 
 from app.agents import job_runtime
 from app.agents.job_affinity import resolve_job_dispatch
-from app.agents.session_plane import append_transcript_turn, build_session_briefing
+from app.agents.session_plane import (
+    append_transcript_turn,
+    build_routing_memory,
+    build_session_briefing,
+)
 from app.agents.source_reference import resolve_source_reference
 from app.agents.voice_dispatch import (
     is_voice_turn,
@@ -137,6 +141,7 @@ async def astream_conversation_voice(
     )
     routing_context = {
         **ctx_json,
+        "routing_memory": build_routing_memory(thread_id),
         "session_state": {
             "active_jobs": [
                 {
@@ -204,7 +209,7 @@ async def astream_conversation_voice(
         project_id=project_id,
         worker_kind=worker_kind,
         effective_text=effective_text,
-        context_json={**ctx_json, "supervisor_decision": decision.model_dump()},
+        context_json={**routing_context, "supervisor_decision": decision.model_dump()},
         jobs=job_runtime.list_jobs(thread_id),
         pending_approvals=store.list_pending(project_id, thread_id),
         introduction=project.introduction or "",
@@ -247,7 +252,7 @@ async def astream_conversation_voice(
     if dispatch_pending and worker_fn:
         ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
         ctx_json_dispatch = {
-            **ctx_json,
+            **routing_context,
             "voice_dispatch": True,
             "supervisor_decision": decision.model_dump(),
         }
