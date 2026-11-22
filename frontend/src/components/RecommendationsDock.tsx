@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LayoutList, Sparkles, User, Bot } from 'lucide-react';
+import { LayoutList, LoaderCircle, Sparkles, User, Bot } from 'lucide-react';
 
 import { ApprovalReviewPanel } from './ApprovalReviewPanel';
 import { DockMarkdown } from './DockMarkdown';
@@ -20,6 +20,7 @@ type Props = {
   latestReply?: string;
   latestUserText?: string;
   items?: DockItem[];
+  pendingApprovals?: Set<string>;
   projectScope?: string;
   onApprove?: (id: string) => void;
   onDismiss?: (id: string) => void;
@@ -55,6 +56,7 @@ export const RecommendationsDock: React.FC<Props> = ({
   latestReply = '',
   latestUserText = '',
   items = [],
+  pendingApprovals = new Set(),
   projectScope = '',
   onApprove,
   onDismiss,
@@ -106,6 +108,7 @@ export const RecommendationsDock: React.FC<Props> = ({
                 const style = ITEM_STYLES[item.className];
                 const reviewOpen = reviewId === item.id;
                 const reviewBody = item.reviewMarkdown || '_Loading preview…_';
+                const isApproving = pendingApprovals.has(item.id);
                 return (
                   <li
                     key={item.id}
@@ -129,21 +132,32 @@ export const RecommendationsDock: React.FC<Props> = ({
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button
                             type="button"
-                            className="rounded-lg border border-cyan-600/50 bg-cyan-950/40 px-3 py-1 text-xs font-medium text-cyan-200 hover:bg-cyan-900/40"
+                            disabled={isApproving}
+                            className="rounded-lg border border-cyan-600/50 bg-cyan-950/40 px-3 py-1 text-xs font-medium text-cyan-200 hover:bg-cyan-900/40 disabled:cursor-not-allowed disabled:opacity-50"
                             onClick={() => setReviewId(reviewOpen ? null : item.id)}
                           >
                             Review
                           </button>
                           <button
                             type="button"
-                            className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-500"
+                            disabled={isApproving}
+                            aria-busy={isApproving}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-75"
                             onClick={() => onApprove(item.id)}
                           >
-                            Approve
+                            {isApproving ? (
+                              <>
+                                <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                                Approving…
+                              </>
+                            ) : (
+                              'Approve'
+                            )}
                           </button>
                           <button
                             type="button"
-                            className="rounded-lg border border-slate-600 bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-700"
+                            disabled={isApproving}
+                            className="rounded-lg border border-slate-600 bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                             onClick={() => onDismiss(item.id)}
                           >
                             Dismiss

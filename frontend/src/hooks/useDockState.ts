@@ -25,6 +25,7 @@ export function useDockState(
   const [streamState, setStreamState] = useState(emptyDockStreamState);
   const [projectScope, setProjectScope] = useState('');
   const [voiceSession, setVoiceSession] = useState<VoiceSession | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState<Set<string>>(() => new Set());
 
   const { latestReply, latestUserText, items } = streamState;
 
@@ -37,7 +38,25 @@ export function useDockState(
       ...s,
       items: reconcileQueueItems(approvals, nudges, s.items),
     }));
+    return approvals;
   }, [projectId, threadId]);
+
+  const reconcilePendingApprovals = useCallback(async () => {
+    try {
+      const approvals = await refreshApprovals();
+      const pendingIds = new Set(approvals.map((item) => item.id));
+      setPendingApprovals((current) => {
+        const next = new Set(current);
+        for (const id of current) {
+          if (!pendingIds.has(id)) next.delete(id);
+        }
+        return next;
+      });
+    } catch (error) {
+      console.error('Failed to refresh approvals after approval action:', error);
+      setPendingApprovals(new Set());
+    }
+  }, [refreshApprovals]);
 
   useEffect(() => {
     void refreshApprovals();
@@ -57,6 +76,7 @@ export function useDockState(
         const type = event.type as string | undefined;
         const job = event.job as Record<string, unknown> | undefined;
         if (isScopeCommittedEvent(event)) onScopeCommitted?.();
+        if (type === 'turn_end') void reconcilePendingApprovals();
         const shouldRefresh =
           type === 'turn_end' ||
           type === 'recommendation' ||
@@ -66,7 +86,7 @@ export function useDockState(
         if (shouldRefresh) scheduleRefreshApprovals();
       }
     },
-    [scheduleRefreshApprovals, onScopeCommitted],
+    [scheduleRefreshApprovals, onScopeCommitted, reconcilePendingApprovals],
   );
 
   const beginTurn = useCallback((userText: string) => {
@@ -81,12 +101,12 @@ export function useDockState(
         {
           onEvent: (ev) => applyStreamEventToState(ev),
           onTurnEnd: () => {
-            void refreshApprovals();
+            void reconcilePendingApprovals();
           },
         },
       );
     },
-    [threadId, refreshApprovals, applyStreamEventToState, beginTurn],
+    [threadId, reconcilePendingApprovals, applyStreamEventToState, beginTurn],
   );
 
   const voiceCtx = useCallback(
@@ -102,23 +122,38 @@ export function useDockState(
 
   const approve = useCallback(
     async (approvalId: string, contextJson: Record<string, unknown>) => {
+      setPendingApprovals((current) => new Set(current).add(approvalId));
       let result: Record<string, unknown> | undefined;
-      if (voiceSession?.isReady()) {
-        await voiceSession.sendApproval(approvalId, 'approve', voiceCtx(contextJson));
-      } else {
+      try {
+        if (voiceSession?.isReady()) {
+          await voiceSession.sendApproval(approvalId, 'approve', voiceCtx(contextJson));
+          return;
+        }
         result = await resumeApproval({
           thread_id: threadId,
           approval_id: approvalId,
           action: 'approve',
           context_json: contextJson,
         });
+        if (result?.scope_committed === true) onScopeCommitted?.();
+        setStreamState((s) => ({
+          ...s,
+          items: s.items.filter((i) => i.id !== approvalId),
+        }));
+        await refreshApprovals();
+        setPendingApprovals((current) => {
+          const next = new Set(current);
+          next.delete(approvalId);
+          return next;
+        });
+      } catch (error) {
+        setPendingApprovals((current) => {
+          const next = new Set(current);
+          next.delete(approvalId);
+          return next;
+        });
+        throw error;
       }
-      if (result?.scope_committed === true) onScopeCommitted?.();
-      setStreamState((s) => ({
-        ...s,
-        items: s.items.filter((i) => i.id !== approvalId),
-      }));
-      await refreshApprovals();
     },
     [threadId, refreshApprovals, voiceSession, voiceCtx, onScopeCommitted],
   );
@@ -147,6 +182,7 @@ export function useDockState(
     latestReply,
     latestUserText,
     items,
+    pendingApprovals,
     projectScope,
     setProjectScope,
     runTextTurn,

@@ -53,6 +53,7 @@ export const App: React.FC = () => {
           latestReply={dock.latestReply}
           latestUserText={dock.latestUserText}
           items={dock.items}
+          pendingApprovals={dock.pendingApprovals}
           projectScope={dock.projectScope || projectScope}
           onApprove={(id) => void dock.approve(id, contextJson)}
           onDismiss={(id) => void dock.dismiss(id, contextJson)}
