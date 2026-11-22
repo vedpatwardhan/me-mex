@@ -32,10 +32,22 @@ async def test_astream_stub_yields_tokens_before_full_reply(monkeypatch):
 def test_foreground_conversation_knows_a_gist_job_is_starting():
     inputs = _conversation_prompt_inputs(
         text="Give me a short summary of this paper.",
-        briefing={"active_jobs": []},
+        briefing={"active_jobs": [], "pending_approval_count": 0},
         project_scope="",
         worker_kind="gist",
         dispatch_pending=True,
     )
-    assert '"worker": "gist"' in inputs["text"]
+    assert '"worker_kind": "gist"' in inputs["text"]
     assert '"background_job_starting": true' in inputs["text"]
+    assert "drafting the detailed output for the dock" in inputs["text"]
+
+
+def test_foreground_conversation_includes_pending_approval_count():
+    inputs = _conversation_prompt_inputs(
+        text="hello",
+        briefing={"pending_approval_count": 2},
+        project_scope="",
+        worker_kind="conversation",
+        dispatch_pending=False,
+    )
+    assert '"pending_approval_count": 2' in inputs["text"]

@@ -490,10 +490,12 @@ Barge-in → cancel foreground TTS/stream only; debounce proactive TTS per job_i
 1. **LiveKit path:** STT → **Conversation endpoint** (contract TBD: backend stream or Colab hop) with `context_json.voice_turn = true`.
 2. **Dialogue only:** Conversation has **no tools** on voice — no `fetch`, `open_passages`, or retrieval. Facts → **dispatch** plane 3 ([§8](#8-supervisor-routing-intent--agent)).
 3. **Interim contract:** For an information task dispatched in the current turn, Convo acknowledges that the supplied source is being processed and makes no source-specific claims until worker output is available. While `jobs[].status == running`, it can continue normal conversation and accurately use briefing/`jobs` for status questions.
-4. **Token budget:** Conversation uses low `max_tokens` (policy env e.g. `VOICE_FOREGROUND_MAX_TOKENS` — default TBD [10](./10-open-questions.md)).
-5. **Phase from briefing:** e.g. incomplete scope → P1 onboarding copy; running intra-doc → offer status; pending approvals → short reminder (not full staging JSON aloud).
-6. **Dispatch:** Same utterance: Convo reply **first**, then async worker; worker `reply` must **not** replace Convo on the STT→TTS hot path. On completed Gist jobs, Observer passes the source-grounded summary to Conversation for a concise follow-up on the same thread.
-7. **`session_briefing`** shape (Observer → Convo each call):
+4. **Token budget:** Conversation uses low `max_tokens` (`VOICE_FOREGROUND_MAX_TOKENS`, default **220** on voice stream).
+5. **No duplicate drafts:** Conversation does **not** restate long scope dumps or worker drafts; full prose lives in dock Review / jobs / graph. Prefer brief acks; user asks to expand.
+6. **TTS orthography:** Spoken replies use full words (**for example**, not `e.g.`); voice worker may normalize text before synthesis.
+7. **Phase from briefing:** incomplete scope → P1 onboarding copy; running intra-doc → offer status; pending approvals → short reminder (not full staging JSON aloud).
+8. **Dispatch:** Same utterance: Convo reply **first**, then async worker; worker `reply` must **not** replace Convo on the STT→TTS hot path. On completed Gist jobs, Observer passes the source-grounded summary to Conversation for a concise follow-up on the same thread.
+9. **`session_briefing`** shape (Observer → Convo each call):
 
 ```json
 {
@@ -505,7 +507,7 @@ Barge-in → cancel foreground TTS/stream only; debounce proactive TTS per job_i
 }
 ```
 
-8. **Persistence:** Append user/assistant lines on `thread_id` even when plane 3 skipped; full graph invoke only on dispatch, resume, or harness.
+10. **Persistence:** Append user/assistant lines on `thread_id` even when plane 3 skipped; full graph invoke only on dispatch, resume, or harness.
 
 ### 12.12 Proactive updates (blend-in)
 

@@ -7,6 +7,8 @@ import os
 import re
 from typing import Any
 
+from voice_agent.speech_text import speech_friendly
+
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n+")
 
 _ENV_TRUE = frozenset({"1", "true", "yes"})
@@ -132,6 +134,9 @@ class TtsPipeline:
             segment = await self._queue.get()
             if segment is None:
                 break
+            segment = speech_friendly(segment)
+            if not segment.strip():
+                continue
             if prefetch is None:
                 prefetch = asyncio.create_task(self._synthesize(segment))
                 continue

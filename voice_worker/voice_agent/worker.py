@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover
 
 from voice_agent.audio_util import float32_to_pcm16, frame_to_mono_floats
 from voice_agent.speech_colab import speech_enabled, synthesize_wav, transcribe_wav
+from voice_agent.speech_text import speech_friendly
 from voice_agent.tts_pipeline import TtsPipeline, pipelined_tts_enabled
 from voice_agent.turn_bridge import post_resume, run_turn_with_reply, stream_session_events
 from voice_agent.vad_silero import PushToTalkBuffer, load_silero_vad, voice_vad_mode
@@ -220,7 +221,7 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
                 if tts_pipeline:
                     await tts_pipeline.finish()
                 else:
-                    wav = await synthesize_wav(reply)
+                    wav = await synthesize_wav(speech_friendly(reply))
                     await _play_wav(room, session, wav)
             except httpx.HTTPError:
                 _log.exception("TTS failed")
@@ -249,7 +250,7 @@ async def _maybe_proactive_tts(
     session.proactive_spoken.add(job_id)
     session.cancel_tts.set()
     try:
-        wav = await synthesize_wav(text.strip())
+        wav = await synthesize_wav(speech_friendly(text))
         await _play_wav(room, session, wav)
     except httpx.HTTPError:
         _log.exception("proactive TTS failed")
@@ -428,7 +429,7 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
         )
         if reply.strip() and speech_enabled():
             try:
-                await _play_wav(room, session, await synthesize_wav(reply[:2000]))
+                await _play_wav(room, session, await synthesize_wav(speech_friendly(reply[:2000])))
             except httpx.HTTPError:
                 _log.exception("TTS failed after resume")
         return

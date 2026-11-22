@@ -35,13 +35,25 @@ def _conversation_prompt_inputs(
 ) -> dict[str, Any]:
     briefing_note = json.dumps(briefing, ensure_ascii=False)[:4000]
     scope = project_scope or ""
+    pending_approvals = int(briefing.get("pending_approval_count") or 0)
     task_state = json.dumps(
-        {"worker": worker_kind, "background_job_starting": dispatch_pending},
+        {
+            "worker_kind": worker_kind,
+            "background_job_starting": dispatch_pending,
+            "pending_approval_count": pending_approvals,
+        },
         ensure_ascii=False,
     )
+    dispatch_note = ""
+    if dispatch_pending:
+        dispatch_note = (
+            "A background worker is drafting the detailed output for the dock; "
+            "keep your reply brief and conversational.\n"
+        )
     augmented = (
         f"[session_briefing]{briefing_note}[/session_briefing]\n"
         f"[task_state]{task_state}[/task_state]\n"
+        f"{dispatch_note}"
         f"User: {text}\n"
         "Respond naturally as voice Conversation only (no tools, no graph writes)."
     )

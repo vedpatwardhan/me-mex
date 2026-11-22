@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.briefing import RecommendationCard
-from app.config import settings
 
 
 def run_workflow_agent(
@@ -18,7 +17,6 @@ def run_workflow_agent(
     worker = job.get("worker") or job.get("kind") or "task"
     label = (job.get("label") or "")[:80]
     approval_id = worker_output.get("approval_id")
-    reply = (worker_output.get("reply") or "")[:200]
 
     title = f"{worker}: {label or status}".strip()
     cards: list[RecommendationCard] = []
@@ -44,8 +42,6 @@ def run_workflow_agent(
     if status == "awaiting_approval" and approval_id:
         if worker == "project_scope":
             proactive = "There's a scope update to review in the dock."
-        elif len(reply) >= 20:
-            proactive = reply[: settings.WORKFLOW_AGENT_MAX_TOKENS]
         else:
             proactive = f"Your {worker} task is ready for review in the dock."
     elif status == "done" and worker != "project_scope":

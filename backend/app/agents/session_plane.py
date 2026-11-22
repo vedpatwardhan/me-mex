@@ -142,6 +142,7 @@ def _compose_gist_followup(
         "A background source-gist job has finished. Give the user a concise, natural answer "
         "to their original request using only the worker's source_summary. Paraphrase it in "
         "2–4 short sentences, avoid verbatim quotes, and do not add facts from memory. "
+        "Use speakable wording: for example not e.g., that is not i.e., and so on not etc. "
         "If gist_saved is true, briefly confirm it was saved; otherwise do not imply persistence. "
         "If source_error is present and source_summary is empty, explain briefly that the "
         "source could not be read and ask for a readable link or excerpt. Do not imply an "
