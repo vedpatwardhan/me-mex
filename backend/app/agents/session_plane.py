@@ -182,7 +182,7 @@ def build_session_briefing(
         jid = j.get("job_id")
         if jid:
             merged[jid] = dict(j)
-    active_jobs = [
+    open_jobs = [
         job
         for job in merged.values()
         if job.get("status") in {"running", "paused", "awaiting_approval"}
@@ -191,6 +191,38 @@ def build_session_briefing(
             or (job.get("approval_id") or job.get("recommendation_id")) in pending_approval_ids
         )
     ]
+    active_job_affinity = sorted(
+        {str(job.get("affinity_key")) for job in open_jobs if job.get("affinity_key")}
+    )
+    active_jobs = [
+        {
+            key: str(job.get(key) or "")
+            for key in ("job_id", "worker", "status", "label")
+            if job.get(key) is not None
+        }
+        for job in open_jobs
+    ][:5]
+    completed_worker_results: list[dict[str, str]] = []
+    for job in reversed(list(merged.values())):
+        if job.get("status") not in {"done", "awaiting_approval"}:
+            continue
+        output = job.get("output") or {}
+        result = str(output.get("source_summary") or output.get("summary") or "").strip()
+        if not result:
+            continue
+        completed_worker_results.append(
+            {
+                "job_id": str(job.get("job_id") or ""),
+                "worker": str(job.get("worker") or job.get("kind") or ""),
+                "status": str(job.get("status") or "done"),
+                "label": str(job.get("label") or "")[:160],
+                "source_title": str(output.get("source_title") or "")[:200],
+                "source_url": str(output.get("source_url") or "")[:500],
+                "result": result[:800],
+            }
+        )
+        if len(completed_worker_results) == 2:
+            break
 
     scope = (project.introduction or "")[:500]
     complete = project_scope_complete(project.introduction)
@@ -201,17 +233,15 @@ def build_session_briefing(
     if show_worker_snippet:
         worker_snippet = str(ckpt.get("last_worker_result_snippet") or "")[:400]
 
-    affinity_keys = sorted(
-        {str(j.get("affinity_key")) for j in active_jobs if j.get("affinity_key")}
-    )
     briefing: SessionBriefing = {
         "project_scope_snippet": scope,
         "scope_complete": complete,
         "voice_phase": "research" if complete else "p1_scope_onboarding",
         "active_jobs": active_jobs,
-        "active_job_affinity": affinity_keys[-3:],
+        "active_job_affinity": active_job_affinity[-3:],
         "last_route": str(ckpt.get("last_route") or ""),
         "pending_approval_count": pending_count,
+        "completed_worker_results": list(reversed(completed_worker_results)),
         "scope_proposal_preview": proposal_preview if not complete else "",
         "worker_result_snippet": worker_snippet,
         "recommendation_cards": list(ckpt.get("recommendation_cards") or []),

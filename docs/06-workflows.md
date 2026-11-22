@@ -70,7 +70,7 @@ Revisit scope later via conversation + `update_project_scope` or settings ([02](
 **Example:** You provide a paper/article link in a custom field—under any field name—and ask for a short summary, brief overview, main idea, or gist.
 
 1. Supervisor routes to **GistWorker**; the worker resolves the supplied source reference from the message and custom-field values, fetches that document, and creates a concise summary from its extracted text.
-2. Conversation acknowledges processing and does not guess at source contents. While the job runs, you can keep talking; a failed Supervisor classification falls back to Conversation-only so the turn still receives a reply.
+2. The dispatch turn gets a short status acknowledgement without asking the Conversation LLM to describe the paper. While the job runs, you can keep talking; normal Conversation uses only project scope and completed worker results, and a failed Supervisor classification falls back to Conversation-only.
 3. On completion, the full gist appears in a **Review / Approve** dock item as a `gist_root` proposal. The brief spoken follow-up points to the dock; it does not repeat the summary.
 4. The proposal does **not** create a `ROOT` until you approve it. Approval calls **`create_or_update_root_gist`** and attaches the supplied source URI when available. A direct explicit create-ROOT request remains supported.
 

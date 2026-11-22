@@ -48,7 +48,7 @@ def test_conversation_turn_does_not_park_background_jobs(
                 "voice_turn": True,
                 "active_project_id": project_scoped.id,
                 "project_id": project_scoped.id,
-                "custom_fields": {},
+                "custom_fields": {"paper": "https://arxiv.org/pdf/2605.11550"},
             },
         },
     )
@@ -104,7 +104,7 @@ def test_malformed_supervisor_output_falls_back_to_spoken_conversation(client, p
                 "voice_turn": True,
                 "active_project_id": project_scoped.id,
                 "project_id": project_scoped.id,
-                "custom_fields": {},
+                "custom_fields": {"paper": "https://arxiv.org/pdf/2605.11550"},
             },
         },
     )
@@ -116,14 +116,29 @@ def test_malformed_supervisor_output_falls_back_to_spoken_conversation(client, p
     assert end["dispatched"] is False
     assert end["worker_kind"] is None
     assert '"job_id": "job-in-progress"' in conversation_inputs[0]["text"]
+    assert "2605.11550" not in conversation_inputs[0]["text"]
     active_jobs = supervisor_inputs[0]["context"]["session_state"]["active_jobs"]
     assert active_jobs[0]["job_id"] == "job-in-progress"
 
 
 @pytest.mark.voice_plane
 def test_scope_completion_acknowledgement_stays_in_conversation(client, store, project_scoped):
+    from app.agents import job_runtime
+
     base = get_chains()
     seen = {}
+    thread_id = "voice-scope-complete-next"
+    completed_scope_job = {
+        "job_id": "job-scope-already-done",
+        "worker": "project_scope",
+        "kind": "project_scope",
+        "status": "done",
+        "label": "The scope proposal was approved",
+        "thread_id": thread_id,
+        "project_id": project_scoped.id,
+    }
+    job_runtime._jobs[completed_scope_job["job_id"]] = completed_scope_job
+    job_runtime._by_thread[thread_id] = [completed_scope_job["job_id"]]
 
     def supervisor(inputs):
         seen.update(inputs)
@@ -140,7 +155,6 @@ def test_scope_completion_acknowledgement_stays_in_conversation(client, store, p
             project_scope=RunnableLambda(unexpected_scope_call),
         )
     )
-    thread_id = "voice-scope-complete-next"
     response = client.post(
         "/api/voice/conversation/stream",
         json={
@@ -162,3 +176,4 @@ def test_scope_completion_acknowledgement_stays_in_conversation(client, store, p
     assert seen["context"]["project_scope_status"] == "committed"
     assert seen["context"]["scope_approval_pending"] is False
     assert store.list_pending(project_scoped.id, thread_id) == []
+    assert all(job["job_id"] != completed_scope_job["job_id"] for job in end["jobs"])

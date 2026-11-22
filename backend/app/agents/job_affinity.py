@@ -96,6 +96,14 @@ def resolve_job_dispatch(
 
     open_job = _open_job_for_affinity(jobs, affinity_key)
     if open_job:
+        if open_job.get("status") in {"running", "paused"} and worker_kind != "project_scope":
+            return JobDispatchPlan(
+                action="skip",
+                job_id=open_job.get("job_id"),
+                approval_id=open_job.get("recommendation_id") or open_job.get("approval_id"),
+                affinity_key=affinity_key,
+                reason="already_running",
+            )
         return JobDispatchPlan(
             action="update",
             job_id=open_job.get("job_id"),

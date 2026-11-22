@@ -115,6 +115,7 @@ Marker **`voice_plane`** (default CI; HTTP/SSE only, no LiveKit room).
 |----------|-------------|
 | Conversation no tools on voice | `test_voice_conversation_stream.py` |
 | Async dispatch off hot path | `test_voice_dispatch_enqueued.py` |
+| Dispatched source jobs use a fixed acknowledgement; normal Conversation receives only completed source results and no source-URL fields | `test_voice_source_gist_flow.py`, `test_conversation_voice_stream.py`, `test_session_briefing.py` |
 | Chit-chat skips worker | `test_voice_chit_chat_no_graph.py` |
 | Briefing API | `test_session_briefing_api.py` |
 | Worker reply not hot-path TTS | `test_streaming_voice_filter.py` |
@@ -165,9 +166,12 @@ Every workflow row **must** have at least one **e2e** test (REST Phase 1; + voic
 | `vllm` | Needs live Colab gateway (vLLM chat + `decision/score` reranker) |
 | `mongodb` | Needs real Mongo (testcontainers or local `me_mex_test`) |
 | `livekit` | Phase 2 worker + room |
+| `live_llm` | Opt-in prompt behavior check against the configured live chat model |
 | `slow` | Long intra-doc extract |
 
-Default CI: `pytest -m "not vllm and not livekit and not slow"`.
+Default CI: `pytest -m "not vllm and not livekit and not slow and not live_llm"`.
+
+Opt-in live Conversation check: set `CHAT_LLM_MODE=live` (or configure `backend/.env.test`), set `ME_MEX_RUN_LIVE_LLM_TESTS=1`, then run `uv run pytest -m live_llm`. The live test is excluded from the default suite; ordinary tests keep stub/mock backends.
 
 ---
 

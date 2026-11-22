@@ -1,9 +1,11 @@
 import pytest
 from app.agents.conversation_voice import (
     _astream_voice_conversation_reply,
+    _background_worker_acknowledgement,
     _conversation_prompt_inputs,
 )
 from app.llm.chains import AgentChains, get_chains, set_chains_override
+from app.prompts import load_prompt
 from langchain_core.runnables import RunnableLambda
 
 
@@ -29,25 +31,38 @@ async def test_astream_stub_yields_tokens_before_full_reply(monkeypatch):
     assert "".join(parts) == "Hello world from stub."
 
 
-def test_foreground_conversation_knows_a_gist_job_is_starting():
-    inputs = _conversation_prompt_inputs(
-        text="Give me a short summary of this paper.",
-        briefing={"active_jobs": [], "pending_approval_count": 0},
-        project_scope="",
-        worker_kind="gist",
-        dispatch_pending=True,
+def test_background_gist_dispatch_uses_fixed_acknowledgement():
+    assert _background_worker_acknowledgement("gist") == (
+        "I’ll read the paper you shared and put a concise gist in the dock for review."
     )
-    assert '"worker_kind": "gist"' in inputs["text"]
-    assert '"background_job_starting": true' in inputs["text"]
-    assert "drafting the detailed output for the dock" in inputs["text"]
 
 
-def test_foreground_conversation_includes_pending_approval_count():
+def test_conversation_prompt_uses_completed_results_as_only_source_evidence():
     inputs = _conversation_prompt_inputs(
-        text="hello",
-        briefing={"pending_approval_count": 2},
-        project_scope="",
-        worker_kind="conversation",
-        dispatch_pending=False,
+        text="What does the paper say about its method?",
+        briefing={
+            "pending_approval_count": 1,
+            "active_jobs": [{"worker": "gist", "status": "running", "label": "paper"}],
+            "completed_worker_results": [
+                {
+                    "worker": "gist",
+                    "source_title": "Paper A",
+                    "result": "It evaluates a latent world-action model.",
+                }
+            ],
+            "recommendation_cards": [{"title": "not conversational evidence"}],
+        },
+        project_scope="Research project scope",
+        user_fields={
+            "name": "Ved",
+            "paper": "https://arxiv.org/pdf/2605.11550",
+        },
     )
-    assert '"pending_approval_count": 2' in inputs["text"]
+    assert '"pending_approval_count": 1' in inputs["text"]
+    assert "It evaluates a latent world-action model." in inputs["text"]
+    assert "not conversational evidence" not in inputs["text"]
+    assert '"name": "Ved"' in inputs["text"]
+    assert "2605.11550" not in inputs["text"]
+    prompt = load_prompt("conversation", project_scope="Research project scope")
+    assert "Only `completed_worker_results`" in prompt
+    assert "Never infer a title, method, finding, or conclusion" in prompt

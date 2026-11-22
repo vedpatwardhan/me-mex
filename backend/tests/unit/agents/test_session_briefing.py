@@ -63,3 +63,59 @@ def test_resolved_scope_approval_is_not_briefed_as_active_job(
     assert briefing["pending_approval_count"] == 0
     assert briefing["active_jobs"] == []
     assert job_runtime.get_job(job["job_id"])["status"] == "resolved"
+
+
+@pytest.mark.voice_plane
+def test_briefing_separates_active_job_status_from_completed_source_evidence(
+    store, project, tmpdir_checkpoint, monkeypatch
+):
+    from app.agents import job_runtime, session_plane
+    from app.services.checkpoints import JsonCheckpointStore
+
+    checkpoint = JsonCheckpointStore(str(tmpdir_checkpoint))
+    monkeypatch.setattr(session_plane, "_checkpoint", checkpoint)
+    thread_id = "briefing-evidence-boundary"
+    jobs = [
+        {
+            "job_id": "job-gist-running",
+            "worker": "gist",
+            "kind": "gist",
+            "label": "Read current paper",
+            "status": "running",
+            "thread_id": thread_id,
+            "project_id": project.id,
+            "output": {"source_summary": "This is not complete evidence."},
+        },
+        {
+            "job_id": "job-gist-complete",
+            "worker": "gist",
+            "kind": "gist",
+            "label": "Earlier paper",
+            "status": "done",
+            "thread_id": thread_id,
+            "project_id": project.id,
+            "output": {
+                "source_title": "Completed paper",
+                "source_url": "https://example.test/paper.pdf",
+                "source_summary": "The completed paper studies a latent model.",
+            },
+        },
+    ]
+    job_runtime._by_thread[thread_id] = [job["job_id"] for job in jobs]
+    job_runtime._jobs.update({job["job_id"]: job for job in jobs})
+
+    briefing = session_plane.build_session_briefing(project_id=project.id, thread_id=thread_id)
+
+    assert [job["job_id"] for job in briefing["active_jobs"]] == ["job-gist-running"]
+    assert "output" not in briefing["active_jobs"][0]
+    assert briefing["completed_worker_results"] == [
+        {
+            "job_id": "job-gist-complete",
+            "worker": "gist",
+            "status": "done",
+            "label": "Earlier paper",
+            "source_title": "Completed paper",
+            "source_url": "https://example.test/paper.pdf",
+            "result": "The completed paper studies a latent model.",
+        }
+    ]

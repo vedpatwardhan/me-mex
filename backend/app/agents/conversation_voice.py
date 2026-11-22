@@ -10,6 +10,7 @@ from typing import Any
 from app.agents import job_runtime
 from app.agents.job_affinity import resolve_job_dispatch
 from app.agents.session_plane import append_transcript_turn, build_session_briefing
+from app.agents.source_reference import resolve_source_reference
 from app.agents.voice_dispatch import (
     is_voice_turn,
     needs_voice_dispatch,
@@ -30,34 +31,53 @@ def _conversation_prompt_inputs(
     text: str,
     briefing: dict[str, Any],
     project_scope: str,
-    worker_kind: str = "conversation",
-    dispatch_pending: bool = False,
+    user_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    briefing_note = json.dumps(briefing, ensure_ascii=False)[:4000]
-    scope = project_scope or ""
-    pending_approvals = int(briefing.get("pending_approval_count") or 0)
-    task_state = json.dumps(
-        {
-            "worker_kind": worker_kind,
-            "background_job_starting": dispatch_pending,
-            "pending_approval_count": pending_approvals,
-        },
-        ensure_ascii=False,
-    )
-    dispatch_note = ""
-    if dispatch_pending:
-        dispatch_note = (
-            "A background worker is drafting the detailed output for the dock; "
-            "keep your reply brief and conversational.\n"
+    conversation_briefing = {
+        key: briefing.get(key)
+        for key in (
+            "project_scope_snippet",
+            "scope_complete",
+            "completed_worker_results",
+            "active_jobs",
+            "pending_approval_count",
+            "scope_proposal_preview",
         )
+        if briefing.get(key) not in (None, [], "")
+    }
+    briefing_note = json.dumps(conversation_briefing, ensure_ascii=False)[:4000]
+    scope = project_scope or ""
+    safe_user_fields = {
+        str(key): str(value)[:1200]
+        for key, value in (user_fields or {}).items()
+        if value is not None
+        and not (
+            (reference := resolve_source_reference("", {str(key): value})).url or reference.error
+        )
+    }
     augmented = (
         f"[session_briefing]{briefing_note}[/session_briefing]\n"
-        f"[task_state]{task_state}[/task_state]\n"
-        f"{dispatch_note}"
+        f"[user_provided_fields]{json.dumps(safe_user_fields, ensure_ascii=False)}"
+        "[/user_provided_fields]\n"
         f"User: {text}\n"
         "Respond naturally as voice Conversation only (no tools, no graph writes)."
     )
     return {"text": augmented, "project_scope": scope}
+
+
+def _background_worker_acknowledgement(worker_kind: str, *, already_running: bool = False) -> str:
+    """Short, factual interim response; dispatch turns do not ask Conversation to speculate."""
+    if already_running:
+        return "That job is still running. I’ll share its result in the dock when it’s ready."
+    acknowledgements = {
+        "gist": "I’ll read the paper you shared and put a concise gist in the dock for review.",
+        "intradoc": "I’ll analyze the source and put the results in the dock for review.",
+        "project_scope": "I’ll prepare the scope proposal and put it in the dock for review.",
+        "link": "I’ll prepare placement options and put them in the dock for review.",
+        "reorg": "I’ll prepare a reorganization proposal for review in the dock.",
+        "retrieval": "I’ll check the graph and highlight relevant nodes.",
+    }
+    return acknowledgements.get(worker_kind, "I’ll work on that and share the result in the dock.")
 
 
 def _conversation_openai_messages(inp: dict[str, Any]) -> list[dict[str, Any]]:
@@ -150,29 +170,6 @@ async def astream_conversation_voice(
         voice_turn=voice,
         scope_blocked=scope_blocked,
     )
-
-    if voice and worker_kind != "conversation":
-        job_runtime.park_active_jobs(thread_id)
-
-    inp = _conversation_prompt_inputs(
-        text=effective_text,
-        briefing=briefing,
-        project_scope=project.introduction or "",
-        worker_kind=worker_kind,
-        dispatch_pending=dispatch,
-    )
-
-    tokens: list[str] = []
-    async for piece in _astream_voice_conversation_reply(inp):
-        tokens.append(piece)
-        yield {"type": "token", "content": piece, "source": "conversation"}
-
-    reply = "".join(tokens)
-
-    append_transcript_turn(thread_id, role="assistant", text=reply)
-
-    job_id: str | None = None
-    dispatched_worker: str | None = None
     plan = resolve_job_dispatch(
         thread_id=thread_id,
         project_id=project_id,
@@ -184,44 +181,80 @@ async def astream_conversation_voice(
         introduction=project.introduction or "",
         dispatch_allowed=dispatch,
     )
-    if dispatch and plan.action != "skip":
-        fn = worker_handler(worker_kind)
-        if fn:
-            ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
-            ctx_json_dispatch = {
-                **ctx_json,
-                "voice_dispatch": True,
-                "supervisor_decision": decision.model_dump(),
-            }
-            job = job_runtime.dispatch_background_worker(
-                thread_id=thread_id,
-                worker_kind=worker_kind,
-                ctx=ctx,
-                text=effective_text,
-                context=ctx_json_dispatch,
-                worker_fn=fn,
-                project_id=project_id,
-                plan=plan,
-            )
-            if not job:
-                dispatch = False
-            else:
-                job_id = job.get("job_id")
-                dispatched_worker = worker_kind
-            _log.info(
-                "voice_dispatch job_id=%s worker=%s thread_id=%s project_id=%s",
-                job_id,
-                worker_kind,
-                thread_id,
-                project_id,
-            )
-            yield {
-                "type": "custom",
-                "job": job,
-                "source": "dispatch",
-            }
+    worker_fn = worker_handler(worker_kind) if dispatch and plan.action != "skip" else None
+    already_running = dispatch and plan.reason == "already_running"
+    dispatch_pending = bool(worker_fn) or already_running
 
-    jobs = job_runtime.list_jobs(thread_id)
+    if voice and worker_fn:
+        job_runtime.park_active_jobs(thread_id)
+
+    tokens: list[str] = []
+    if dispatch_pending:
+        reply_parts = _background_worker_acknowledgement(
+            worker_kind,
+            already_running=already_running,
+        )
+        for i in range(0, len(reply_parts), 32):
+            piece = reply_parts[i : i + 32]
+            tokens.append(piece)
+            yield {"type": "token", "content": piece, "source": "conversation"}
+    else:
+        inp = _conversation_prompt_inputs(
+            text=text,
+            briefing=briefing,
+            project_scope=project.introduction or "",
+            user_fields=ctx_json.get("custom_fields") or {},
+        )
+        async for piece in _astream_voice_conversation_reply(inp):
+            tokens.append(piece)
+            yield {"type": "token", "content": piece, "source": "conversation"}
+
+    reply = "".join(tokens)
+
+    append_transcript_turn(thread_id, role="assistant", text=reply)
+
+    job_id: str | None = None
+    dispatched_worker: str | None = None
+    if dispatch_pending and worker_fn:
+        ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
+        ctx_json_dispatch = {
+            **ctx_json,
+            "voice_dispatch": True,
+            "supervisor_decision": decision.model_dump(),
+        }
+        job = job_runtime.dispatch_background_worker(
+            thread_id=thread_id,
+            worker_kind=worker_kind,
+            ctx=ctx,
+            text=effective_text,
+            context=ctx_json_dispatch,
+            worker_fn=worker_fn,
+            project_id=project_id,
+            plan=plan,
+        )
+        if not job:
+            dispatch = False
+        else:
+            job_id = job.get("job_id")
+            dispatched_worker = worker_kind
+        _log.info(
+            "voice_dispatch job_id=%s worker=%s thread_id=%s project_id=%s",
+            job_id,
+            worker_kind,
+            thread_id,
+            project_id,
+        )
+        yield {
+            "type": "custom",
+            "job": job,
+            "source": "dispatch",
+        }
+
+    jobs = [
+        job
+        for job in job_runtime.list_jobs(thread_id)
+        if job.get("status") in {"running", "paused", "awaiting_approval"}
+    ]
     approval_id = None
     for j in jobs:
         if j.get("status") != "awaiting_approval":

@@ -3,6 +3,7 @@ from dataclasses import replace
 
 from app.agents import job_runtime, session_plane, workers
 from app.llm import get_chains, set_chains_override
+from app.llm.schemas import WorkerRoute
 from langchain_core.runnables import RunnableLambda
 from tests.sse_util import iter_sse_data
 
@@ -12,19 +13,27 @@ def test_voice_source_gist_holds_then_creates_reviewable_root_proposal(
 ):
     events = []
     followup_ready = threading.Event()
-    conversation_inputs = []
 
-    def conversation(inputs):
-        conversation_inputs.append(inputs)
-        if "[task_state]" in inputs["text"]:
-            return "I’ll read the linked paper and share a concise summary when it’s ready."
-        return "The May 2026 paper proposes a new predictive world model and evaluates it experimentally."
+    def conversation_must_not_run(_inputs):
+        raise AssertionError(
+            "dispatch acknowledgements must not ask Conversation to infer source facts"
+        )
 
     base = get_chains()
+    monkeypatch.setattr("app.agents.conversation_voice.settings.CHAT_LLM_MODE", "live")
     set_chains_override(
         replace(
             base,
-            conversation=RunnableLambda(conversation),
+            supervisor=RunnableLambda(
+                lambda _inputs: WorkerRoute(
+                    worker="gist",
+                    intent="source_summary",
+                    dispatch=True,
+                    source_field="paper",
+                    source_reference="https://arxiv.org/abs/2605.11550",
+                )
+            ),
+            conversation=RunnableLambda(conversation_must_not_run),
             gist_draft=RunnableLambda(
                 lambda inputs: (
                     "The paper proposes a new predictive world model and evaluates it experimentally."
@@ -70,16 +79,15 @@ def test_voice_source_gist_holds_then_creates_reviewable_root_proposal(
     assert response.status_code == 200
     assert end["worker_kind"] == "gist"
     assert end["dispatched"] is True
-    assert "read the linked paper" in end["reply"]
+    assert end["reply"] == (
+        "I’ll read the paper you shared and put a concise gist in the dock for review."
+    )
     assert "predictive world model" not in end["reply"]
-    assert '"background_job_starting": true' in conversation_inputs[0]["text"]
     assert followup_ready.wait(timeout=5)
     followup = next(event for event in events if event.get("type") == "assistant_followup")
     assert followup["text"] == (
         "The gist is ready in the dock for review. Approve it there to add it to the graph."
     )
-    assert "2605.11550" in conversation_inputs[0]["text"]
-
     approvals = client.get(
         "/api/agent/approvals",
         params={"project_id": project_scoped.id, "thread_id": thread_id},

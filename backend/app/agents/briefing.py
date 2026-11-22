@@ -28,6 +28,7 @@ class SessionBriefing(TypedDict, total=False):
     active_job_affinity: list[str]
     last_route: str
     pending_approval_count: int
+    completed_worker_results: list[dict[str, str]]
     scope_proposal_preview: str
     worker_result_snippet: str
     recommendation_cards: list[RecommendationCard]

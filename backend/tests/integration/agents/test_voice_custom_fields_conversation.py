@@ -43,7 +43,7 @@ def test_voice_conversation_stream_passes_custom_fields_to_llm(client, project):
     assert captured, "conversation chain was not invoked"
     human = captured[0]["text"]
     assert "what is my name?" in human
-    assert "name=Ved" in human
+    assert '"name": "Ved"' in human
 
 
 @pytest.mark.voice_plane
