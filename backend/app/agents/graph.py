@@ -15,6 +15,7 @@ from app.agents import job_runtime, workers
 from app.agents.context_preprocessor import (
     apply_custom_fields_to_text,
     block_graph_writes_without_scope,
+    graph_candidates_for_supervisor,
     prioritize_project_scope_until_complete,
 )
 from app.agents.jobs import job_from_worker_turn
@@ -49,6 +50,7 @@ def _supervisor(state: AgentState) -> AgentState:
     project = ctx.store.get_project(ctx.project_id)
     effective = apply_custom_fields_to_text(state["text"], state.get("context_json") or {})
     context = dict(state.get("context_json") or {})
+    context["graph_candidates"] = graph_candidates_for_supervisor(ctx.store, ctx.project_id)
     context["scope_approval_pending"] = any(
         item.approval_type == "project_scope"
         for item in ctx.store.list_pending(ctx.project_id, ctx.thread_id)

@@ -48,6 +48,8 @@ class WorkerRoute(BaseModel):
     content: str | None = None
     target_id: str | None = None
     job_action: JobAction | None = None
+    root_id: str | None = None
+    target_ids: list[str] | None = None
 
 
 class ProjectScopeResult(BaseModel):

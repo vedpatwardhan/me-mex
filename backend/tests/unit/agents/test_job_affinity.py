@@ -64,6 +64,42 @@ def test_repeated_source_request_does_not_restart_a_running_gist_job():
     assert plan.reason == "already_running"
 
 
+def test_link_affinity_uses_resolved_source_and_target_nodes():
+    first = affinity_key_for_worker(
+        "link",
+        project_id="pid",
+        context_json={
+            "supervisor_decision": {
+                "root_id": "root-a",
+                "target_ids": ["node-b", "node-c"],
+            }
+        },
+    )
+    same_link_reordered = affinity_key_for_worker(
+        "link",
+        project_id="pid",
+        context_json={
+            "supervisor_decision": {
+                "root_id": "root-a",
+                "target_ids": ["node-c", "node-b"],
+            }
+        },
+    )
+    different_link = affinity_key_for_worker(
+        "link",
+        project_id="pid",
+        context_json={
+            "supervisor_decision": {
+                "root_id": "root-a",
+                "target_ids": ["node-d"],
+            }
+        },
+    )
+
+    assert first == same_link_reordered
+    assert first != different_link
+
+
 def test_dialogue_skips_dispatch():
     plan = resolve_job_dispatch(
         thread_id="t",

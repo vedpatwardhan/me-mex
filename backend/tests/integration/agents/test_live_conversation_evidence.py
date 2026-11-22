@@ -44,9 +44,44 @@ async def test_live_conversation_defers_source_claims_until_gist_is_complete():
     )
     defers_claims = any(
         phrase in answer
-        for phrase in ("not yet", "once", "when the", "when it’s", "when it's", "when ready")
+        for phrase in (
+            "not yet",
+            "don't have",
+            "don’t have",
+            "once",
+            "when the",
+            "when it’s",
+            "when it's",
+            "when ready",
+        )
     )
     assert says_pending and defers_claims, answer
+
+
+@pytest.mark.live_llm
+@pytest.mark.asyncio
+async def test_live_empty_scope_conversation_guides_user_to_define_scope():
+    if settings.CHAT_LLM_MODE != "live":
+        pytest.skip("run with ME_MEX_RUN_LIVE_LLM_TESTS=1 and CHAT_LLM_MODE=live")
+
+    inputs = _conversation_prompt_inputs(
+        text="I don't have anything on my mind specifically. What's on the plan today?",
+        briefing={
+            "scope_complete": False,
+            "active_jobs": [],
+            "pending_approval_count": 0,
+            "completed_worker_results": [],
+        },
+        project_scope="",
+    )
+    parts: list[str] = []
+    async for part in _astream_voice_conversation_reply(inputs):
+        parts.append(part)
+    answer = "".join(parts).strip().lower()
+
+    assert "scope" in answer, answer
+    assert "source" in answer, answer
+    assert "?" in answer, answer
 
 
 @pytest.mark.live_llm

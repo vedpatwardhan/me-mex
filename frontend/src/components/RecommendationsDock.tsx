@@ -25,6 +25,7 @@ export type DockItem = {
   linkedJobId?: string;
   approvalId?: string;
   jobStatus?: string;
+  approvalResolution?: string;
 };
 
 type Props = {

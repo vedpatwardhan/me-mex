@@ -24,6 +24,29 @@ def project_scope_complete(introduction: str | None) -> bool:
     return bool((introduction or "").strip())
 
 
+def graph_candidates_for_supervisor(
+    store, project_id: str, limit: int = 80
+) -> list[dict[str, str]]:
+    """Compact, project-local node identifiers for structured link-target resolution."""
+    project = store.get_project(project_id)
+    candidates = [
+        node
+        for node in store.list_nodes(project_id)
+        if node.node_kind.value in {"ROOT", "INSIGHT", "CONCEPT_M"}
+    ]
+    candidates.sort(
+        key=lambda node: (
+            node.id != project.genesis_node_id,
+            node.node_kind.value != "ROOT",
+            node.title.casefold(),
+        )
+    )
+    return [
+        {"id": node.id, "title": node.title[:180], "node_kind": node.node_kind.value}
+        for node in candidates[:limit]
+    ]
+
+
 def block_graph_writes_without_scope(introduction: str | None, worker: str) -> bool:
     """True when write workers must be blocked until P1 scope saved (04 §7)."""
     write_workers = {"gist", "intradoc", "link", "reorg"}

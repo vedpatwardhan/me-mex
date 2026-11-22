@@ -66,3 +66,5 @@ def test_conversation_prompt_uses_completed_results_as_only_source_evidence():
     prompt = load_prompt("conversation", project_scope="Research project scope")
     assert "Only `completed_worker_results`" in prompt
     assert "Never infer a title, method, finding, or conclusion" in prompt
+    assert "When `session_briefing.scope_complete` is false" in prompt
+    assert "define the project scope" in prompt

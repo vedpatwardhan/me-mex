@@ -15,6 +15,7 @@ describe('parseCustomFields', () => {
     const submitted = mergeOneShotCustomFields(null, 'paper=https://example.test/a.pdf');
     const afterReset = mergeOneShotCustomFields(submitted, INITIAL_CUSTOM_FIELDS);
     expect(afterReset).toEqual({ paper: 'https://example.test/a.pdf' });
-    expect(INITIAL_CUSTOM_FIELDS).toBe('arxiv_id=\nroot_id=');
+    expect(INITIAL_CUSTOM_FIELDS).toBe('');
+    expect(parseCustomFields(INITIAL_CUSTOM_FIELDS)).toEqual({});
   });
 });

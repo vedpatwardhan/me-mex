@@ -34,7 +34,12 @@ export function reconcileQueueItems(
   nudges: DockItem[],
   streamItems: DockItem[],
 ): DockItem[] {
-  const jobs = streamItems.filter((i) => i.className === 'job');
+  const jobs = streamItems.filter(
+    (i) =>
+      i.className === 'job' &&
+      i.approvalResolution !== 'approve' &&
+      i.approvalResolution !== 'dismiss',
+  );
   const other = streamItems.filter((i) => i.className !== 'job' && i.className !== 'approval');
   const byId = new Map<string, DockItem>();
   for (const list of [approvals, nudges, other, jobs]) {

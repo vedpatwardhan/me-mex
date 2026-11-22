@@ -50,7 +50,17 @@ def affinity_key_for_worker(
         if source and not root:
             token = hashlib.sha256(source.encode()).hexdigest()[:12]
         return f"gist:{token}"
-    if worker_kind in ("link", "reorg", "retrieval"):
+    if worker_kind == "link":
+        decision = context_json.get("supervisor_decision") or {}
+        root = fields.get("root_id") or decision.get("root_id") or project_id
+        targets = fields.get("target_ids") or decision.get("target_ids") or []
+        if isinstance(targets, str):
+            targets = [targets]
+        if not targets and decision.get("target_id"):
+            targets = [decision["target_id"]]
+        target_token = ",".join(sorted(str(target) for target in targets))
+        return f"link:{root}:{target_token}"
+    if worker_kind in ("reorg", "retrieval"):
         root = fields.get("root_id") or project_id
         return f"{worker_kind}:{root}"
     return f"{worker_kind}:{project_id}"

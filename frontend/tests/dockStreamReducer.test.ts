@@ -7,6 +7,7 @@ import {
   isGraphWriteEvent,
   isScopeCommittedEvent,
 } from '../src/utils/dockStreamReducer';
+import { reconcileQueueItems } from '../src/utils/dockQueueSort';
 
 describe('dockStreamReducer', () => {
   it('accumulates tokens', () => {
@@ -32,6 +33,31 @@ describe('dockStreamReducer', () => {
     });
     const deleted = applyStreamEvent(withJob, { type: 'job_delete', job_id: 'job-delete' });
     expect(deleted.items).toEqual([]);
+  });
+
+  it('does not restore a job after its approval has been resolved', () => {
+    const items = reconcileQueueItems([], [], [
+      {
+        id: 'job-approved-gist',
+        className: 'job',
+        title: 'Paper gist',
+        jobStatus: 'done',
+        approvalResolution: 'approve',
+      },
+    ]);
+    expect(items).toEqual([]);
+  });
+
+  it('keeps completed non-approval jobs removable from the queue', () => {
+    const items = reconcileQueueItems([], [], [
+      {
+        id: 'job-readonly-retrieval',
+        className: 'job',
+        title: 'Graph retrieval',
+        jobStatus: 'done',
+      },
+    ]);
+    expect(items.map((item) => item.id)).toEqual(['job-readonly-retrieval']);
   });
 
   it('ignores worker_progress for latestReply', () => {

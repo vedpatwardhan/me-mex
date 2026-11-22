@@ -1,5 +1,5 @@
 /** Parse custom_fields textarea (key=value lines) into context_json object. */
-export const INITIAL_CUSTOM_FIELDS = 'arxiv_id=\nroot_id=';
+export const INITIAL_CUSTOM_FIELDS = '';
 
 export function parseCustomFields(raw: string): Record<string, string> {
   const out: Record<string, string> = {};

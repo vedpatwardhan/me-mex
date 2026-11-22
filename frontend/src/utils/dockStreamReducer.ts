@@ -88,6 +88,7 @@ function upsertJob(items: DockItem[], job: Record<string, unknown>): DockItem[] 
     title: (job.label as string) || String(job.worker || 'Job'),
     detail: `${job.worker || 'worker'} · ${job.status || 'running'}`,
     jobStatus: String(job.status || 'running'),
+    approvalResolution: (job.approval_resolution as string) || undefined,
     approvalId,
     linkedJobId: jobId,
   };

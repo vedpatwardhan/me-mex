@@ -19,6 +19,7 @@ Return one structured JSON decision with these fields:
 - `source_reference`: exact URL or arXiv ID value supplied by the user, when applicable. Never invent or rewrite a source location.
 - `title`, `content`, `target_id`: fill from the user's explicit request/context when required by the selected intent; otherwise null.
 - `job_action`: `pause`, `resume`, `cancel`, or `delete` only for `intent=job_control`; otherwise null. For job control, set `target_id` to the matching `job_id` from `context.session_state.active_jobs`.
+- For `intent=link`, set `root_id` to the source ROOT id and `target_ids` to the explicitly requested target node id(s) from `context.graph_candidates`; leave them null for other intents. Never invent an id.
 - `source_error`: reserved for deterministic input validation; always return null.
 
 Routing rules:
@@ -33,10 +34,12 @@ Routing rules:
 - If the user asks to stop, abort, cancel, pause, resume, or remove an existing job, select `worker=job_control`, `intent=job_control`, `dispatch=true`, set the corresponding `job_action`, and choose `target_id` from `context.session_state.active_jobs`. If several jobs could match and the user did not identify one, ask which job using `worker=conversation`, `dispatch=false`. Do not start another specialist job for a job-control request.
 - For true scope edits, do not classify incremental versus replace; the ProjectScope LLM does that using the active baseline and full conversation. Pass through `custom_fields.force_scope_rewrite` unchanged as an explicit override.
 - For scratch requests, extract the requested operation and title/content/target into the fields above; do not rely on fixed phrase matching in the worker.
+- For “connect X to Y” / placement requests, resolve X and Y against `context.graph_candidates` and return their ids in `root_id` and `target_ids`. If either node cannot be identified unambiguously, ask a concise clarification with `worker=conversation`, `dispatch=false`; do not dispatch a link job that cannot perform the requested connection.
 - Treat explicit `force_gist_commit` and `force_scope_commit` custom-field flags as authoritative commit requests when true.
 - Do not infer persistence from a source link, a summary request, or a user discussing possible scope wording.
 
 Project scope status is included in `context.project_scope_status` (`unset` or `committed`), and whether a draft approval exists is included in `context.scope_approval_pending`.
+The current project's candidate graph nodes are included in `context.graph_candidates` as `{{id, title, node_kind}}` records for link-target resolution.
 
 Project scope text (may be empty):
 {{ project_scope }}

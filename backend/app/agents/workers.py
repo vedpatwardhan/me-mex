@@ -402,33 +402,83 @@ def _summarize_source(
 def link_place_worker(ctx: ToolContext, context: dict) -> dict:
     _job_checkpoint(context)
     fields = context.get("custom_fields") or {}
-    root_id = fields.get("root_id")
+    decision = context.get("supervisor_decision") or {}
+    root_id = fields.get("root_id") or decision.get("root_id")
     if not root_id:
-        return {"reply": "Need root_id in custom_fields.", "graph_write": False}
+        selected_roots = [
+            node_id
+            for node_id in (context.get("selected_node_ids") or [])
+            if ctx.store.get_node(str(node_id)).node_kind.value == "ROOT"
+        ]
+        if len(selected_roots) == 1:
+            root_id = selected_roots[0]
+    if not root_id:
+        return {
+            "reply": "I couldn't identify the source ROOT to connect. Select it or clarify its title.",
+            "graph_write": False,
+            "error": True,
+        }
+    root = ctx.store.get_node(str(root_id))
+    if root.project_id != ctx.project_id or root.node_kind.value != "ROOT":
+        return {
+            "reply": "The source for a connection must be a ROOT node.",
+            "graph_write": False,
+            "error": True,
+        }
     nodes = ctx.store.list_nodes(ctx.project_id)
-    frontier = [n for n in nodes if n.id != root_id][:10]
-    query = _scorer_node(ctx.store, root_id)
-    front = [
-        ScorerNode(
-            id=n.id,
-            title=n.title,
-            node_kind=n.node_kind.value,
-            description=n.description or "",
-        )
-        for n in frontier
-    ]
-    with decision_trace_scope(ctx, "placement"):
-        probs = get_decision_scorer().score(query, front)
+    selected_targets = decision.get("target_ids") or []
+    if not selected_targets and decision.get("target_id"):
+        selected_targets = [decision["target_id"]]
+    if not selected_targets:
+        selected_targets = fields.get("target_ids") or []
+        if isinstance(selected_targets, str):
+            selected_targets = [selected_targets]
+
+    if selected_targets:
+        targets = []
+        for target_id in selected_targets:
+            target = ctx.store.get_node(str(target_id))
+            if target.project_id != ctx.project_id or target.node_kind.value == "CONCEPT_I":
+                return {
+                    "reply": "I couldn't validate one of the requested connection targets.",
+                    "graph_write": False,
+                    "error": True,
+                }
+            if target.id != root.id:
+                targets.append((target.id, 1.0))
+        ranked = targets
+    else:
+        frontier = [node for node in nodes if node.id != root_id][:10]
+        query = _scorer_node(ctx.store, str(root_id))
+        front = [
+            ScorerNode(
+                id=node.id,
+                title=node.title,
+                node_kind=node.node_kind.value,
+                description=node.description or "",
+            )
+            for node in frontier
+        ]
+        with decision_trace_scope(ctx, "placement"):
+            probs = get_decision_scorer().score(query, front)
+        _job_checkpoint(context)
+        ranked = sorted(probs.items(), key=lambda x: x[1], reverse=True)[:5]
+    if not ranked:
+        return {
+            "reply": "I couldn't identify a valid target node to connect.",
+            "graph_write": False,
+            "error": True,
+        }
+
     _job_checkpoint(context)
-    ranked = sorted(probs.items(), key=lambda x: x[1], reverse=True)
     approval_id = dock.enqueue_pending_approval(
         ctx,
         approval_type="placement",
-        title="Connect ROOT?",
-        payload={"root_id": root_id, "candidates": ranked[:5]},
+        title=f"Connect {root.title}?",
+        payload={"root_id": root.id, "candidates": ranked[:5]},
     )
     return {
-        "reply": "Placement options in dock.",
+        "reply": f"Placement proposal for {root.title} is ready for review.",
         "approval_id": approval_id,
         "graph_write": False,
     }

@@ -90,12 +90,14 @@ export async function fetchJobs(projectId: string, threadId: string): Promise<Do
       status?: string;
       approval_id?: string;
       recommendation_id?: string;
+      approval_resolution?: string;
     }) => ({
       id: job.job_id,
       className: 'job' as const,
       title: job.label || job.worker || job.kind || 'Background job',
       detail: `${job.worker || job.kind || 'worker'} · ${job.status || 'running'}`,
       jobStatus: job.status,
+      approvalResolution: job.approval_resolution,
       approvalId: job.approval_id || job.recommendation_id,
       linkedJobId: job.job_id,
     }),

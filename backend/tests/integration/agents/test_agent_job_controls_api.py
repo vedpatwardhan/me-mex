@@ -51,3 +51,32 @@ def test_job_control_api_pauses_resumes_cancels_and_deletes(
     assert deleted.json()["status"] == "deleted"
     assert job_runtime.get_job(job["job_id"]) is None
     assert client.get("/api/agent/jobs", params=params).json()["items"] == []
+
+
+@pytest.mark.voice_plane
+def test_job_list_does_not_requeue_approved_jobs(client, project):
+    thread_id = "job-list-approved"
+    approved = {
+        "job_id": "job-approved-gist",
+        "worker": "gist",
+        "thread_id": thread_id,
+        "project_id": project.id,
+        "status": "done",
+        "approval_resolution": "approve",
+    }
+    done_without_approval = {
+        "job_id": "job-readonly-retrieval",
+        "worker": "retrieval",
+        "thread_id": thread_id,
+        "project_id": project.id,
+        "status": "done",
+    }
+    job_runtime._jobs.update({job["job_id"]: job for job in (approved, done_without_approval)})
+    job_runtime._by_thread[thread_id] = [approved["job_id"], done_without_approval["job_id"]]
+
+    items = client.get(
+        "/api/agent/jobs",
+        params={"project_id": project.id, "thread_id": thread_id},
+    ).json()["items"]
+
+    assert [item["job_id"] for item in items] == ["job-readonly-retrieval"]

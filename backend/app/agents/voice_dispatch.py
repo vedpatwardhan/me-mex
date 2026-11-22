@@ -37,6 +37,7 @@ def resolve_voice_route(
     from app.agents.context_preprocessor import (
         apply_custom_fields_to_text,
         block_graph_writes_without_scope,
+        graph_candidates_for_supervisor,
         prioritize_project_scope_until_complete,
     )
     from app.agents.workers import route_intent
@@ -44,6 +45,7 @@ def resolve_voice_route(
     project = store.get_project(project_id)
     effective = apply_custom_fields_to_text(text, context_json or {})
     routing_context = dict(context_json or {})
+    routing_context["graph_candidates"] = graph_candidates_for_supervisor(store, project_id)
     routing_context["scope_approval_pending"] = any(
         item.approval_type == "project_scope" for item in store.list_pending(project_id, thread_id)
     )

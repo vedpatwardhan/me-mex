@@ -1,9 +1,12 @@
 import threading
+import time
 from dataclasses import replace
 
 import pytest
+from app.db import ToolContext
 from app.llm import get_chains, set_chains_override
 from app.llm.schemas import WorkerRoute
+from app.tools import gist
 from langchain_core.runnables import RunnableLambda
 from tests.sse_util import iter_sse_data
 
@@ -249,3 +252,79 @@ def test_voice_job_control_cancels_selected_job_without_dispatching_new_work(
     from app.prompts import load_prompt
 
     assert "worker=job_control" in load_prompt("worker_route")
+
+
+@pytest.mark.voice_plane
+def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
+    client, store, project_scoped
+):
+    base = get_chains()
+    seen = {}
+    ctx = ToolContext(
+        project_id=project_scoped.id,
+        thread_id="voice-link-targets",
+        store=store,
+    )
+    dawn = gist.create_or_update_root_gist(
+        ctx,
+        title="The DAWN of World-Action Interactive Models",
+        gist="Source gist.",
+    )
+    genesis_id = store.get_project(project_scoped.id).genesis_node_id
+
+    def supervisor(inputs):
+        seen.update(inputs)
+        return WorkerRoute(
+            worker="link",
+            intent="link",
+            dispatch=True,
+            root_id=dawn["root_id"],
+            target_ids=[genesis_id],
+        )
+
+    set_chains_override(replace(base, supervisor=RunnableLambda(supervisor)))
+    thread_id = "voice-link-targets"
+    response = client.post(
+        "/api/voice/conversation/stream",
+        json={
+            "text": "Connect the Dawn node to the Genesis node.",
+            "thread_id": thread_id,
+            "context_json": {
+                "voice_turn": True,
+                "active_project_id": project_scoped.id,
+                "project_id": project_scoped.id,
+                "custom_fields": {},
+            },
+        },
+    )
+    end = next(chunk for chunk in iter_sse_data(response) if chunk.get("type") == "turn_end")
+    assert response.status_code == 200
+    assert end["worker_kind"] == "link"
+    assert end["dispatched"] is True
+    assert any(node["id"] == dawn["root_id"] for node in seen["context"]["graph_candidates"])
+    assert any(node["id"] == genesis_id for node in seen["context"]["graph_candidates"])
+
+    approvals = []
+    for _ in range(100):
+        approvals = client.get(
+            "/api/agent/approvals",
+            params={"project_id": project_scoped.id, "thread_id": thread_id},
+        ).json()["items"]
+        if approvals:
+            break
+        time.sleep(0.01)
+    placement = next(item for item in approvals if item["approval_type"] == "placement")
+    assert placement["payload"]["root_id"] == dawn["root_id"]
+    assert placement["payload"]["candidates"][0][0] == genesis_id
+
+    approved = client.post(
+        "/api/agent/resume",
+        json={
+            "thread_id": thread_id,
+            "approval_id": placement["id"],
+            "action": "approve",
+            "context_json": {"active_project_id": project_scoped.id},
+        },
+    )
+    assert approved.status_code == 200
+    assert genesis_id in store.neighbors(dawn["root_id"])

@@ -210,7 +210,10 @@ def list_approvals(
 def list_agent_jobs(project_id: str, thread_id: str):
     return {
         "items": [
-            job for job in job_runtime.list_jobs(thread_id) if job.get("project_id") == project_id
+            job
+            for job in job_runtime.list_jobs(thread_id)
+            if job.get("project_id") == project_id
+            and job.get("approval_resolution") not in {"approve", "dismiss"}
         ]
     }
 
