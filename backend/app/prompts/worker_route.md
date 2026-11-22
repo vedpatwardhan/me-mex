@@ -9,14 +9,16 @@ Choose the worker and task for the user's message from its meaning and the full 
 - retrieval — related nodes, highlight subgraph
 - scratch — notes, todos, promote todo
 - project_scope — onboarding when project introduction is empty; revisions to an existing scope
+- job_control — pause, resume, cancel, or remove an existing background job
 
 Return one structured JSON decision with these fields:
 - `worker`: one of the worker names above.
-- `intent`: `conversation`, `source_summary`, `source_analysis`, `commit_gist`, `create_note`, `create_todo`, `promote_todo`, `scope_conversation`, `scope_save`, `link`, `reorg`, `retrieval`, or `status`.
+- `intent`: `conversation`, `source_summary`, `source_analysis`, `commit_gist`, `create_note`, `create_todo`, `promote_todo`, `scope_conversation`, `scope_save`, `link`, `reorg`, `retrieval`, `status`, or `job_control`.
 - `dispatch`: true only when the selected specialist worker needs to run for this turn. Conversation-only replies use false.
 - `source_field`: exact custom-field key holding the selected source, when applicable; null for a source in the utterance or no selected field.
 - `source_reference`: exact URL or arXiv ID value supplied by the user, when applicable. Never invent or rewrite a source location.
 - `title`, `content`, `target_id`: fill from the user's explicit request/context when required by the selected intent; otherwise null.
+- `job_action`: `pause`, `resume`, `cancel`, or `delete` only for `intent=job_control`; otherwise null. For job control, set `target_id` to the matching `job_id` from `context.session_state.active_jobs`.
 - `source_error`: reserved for deterministic input validation; always return null.
 
 Routing rules:
@@ -28,6 +30,7 @@ Routing rules:
 - Acknowledging that scope is complete, mentioning that scope is already set, asking what comes next, or asking a general research question is conversation—not a scope revision. Do not draft a new proposal or create another scope job for those turns, even if the user mentions “scope”.
 - When the user gives substantive project goals, topic, methods, or source plans while scope is unset, prepare a concise candidate in `content` and set `worker=project_scope`, `intent=scope_conversation`, `dispatch=true` so it appears for review. Do not wait for the user to say “define scope” or “save scope”. Greetings and brief status questions are conversation-only and must not create a proposal.
 - Use `context.session_state.active_jobs` and `context.session_state.pending_approval_count` as current state. A background job or pending approval is context, not an instruction to route unrelated follow-up messages back to the same worker. Route the user's latest intent; a supplied source link by itself is not a request to summarize it again. Do not dispatch or duplicate a job for a conversation-only turn.
+- If the user asks to stop, abort, cancel, pause, resume, or remove an existing job, select `worker=job_control`, `intent=job_control`, `dispatch=true`, set the corresponding `job_action`, and choose `target_id` from `context.session_state.active_jobs`. If several jobs could match and the user did not identify one, ask which job using `worker=conversation`, `dispatch=false`. Do not start another specialist job for a job-control request.
 - For true scope edits, do not classify incremental versus replace; the ProjectScope LLM does that using the active baseline and full conversation. Pass through `custom_fields.force_scope_rewrite` unchanged as an explicit override.
 - For scratch requests, extract the requested operation and title/content/target into the fields above; do not rely on fixed phrase matching in the worker.
 - Treat explicit `force_gist_commit` and `force_scope_commit` custom-field flags as authoritative commit requests when true.

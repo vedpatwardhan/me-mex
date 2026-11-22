@@ -23,6 +23,12 @@ from app.tools import fetch as fetch_tool
 _log = logging.getLogger("memex.v2.workers")
 
 
+def _job_checkpoint(context: dict[str, Any] | None) -> None:
+    checkpoint = ((context or {}).get("_job_control") or {}).get("checkpoint")
+    if callable(checkpoint):
+        checkpoint()
+
+
 def _scorer_node(store: Store, node_id: str) -> ScorerNode:
     node = store.get_node(node_id)
     return ScorerNode(
@@ -132,6 +138,7 @@ def conversation_worker(
 
 
 def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
+    _job_checkpoint(context)
     fields = context.get("custom_fields") or {}
     decision = context.get("supervisor_decision") or {}
     proj = ctx.store.get_project(ctx.project_id)
@@ -159,6 +166,7 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     source_text = str(fields.get("raw_text") or "").strip()
     source_title = str(decision.get("title") or fields.get("title") or "").strip()
     if source.url:
+        _job_checkpoint(context)
         fetched = fetch_tool.fetch_normalized_text(ctx, source.url)
         source_text = (fetched.get("text") or "").strip()
         if not source_text:
@@ -175,11 +183,13 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
         source_title = source_title or _document_title(source_text)
 
     if source_text:
+        _job_checkpoint(context)
         gist_text = _summarize_source(
             source_text,
             source_title=source_title,
             source_url=source.url or "",
             project_scope=(proj.introduction or "")[:1000],
+            checkpoint=lambda: _job_checkpoint(context),
         )
         if not gist_text:
             return {
@@ -194,6 +204,7 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
 
     explicit_commit = decision.get("intent") == "commit_gist" or fields.get("force_gist_commit")
     if explicit_commit:
+        _job_checkpoint(context)
         title = decision.get("title") or fields.get("title") or source_title or "Untitled source"
         gist_text = fields.get("gist") or decision.get("content") or gist_text or text
         out = gist.create_or_update_root_gist(ctx, title=title, gist=gist_text)
@@ -217,6 +228,7 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
             "error": True,
         }
     title = source_title or "Untitled source"
+    _job_checkpoint(context)
     approval_id = dock.enqueue_pending_approval(
         ctx,
         approval_type="gist_root",
@@ -238,6 +250,7 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
 
 
 def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
+    _job_checkpoint(context)
     fields = context.get("custom_fields") or {}
     decision = context.get("supervisor_decision") or {}
     root_id = fields.get("root_id")
@@ -266,6 +279,7 @@ def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     doc_text = str(fields.get("raw_text") or "").strip()
     content_hash = ""
     if url:
+        _job_checkpoint(context)
         fetched = fetch_tool.fetch_normalized_text(ctx, url)
         doc_text = fetched.get("text") or ""
         content_hash = fetched["content_hash"]
@@ -288,9 +302,11 @@ def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
             "error": True,
         }
 
+    _job_checkpoint(context)
     concepts = get_chains().intradoc.invoke(
         {"text": doc_text, "doc_title": title, "user_intent": text}
     )
+    _job_checkpoint(context)
     key_out = staging.upsert_staging_bundle(
         ctx,
         root_id=root_id,
@@ -298,6 +314,7 @@ def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
         concepts=concepts,
         content_hash=content_hash,
     )
+    _job_checkpoint(context)
     approval_id = dock.enqueue_pending_approval(
         ctx,
         approval_type="intra_doc_staging",
@@ -326,6 +343,7 @@ def _summarize_source(
     source_title: str,
     source_url: str,
     project_scope: str,
+    checkpoint=None,
 ) -> str:
     """Summarize long documents hierarchically within the configured LLM context budget."""
     chain = get_chains().gist_draft
@@ -337,6 +355,8 @@ def _summarize_source(
     chunks = splitter.split_text(text)
 
     def summarize(part: str, stage: str) -> str:
+        if checkpoint:
+            checkpoint()
         result = chain.invoke(
             {
                 "text": part,
@@ -346,6 +366,8 @@ def _summarize_source(
                 "summary_stage": stage,
             }
         )
+        if checkpoint:
+            checkpoint()
         return str(result or "").strip()
 
     if len(chunks) == 1:
@@ -378,6 +400,7 @@ def _summarize_source(
 
 
 def link_place_worker(ctx: ToolContext, context: dict) -> dict:
+    _job_checkpoint(context)
     fields = context.get("custom_fields") or {}
     root_id = fields.get("root_id")
     if not root_id:
@@ -396,6 +419,7 @@ def link_place_worker(ctx: ToolContext, context: dict) -> dict:
     ]
     with decision_trace_scope(ctx, "placement"):
         probs = get_decision_scorer().score(query, front)
+    _job_checkpoint(context)
     ranked = sorted(probs.items(), key=lambda x: x[1], reverse=True)
     approval_id = dock.enqueue_pending_approval(
         ctx,
@@ -410,7 +434,8 @@ def link_place_worker(ctx: ToolContext, context: dict) -> dict:
     }
 
 
-def reorg_recommend_worker(ctx: ToolContext) -> dict:
+def reorg_recommend_worker(ctx: ToolContext, context: dict | None = None) -> dict:
+    _job_checkpoint(context)
     nodes = ctx.store.list_nodes(ctx.project_id)
     crowded = [n for n in nodes if ctx.store.degree(n.id) > settings.DEGREE_THRESHOLD]
     if not crowded:
@@ -440,6 +465,7 @@ def reorg_recommend_worker(ctx: ToolContext) -> dict:
     ]
     with decision_trace_scope(ctx, "reorg_neighbor"):
         probs = get_decision_scorer().score(query, front)
+    _job_checkpoint(context)
     ranked = sorted(probs.items(), key=lambda x: x[1], reverse=True)[:5]
     prop = reorg.write_reorg_proposal(
         ctx,
@@ -451,6 +477,7 @@ def reorg_recommend_worker(ctx: ToolContext) -> dict:
         },
     )
     preview = reorg.preview_reorg_diff(ctx, proposal_id=prop["proposal_id"])
+    _job_checkpoint(context)
     approval_id = dock.enqueue_pending_approval(
         ctx,
         approval_type="reorg",
@@ -465,6 +492,7 @@ def reorg_recommend_worker(ctx: ToolContext) -> dict:
 
 
 def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
+    _job_checkpoint(context)
     fields = context.get("custom_fields") or {}
     seed = fields.get("query_node_id") or (context.get("selected_node_ids") or [None])[0]
     if not seed:
@@ -482,6 +510,7 @@ def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     top_k = max(1, settings.RETRIEVAL_TRAVERSAL_TOP_K)
 
     for _ in range(max_depth):
+        _job_checkpoint(context)
         neighbor_ids = [n for n in ctx.store.neighbors(current) if n not in visited]
         if not neighbor_ids:
             break
@@ -498,6 +527,7 @@ def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
             break
         current = hop[0][0]
 
+    _job_checkpoint(context)
     link.highlight_nodes(ctx, node_ids=expand + [seed])
     summary = get_chains().retrieval_summary.invoke(
         {
@@ -517,27 +547,69 @@ def retrieval_worker(ctx: ToolContext, text: str, context: dict) -> dict:
 
 
 def scratch_worker_with_context(ctx: ToolContext, text: str, context: dict) -> dict:
+    _job_checkpoint(context)
     fields = context.get("custom_fields") or {}
     decision = context.get("supervisor_decision") or {}
     intent = decision.get("intent")
     if intent == "create_note":
         title = str(decision.get("title") or "Note")
         body = str(decision.get("content") or "")
+        _job_checkpoint(context)
         out = gist.create_note(ctx, title=title, body=body)
         return {"reply": "Note created.", "result": out, "graph_write": True}
     if intent == "create_todo":
         title = str(decision.get("title") or "ToDo")
         body = str(decision.get("content") or "")
+        _job_checkpoint(context)
         out = gist.create_todo(ctx, title=title, body=body)
         return {"reply": "Todo created.", "result": out, "graph_write": True}
     if intent == "promote_todo":
         todo_id = fields.get("promote_todo_id") or decision.get("target_id")
         if not todo_id:
             return {"reply": "Select the ToDo you want to promote.", "graph_write": False}
+        _job_checkpoint(context)
         out = gist.promote_todo_to_concept_m(ctx, todo_id=str(todo_id))
         return {"reply": "Todo promoted.", "result": out, "graph_write": True}
     return {
         "reply": "I couldn't determine which note or ToDo action you want.",
+        "graph_write": False,
+    }
+
+
+def job_control_worker(ctx: ToolContext, text: str, context: dict) -> dict:
+    """Apply the Supervisor's selected action to an existing background job."""
+    from app.agents import job_runtime
+
+    decision = context.get("supervisor_decision") or {}
+    action = decision.get("job_action")
+    job_id = decision.get("target_id")
+    if action not in {"pause", "resume", "cancel", "delete"} or not job_id:
+        return {
+            "reply": "I couldn't identify which job to control. Please specify the job shown in the queue.",
+            "graph_write": False,
+        }
+    try:
+        job = job_runtime.control_job(
+            ctx.thread_id,
+            str(job_id),
+            str(action),
+            project_id=ctx.project_id,
+        )
+    except ValueError as exc:
+        return {"reply": str(exc), "graph_write": False, "error": True}
+
+    worker = str(job.get("worker") or job.get("kind") or "background")
+    replies = {
+        "pause": f"I’ve paused the {worker} job.",
+        "resume": f"I’ve resumed the {worker} job.",
+        "cancel": f"I’ve cancelled the {worker} job.",
+        "delete": f"I’ve removed the {worker} job from the queue.",
+    }
+    return {
+        "reply": replies[str(action)],
+        "job_id": str(job_id),
+        "job_action": str(action),
+        "job_status": job.get("status"),
         "graph_write": False,
     }
 
@@ -551,6 +623,7 @@ def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = Non
     )
 
     context = context or {}
+    _job_checkpoint(context)
     approval_id = context.get("approval_id")
     if not approval_id:
         pending_scopes = [
@@ -563,9 +636,11 @@ def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = Non
     decision = context.get("supervisor_decision") or {}
     fields = context.get("custom_fields") or {}
     payload = json.loads(project_scope_payload_json(ctx, text, context=context))
+    _job_checkpoint(context)
     raw_result = get_chains().project_scope.invoke(
         {"payload": json.dumps(payload, ensure_ascii=False)}
     )
+    _job_checkpoint(context)
     result = normalize_scope_result(raw_result, payload)
     proposed = result.proposed_introduction.strip()
     if not proposed:
@@ -576,6 +651,7 @@ def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = Non
 
     update_scope_proposal(ctx.thread_id, proposed)
     if fields.get("force_scope_commit") and not context.get("voice_dispatch"):
+        _job_checkpoint(context)
         project.update_project_scope(ctx, introduction=proposed)
         return {
             "reply": "Scope saved.",
@@ -589,6 +665,7 @@ def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = Non
         if save_requested
         else "Project scope proposal updated. Review it in the dock."
     )
+    _job_checkpoint(context)
     aid = upsert_project_scope_approval(
         ctx,
         proposed_introduction=proposed,

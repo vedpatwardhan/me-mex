@@ -403,6 +403,7 @@ When the user **asks for recommendations** explicitly, plane 1 Conversation may 
 | **Background** | Heavy worker subgraphs (**IntraDocWorker**, long placement/reorg scoring) registered as **`jobs`** with their own progress streams. |
 | **On context switch** | User changes topic or selects another ROOT → foreground routes the **new** intent; background job **parks** at last checkpoint (`jobs.status` → `paused` or stays `running` if safe to continue in parallel). **No approval** required to switch context. |
 | **Resume background** | User returns (“continue the ERA deep read”) → supervisor routes to same `job_id`; `Command(resume=…)` or new invocation loads checkpoint and continues. |
+| **User job control** | Supervisor selects `job_control` from the active-job briefing; pause/resume/cancel/remove target a specific `job_id` for any worker. Cancel takes effect at the next worker-safe checkpoint. |
 | **Completion** | When background **finishes extract**, it **does not** auto-commit; it enqueues dock **review** (HITL)—that step *does* need your OK. |
 
 **Implementation patterns (pick one or combine):**

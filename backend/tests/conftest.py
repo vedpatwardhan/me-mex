@@ -50,10 +50,14 @@ def reset_job_runtime():
     with job_runtime._registry_lock:
         job_runtime._jobs.clear()
         job_runtime._by_thread.clear()
+        job_runtime._cancel_events.clear()
+        job_runtime._resume_events.clear()
     yield
     with job_runtime._registry_lock:
         job_runtime._jobs.clear()
         job_runtime._by_thread.clear()
+        job_runtime._cancel_events.clear()
+        job_runtime._resume_events.clear()
 
 
 @pytest.fixture(autouse=True)

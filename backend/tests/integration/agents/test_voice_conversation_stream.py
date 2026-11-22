@@ -1,3 +1,4 @@
+import threading
 from dataclasses import replace
 
 import pytest
@@ -177,3 +178,74 @@ def test_scope_completion_acknowledgement_stays_in_conversation(client, store, p
     assert seen["context"]["scope_approval_pending"] is False
     assert store.list_pending(project_scoped.id, thread_id) == []
     assert all(job["job_id"] != completed_scope_job["job_id"] for job in end["jobs"])
+
+
+@pytest.mark.voice_plane
+def test_voice_job_control_cancels_selected_job_without_dispatching_new_work(
+    client, project_scoped, tmpdir_checkpoint, monkeypatch
+):
+    from app.agents import job_runtime, session_plane
+    from app.services.checkpoints import JsonCheckpointStore
+
+    monkeypatch.setattr(session_plane, "_checkpoint", JsonCheckpointStore(str(tmpdir_checkpoint)))
+    base = get_chains()
+    thread_id = "voice-job-cancel"
+    job = {
+        "job_id": "job-redundant-gist",
+        "worker": "gist",
+        "kind": "gist",
+        "status": "running",
+        "label": "Summarize the first paper",
+        "thread_id": thread_id,
+        "project_id": project_scoped.id,
+        "affinity_key": "gist:first-paper",
+    }
+    job_runtime._jobs[job["job_id"]] = job
+    job_runtime._by_thread[thread_id] = [job["job_id"]]
+    job_runtime._cancel_events[job["job_id"]] = threading.Event()
+    job_runtime._resume_events[job["job_id"]] = threading.Event()
+    job_runtime._resume_events[job["job_id"]].set()
+
+    def conversation_must_not_run(_inputs):
+        raise AssertionError("job control must not be handled as ordinary chat")
+
+    set_chains_override(
+        replace(
+            base,
+            supervisor=RunnableLambda(
+                lambda _inputs: WorkerRoute(
+                    worker="job_control",
+                    intent="job_control",
+                    dispatch=True,
+                    target_id=job["job_id"],
+                    job_action="cancel",
+                )
+            ),
+            conversation=RunnableLambda(conversation_must_not_run),
+        )
+    )
+
+    response = client.post(
+        "/api/voice/conversation/stream",
+        json={
+            "text": "Abort the redundant gist job for the first paper.",
+            "thread_id": thread_id,
+            "context_json": {
+                "voice_turn": True,
+                "active_project_id": project_scoped.id,
+                "project_id": project_scoped.id,
+                "custom_fields": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    end = next(chunk for chunk in iter_sse_data(response) if chunk.get("type") == "turn_end")
+    assert end["details"]["job_action"] == "cancel"
+    assert end["details"]["job_status"] == "cancelled"
+    assert "cancelled" in end["reply"].lower()
+    assert job_runtime.get_job(job["job_id"])["status"] == "cancelled"
+
+    from app.prompts import load_prompt
+
+    assert "worker=job_control" in load_prompt("worker_route")

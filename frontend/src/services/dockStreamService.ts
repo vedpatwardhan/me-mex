@@ -76,6 +76,32 @@ export async function fetchApprovals(projectId: string, threadId: string): Promi
   );
 }
 
+export async function fetchJobs(projectId: string, threadId: string): Promise<DockItem[]> {
+  const q = new URLSearchParams({ project_id: projectId, thread_id: threadId });
+  const res = await fetch(`${API_BASE}/api/agent/jobs?${q}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.items || []).map(
+    (job: {
+      job_id: string;
+      worker?: string;
+      kind?: string;
+      label?: string;
+      status?: string;
+      approval_id?: string;
+      recommendation_id?: string;
+    }) => ({
+      id: job.job_id,
+      className: 'job' as const,
+      title: job.label || job.worker || job.kind || 'Background job',
+      detail: `${job.worker || job.kind || 'worker'} · ${job.status || 'running'}`,
+      jobStatus: job.status,
+      approvalId: job.approval_id || job.recommendation_id,
+      linkedJobId: job.job_id,
+    }),
+  );
+}
+
 export async function fetchNudges(projectId: string): Promise<DockItem[]> {
   const res = await fetch(`${API_BASE}/api/agent/nudges?project_id=${encodeURIComponent(projectId)}`);
   if (!res.ok) return [];
@@ -105,6 +131,25 @@ export async function resumeApproval(
   });
   if (!res.ok) {
     throw new Error(`resume failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export type JobAction = 'pause' | 'resume' | 'cancel' | 'delete';
+
+export async function controlJob(
+  projectId: string,
+  threadId: string,
+  jobId: string,
+  action: JobAction,
+): Promise<Record<string, unknown>> {
+  const q = new URLSearchParams({ project_id: projectId, thread_id: threadId });
+  const res = await fetch(
+    `${API_BASE}/api/agent/jobs/${encodeURIComponent(jobId)}/${action}?${q}`,
+    { method: 'POST' },
+  );
+  if (!res.ok) {
+    throw new Error(`job ${action} failed: ${res.status}`);
   }
   return res.json();
 }

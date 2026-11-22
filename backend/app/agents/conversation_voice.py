@@ -158,6 +158,35 @@ async def astream_conversation_voice(
         context_json=routing_context,
     )
     worker_kind = decision.worker
+    if worker_kind == "job_control":
+        from app.agents.workers import job_control_worker
+
+        ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
+        control_context = {
+            **routing_context,
+            "supervisor_decision": decision.model_dump(),
+        }
+        result = job_control_worker(ctx, effective_text, control_context)
+        reply = str(result.get("reply") or "I couldn't apply that job action.")
+        append_transcript_turn(thread_id, role="user", text=effective_text)
+        append_transcript_turn(thread_id, role="assistant", text=reply)
+        for i in range(0, len(reply), 32):
+            yield {"type": "token", "content": reply[i : i + 32], "source": "conversation"}
+        yield {
+            "type": "turn_end",
+            "worker": "job_control",
+            "reply": reply,
+            "graph_write": False,
+            "dispatched": False,
+            "worker_kind": "job_control",
+            "details": result,
+            "jobs": [
+                job
+                for job in job_runtime.list_jobs(thread_id)
+                if job.get("status") in {"running", "paused", "awaiting_approval"}
+            ],
+        }
+        return
     if decision.intent == "status" and not briefing.get("worker_result_snippet"):
         briefing = build_session_briefing(
             project_id=project_id,

@@ -15,6 +15,7 @@ WorkerName = Literal[
     "retrieval",
     "scratch",
     "project_scope",
+    "job_control",
 ]
 WorkerIntent = Literal[
     "conversation",
@@ -30,8 +31,10 @@ WorkerIntent = Literal[
     "reorg",
     "retrieval",
     "status",
+    "job_control",
 ]
 ScopeRevisionMode = Literal["incremental", "replace"]
+JobAction = Literal["pause", "resume", "cancel", "delete"]
 
 
 class WorkerRoute(BaseModel):
@@ -44,6 +47,7 @@ class WorkerRoute(BaseModel):
     title: str | None = None
     content: str | None = None
     target_id: str | None = None
+    job_action: JobAction | None = None
 
 
 class ProjectScopeResult(BaseModel):

@@ -4,6 +4,7 @@ import {
   applyStreamEvent,
   emptyDockStreamState,
   flattenDockEvents,
+  isGraphWriteEvent,
   isScopeCommittedEvent,
 } from '../src/utils/dockStreamReducer';
 
@@ -21,6 +22,16 @@ describe('dockStreamReducer', () => {
       job: { job_id: 'job-1', label: 'Deep read', status: 'running', worker: 'intradoc' },
     });
     expect(s.items.some((i) => i.id === 'job-1' && i.className === 'job')).toBe(true);
+    expect(s.items.find((i) => i.id === 'job-1')?.jobStatus).toBe('running');
+  });
+
+  it('removes a job row when the user deletes it', () => {
+    const withJob = applyStreamEvent(emptyDockStreamState(), {
+      type: 'job_update',
+      job: { job_id: 'job-delete', label: 'Background gist', status: 'cancelled', worker: 'gist' },
+    });
+    const deleted = applyStreamEvent(withJob, { type: 'job_delete', job_id: 'job-delete' });
+    expect(deleted.items).toEqual([]);
   });
 
   it('ignores worker_progress for latestReply', () => {
@@ -155,5 +166,22 @@ describe('dockStreamReducer', () => {
     });
     expect(events).toHaveLength(1);
     expect(isScopeCommittedEvent(events[0])).toBe(true);
+  });
+
+  it('recognizes graph writes from any approved worker response', () => {
+    expect(isGraphWriteEvent({ type: 'turn_end', graph_write: true })).toBe(true);
+    expect(
+      isGraphWriteEvent({ type: 'turn_end', details: { graph_write: true } }),
+    ).toBe(true);
+    expect(
+      isGraphWriteEvent({ type: 'turn_end', details: { status: 'approved' } }),
+    ).toBe(true);
+    expect(
+      isGraphWriteEvent({
+        type: 'job_update',
+        job: { status: 'done', output: { graph_write: true } },
+      }),
+    ).toBe(true);
+    expect(isGraphWriteEvent({ type: 'turn_end', graph_write: false })).toBe(false);
   });
 });

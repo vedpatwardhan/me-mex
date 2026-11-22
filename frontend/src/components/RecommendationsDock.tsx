@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { LayoutList, LoaderCircle, Sparkles, User, Bot } from 'lucide-react';
+import {
+  LayoutList,
+  LoaderCircle,
+  Pause,
+  Play,
+  Sparkles,
+  Trash2,
+  User,
+  Bot,
+  X,
+} from 'lucide-react';
 
 import { ApprovalReviewPanel } from './ApprovalReviewPanel';
 import { DockMarkdown } from './DockMarkdown';
@@ -14,6 +24,7 @@ export type DockItem = {
   payload?: Record<string, unknown>;
   linkedJobId?: string;
   approvalId?: string;
+  jobStatus?: string;
 };
 
 type Props = {
@@ -21,9 +32,14 @@ type Props = {
   latestUserText?: string;
   items?: DockItem[];
   pendingApprovals?: Set<string>;
+  pendingJobActions?: Set<string>;
   projectScope?: string;
   onApprove?: (id: string) => void;
   onDismiss?: (id: string) => void;
+  onPauseJob?: (id: string) => void;
+  onResumeJob?: (id: string) => void;
+  onCancelJob?: (id: string) => void;
+  onDeleteJob?: (id: string) => void;
 };
 
 const ITEM_STYLES: Record<
@@ -57,9 +73,14 @@ export const RecommendationsDock: React.FC<Props> = ({
   latestUserText = '',
   items = [],
   pendingApprovals = new Set(),
+  pendingJobActions = new Set(),
   projectScope = '',
   onApprove,
   onDismiss,
+  onPauseJob,
+  onResumeJob,
+  onCancelJob,
+  onDeleteJob,
 }) => {
   const [reviewId, setReviewId] = useState<string | null>(null);
 
@@ -109,6 +130,7 @@ export const RecommendationsDock: React.FC<Props> = ({
                 const reviewOpen = reviewId === item.id;
                 const reviewBody = item.reviewMarkdown || '_Loading preview…_';
                 const isApproving = pendingApprovals.has(item.id);
+                const isJobActionPending = pendingJobActions.has(item.id);
                 return (
                   <li
                     key={item.id}
@@ -169,6 +191,52 @@ export const RecommendationsDock: React.FC<Props> = ({
                           onClose={() => setReviewId(null)}
                         />
                       </>
+                    ) : null}
+                    {item.className === 'job' ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {item.jobStatus === 'running' && onPauseJob ? (
+                          <button
+                            type="button"
+                            disabled={isJobActionPending}
+                            className="inline-flex items-center gap-1 rounded-lg border border-amber-600/50 bg-amber-950/40 px-2.5 py-1 text-xs text-amber-100 disabled:opacity-50"
+                            onClick={() => onPauseJob(item.id)}
+                          >
+                            <Pause className="h-3 w-3" /> Pause
+                          </button>
+                        ) : null}
+                        {item.jobStatus === 'paused' && onResumeJob ? (
+                          <button
+                            type="button"
+                            disabled={isJobActionPending}
+                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-600/50 bg-emerald-950/40 px-2.5 py-1 text-xs text-emerald-100 disabled:opacity-50"
+                            onClick={() => onResumeJob(item.id)}
+                          >
+                            <Play className="h-3 w-3" /> Resume
+                          </button>
+                        ) : null}
+                        {['running', 'paused'].includes(item.jobStatus || '') && onCancelJob ? (
+                          <button
+                            type="button"
+                            disabled={isJobActionPending}
+                            className="inline-flex items-center gap-1 rounded-lg border border-rose-600/50 bg-rose-950/40 px-2.5 py-1 text-xs text-rose-100 disabled:opacity-50"
+                            onClick={() => onCancelJob(item.id)}
+                          >
+                            <X className="h-3 w-3" /> Cancel
+                          </button>
+                        ) : null}
+                        {['done', 'cancelled', 'dismissed', 'error'].includes(
+                          item.jobStatus || '',
+                        ) && onDeleteJob ? (
+                          <button
+                            type="button"
+                            disabled={isJobActionPending}
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-800/80 px-2.5 py-1 text-xs text-slate-200 disabled:opacity-50"
+                            onClick={() => onDeleteJob(item.id)}
+                          >
+                            <Trash2 className="h-3 w-3" /> Remove
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
                   </li>
                 );

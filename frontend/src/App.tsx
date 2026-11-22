@@ -15,7 +15,10 @@ export const App: React.FC = () => {
   const refreshProjects = useCallback(() => {
     void fetchProjects();
   }, [fetchProjects]);
-  const dock = useDockState(activeProjectId, threadId, refreshProjects);
+  const refreshGraph = useCallback(() => {
+    void fetchGraphData();
+  }, [fetchGraphData]);
+  const dock = useDockState(activeProjectId, threadId, refreshProjects, refreshGraph);
 
   const projectScope = projects.find((p) => p.id === activeProjectId)?.description || '';
 
@@ -54,9 +57,14 @@ export const App: React.FC = () => {
           latestUserText={dock.latestUserText}
           items={dock.items}
           pendingApprovals={dock.pendingApprovals}
+          pendingJobActions={dock.pendingJobActions}
           projectScope={dock.projectScope || projectScope}
           onApprove={(id) => void dock.approve(id, contextJson)}
           onDismiss={(id) => void dock.dismiss(id, contextJson)}
+          onPauseJob={(id) => void dock.pauseJob(id)}
+          onResumeJob={(id) => void dock.resumeJob(id)}
+          onCancelJob={(id) => void dock.cancelJob(id)}
+          onDeleteJob={(id) => void dock.deleteJob(id)}
         />
       </div>
     </div>

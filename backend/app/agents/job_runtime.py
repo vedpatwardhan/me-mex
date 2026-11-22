@@ -17,6 +17,35 @@ _log = logging.getLogger("memex.v2.jobs")
 _registry_lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
 _by_thread: dict[str, list[str]] = {}
+_cancel_events: dict[str, threading.Event] = {}
+_resume_events: dict[str, threading.Event] = {}
+
+
+class JobCancelled(Exception):
+    """Raised at a cooperative checkpoint after a user cancels a background job."""
+
+
+def checkpoint_job(context: dict[str, Any]) -> None:
+    """Pause at worker-safe boundaries and raise if the job has been cancelled."""
+    control = context.get("_job_control") or {}
+    cancelled = control.get("cancel_event")
+    resume = control.get("resume_event")
+    if cancelled is None or resume is None:
+        return
+    while not resume.wait(timeout=0.1):
+        if cancelled.is_set():
+            raise JobCancelled
+    if cancelled.is_set():
+        raise JobCancelled
+
+
+def _publish_job_update(job: dict[str, Any], source: str = "control") -> None:
+    from app.agents.session_events import publish_session_event
+
+    publish_session_event(
+        str(job.get("thread_id") or ""),
+        {"type": "job_update", "job": job, "source": source},
+    )
 
 
 def _sleep_s() -> float:
@@ -42,7 +71,19 @@ def park_active_jobs(thread_id: str) -> list[dict[str, Any]]:
             if not job or job.get("status") != "running":
                 continue
             job["status"] = "paused"
+            _resume_events.setdefault(jid, threading.Event()).clear()
             paused.append(dict(job))
+    if paused:
+        from app.agents.session_plane import update_job_record_status
+
+    for job in paused:
+        update_job_record_status(
+            thread_id,
+            str(job["job_id"]),
+            str(job["status"]),
+            str(job.get("progress") or "paused"),
+        )
+        _publish_job_update(job, source="context_switch")
     return paused
 
 
@@ -50,6 +91,86 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     with _registry_lock:
         job = _jobs.get(job_id)
         return dict(job) if job else None
+
+
+def control_job(
+    thread_id: str,
+    job_id: str,
+    action: str,
+    *,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    """Pause, resume, cancel, or remove one job belonging to a thread."""
+    if action not in {"pause", "resume", "cancel", "delete"}:
+        raise ValueError(f"Unsupported job action: {action}")
+
+    approval_id: str | None = None
+    with _registry_lock:
+        job = _jobs.get(job_id)
+        if (
+            not job
+            or job.get("thread_id") != thread_id
+            or (project_id is not None and job.get("project_id") != project_id)
+        ):
+            raise ValueError("Job not found in this thread")
+        status = job.get("status")
+        if action == "pause":
+            if status != "running":
+                raise ValueError("Only running jobs can be paused")
+            job["status"] = "paused"
+            job["progress"] = "paused by user"
+            _resume_events.setdefault(job_id, threading.Event()).clear()
+        elif action == "resume":
+            if status != "paused":
+                raise ValueError("Only paused jobs can be resumed")
+            job["status"] = "running"
+            job["progress"] = "resumed by user"
+            _resume_events.setdefault(job_id, threading.Event()).set()
+        elif action == "cancel":
+            if status not in {"running", "paused", "awaiting_approval"}:
+                raise ValueError("Only open jobs can be cancelled")
+            job["status"] = "cancelled"
+            job["progress"] = "cancelled by user"
+            _cancel_events.setdefault(job_id, threading.Event()).set()
+            _resume_events.setdefault(job_id, threading.Event()).set()
+            approval_id = job.get("approval_id") or job.get("recommendation_id")
+        else:
+            if status in {"running", "paused", "awaiting_approval"}:
+                raise ValueError("Cancel or finish an open job before deleting it")
+            job["status"] = "deleted"
+            job["progress"] = "removed from queue"
+        snapshot = dict(job)
+
+    if approval_id and action == "cancel":
+        try:
+            from app.db import get_store
+
+            get_store().resolve_approval(approval_id, "dismiss")
+        except Exception:  # noqa: BLE001 - cancelling the worker remains effective
+            _log.exception("Failed to dismiss approval for cancelled job %s", job_id)
+
+    from app.agents.session_plane import remove_job_record, update_job_record_status
+
+    if action == "delete":
+        with _registry_lock:
+            _jobs.pop(job_id, None)
+            ids = _by_thread.get(thread_id, [])
+            _by_thread[thread_id] = [jid for jid in ids if jid != job_id]
+            _cancel_events.pop(job_id, None)
+            _resume_events.pop(job_id, None)
+        remove_job_record(thread_id, job_id)
+        from app.agents.session_events import publish_session_event
+
+        publish_session_event(thread_id, {"type": "job_delete", "job_id": job_id})
+        return snapshot
+
+    update_job_record_status(thread_id, job_id, snapshot["status"], snapshot["progress"])
+    if approval_id and action == "cancel":
+        from app.agents.session_plane import resolve_job_records
+
+        resolve_job_records(thread_id, [job_id], "cancel", approval_id=approval_id)
+    _publish_job_update(snapshot)
+    return snapshot
 
 
 def resolve_approval_job(thread_id: str, approval_id: str, action: str) -> None:
@@ -99,6 +220,8 @@ def resume_job(job_id: str) -> dict[str, Any] | None:
         if not job:
             return None
         job["status"] = "running"
+        job["progress"] = "resumed"
+        _resume_events.setdefault(job_id, threading.Event()).set()
         return dict(job)
 
 
@@ -106,9 +229,15 @@ def _finish_job(job_id: str, output: dict[str, Any], *, project_id: str | None =
     job_snapshot: dict[str, Any] | None = None
     with _registry_lock:
         job = _jobs.get(job_id)
-        if not job:
+        if not job or job.get("status") in {"cancelled", "deleted"}:
             return
-        job["status"] = "awaiting_approval" if output.get("approval_id") else "done"
+        job["status"] = (
+            "error"
+            if output.get("error")
+            else "awaiting_approval"
+            if output.get("approval_id")
+            else "done"
+        )
         job["output"] = output
         job["progress"] = output.get("reply", "")
         if output.get("approval_id"):
@@ -174,29 +303,85 @@ def dispatch_background_worker(
                 if plan.approval_id:
                     job["approval_id"] = plan.approval_id
                 record = dict(job)
+                _cancel_events.setdefault(job_id, threading.Event()).clear()
+                _resume_events.setdefault(job_id, threading.Event()).set()
             else:
                 job_id = new_job_id()
                 record = _new_job_record(job_id, worker_kind, thread_id, pid, text, affinity_key)
                 _jobs[job_id] = record
                 _by_thread.setdefault(thread_id, []).append(job_id)
+                _cancel_events[job_id] = threading.Event()
+                _resume_events[job_id] = threading.Event()
+                _resume_events[job_id].set()
     else:
         job_id = new_job_id()
         record = _new_job_record(job_id, worker_kind, thread_id, pid, text, affinity_key)
         with _registry_lock:
             _jobs[job_id] = record
             _by_thread.setdefault(thread_id, []).append(job_id)
+            _cancel_events[job_id] = threading.Event()
+            _resume_events[job_id] = threading.Event()
+            _resume_events[job_id].set()
 
     def _run() -> None:
-        sleep_s = _sleep_s()
-        if sleep_s and worker_kind == "intradoc":
-            time.sleep(sleep_s)
         with _registry_lock:
-            st = _jobs.get(job_id, {}).get("status")
-        if st == "cancelled":
-            return
+            cancel_event = _cancel_events.setdefault(job_id, threading.Event())
+            resume_event = _resume_events.setdefault(job_id, threading.Event())
+
+        def checkpoint() -> None:
+            control_context = {
+                **dispatch_ctx,
+                "_job_control": {
+                    "cancel_event": cancel_event,
+                    "resume_event": resume_event,
+                },
+            }
+            checkpoint_job(control_context)
+
+        output: dict[str, Any] = {}
         try:
-            out = worker_fn(ctx, text, dispatch_ctx)
-            _finish_job(job_id, out, project_id=pid)
+            checkpoint()
+            sleep_s = _sleep_s()
+            sleep_until = time.monotonic() + (sleep_s if worker_kind == "intradoc" else 0)
+            while time.monotonic() < sleep_until:
+                checkpoint()
+                time.sleep(min(0.1, sleep_until - time.monotonic()))
+            worker_context = {
+                **dispatch_ctx,
+                "_job_control": {
+                    "cancel_event": cancel_event,
+                    "resume_event": resume_event,
+                    "checkpoint": checkpoint,
+                },
+            }
+            output = worker_fn(ctx, text, worker_context)
+            checkpoint()
+            _finish_job(job_id, output, project_id=pid)
+        except JobCancelled:
+            approval_id = output.get("approval_id")
+            if approval_id:
+                try:
+                    ctx.store.resolve_approval(str(approval_id), "dismiss")
+                except Exception:  # noqa: BLE001 - cancellation should still close the job
+                    _log.exception("Failed to dismiss approval for cancelled job %s", job_id)
+            with _registry_lock:
+                job = _jobs.get(job_id)
+                if job and job.get("status") != "deleted":
+                    job["status"] = "cancelled"
+                    job["progress"] = "cancelled by user"
+                    snapshot = dict(job)
+                else:
+                    snapshot = None
+            if snapshot:
+                from app.agents.session_plane import update_job_record_status
+
+                update_job_record_status(
+                    thread_id,
+                    job_id,
+                    snapshot["status"],
+                    snapshot["progress"],
+                )
+                _publish_job_update(snapshot)
         except Exception as exc:  # noqa: BLE001
             _finish_job(
                 job_id,

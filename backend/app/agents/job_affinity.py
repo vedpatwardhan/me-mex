@@ -84,7 +84,7 @@ def resolve_job_dispatch(
     introduction: str = "",
     dispatch_allowed: bool = True,
 ) -> JobDispatchPlan:
-    if not dispatch_allowed or worker_kind in ("conversation", "scratch"):
+    if not dispatch_allowed or worker_kind in ("conversation", "scratch", "job_control"):
         return JobDispatchPlan(action="skip", reason="dialogue_only")
 
     affinity_key = affinity_key_for_worker(

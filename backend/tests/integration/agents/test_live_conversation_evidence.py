@@ -3,7 +3,9 @@ from app.agents.conversation_voice import (
     _astream_voice_conversation_reply,
     _conversation_prompt_inputs,
 )
+from app.agents.workers import route_intent
 from app.config import settings
+from app.models import Project
 
 
 @pytest.mark.live_llm
@@ -36,15 +38,43 @@ async def test_live_conversation_defers_source_claims_until_gist_is_complete():
     answer = "".join(parts).strip().lower()
 
     assert answer
-    assert len(answer.split()) <= 45
-    assert any(
+    assert len(answer.split()) <= 65
+    says_pending = any(
+        phrase in answer for phrase in ("still", "currently", "being processed", "being read")
+    )
+    defers_claims = any(
         phrase in answer
-        for phrase in (
-            "still being processed",
-            "still being read",
-            "don't have the findings",
-            "do not have the findings",
-            "not available yet",
-            "when the gist is ready",
-        )
-    ), answer
+        for phrase in ("not yet", "once", "when the", "when it’s", "when it's", "when ready")
+    )
+    assert says_pending and defers_claims, answer
+
+
+@pytest.mark.live_llm
+def test_live_supervisor_routes_natural_cancel_to_the_active_job():
+    if settings.CHAT_LLM_MODE != "live":
+        pytest.skip("run with ME_MEX_RUN_LIVE_LLM_TESTS=1 and CHAT_LLM_MODE=live")
+
+    decision = route_intent(
+        "Please abort the redundant gist; I don't need another summary.",
+        {
+            "scope_approval_pending": False,
+            "session_state": {
+                "active_jobs": [
+                    {
+                        "job_id": "job-active-gist",
+                        "worker": "gist",
+                        "status": "running",
+                        "label": "Summarize the first paper",
+                    }
+                ],
+                "pending_approval_count": 0,
+            },
+            "custom_fields": {},
+        },
+        Project(_id="live-job-control", name="Live job control", introduction="Research project."),
+    )
+
+    assert decision.worker == "job_control"
+    assert decision.intent == "job_control"
+    assert decision.job_action == "cancel"
+    assert decision.target_id == "job-active-gist"

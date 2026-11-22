@@ -108,6 +108,9 @@ def test_voice_source_gist_holds_then_creates_reviewable_root_proposal(
         },
     )
     assert approved.status_code == 200
+    assert approved.json()["reply"] != "approved"
+    assert "gist" in approved.json()["reply"].lower()
+    assert approved.json()["graph_write"] is True
     root_id = approved.json()["result"]["root_id"]
     root = store.get_node(root_id)
     assert root.description == gist_approval["payload"]["gist"]

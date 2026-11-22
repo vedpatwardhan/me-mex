@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import operator
 import os
 from typing import Annotated, Any, TypedDict
@@ -21,6 +23,7 @@ from app.db import ToolContext, get_store
 from app.services.checkpoints import JsonCheckpointStore
 
 _checkpointer = MemorySaver()
+_log = logging.getLogger("memex.v2.graph")
 
 
 class AgentState(TypedDict, total=False):
@@ -137,6 +140,8 @@ def _worker_node(state: AgentState) -> AgentState:
         out = workers.project_scope_worker(ctx, text, context=context)
     elif w == "scratch":
         out = workers.scratch_worker_with_context(ctx, text, context)
+    elif w == "job_control":
+        out = workers.job_control_worker(ctx, text, context)
     else:
         out = workers.conversation_worker(ctx, text, context=context)
     return {**state, "output": out}
@@ -189,6 +194,8 @@ def _hitl_gate(state: AgentState) -> AgentState:
 def _workflow_observer(state: AgentState) -> AgentState:
     out = state.get("output") or {}
     w = state.get("worker", "conversation")
+    if w == "job_control":
+        return {**state, "jobs": []}
     job = job_from_worker_turn(w, state.get("text", ""), out)
     return {**state, "jobs": [job]}
 
@@ -284,10 +291,25 @@ def resume_approval(
     )
     if action != "approve":
         job_runtime.resolve_approval_job(thread_id, approval_id, action)
-        return {"status": "dismissed", "approval_id": approval_id}
+        return {
+            "status": "dismissed",
+            "approval_id": approval_id,
+            "approval_type": item.approval_type,
+            "graph_write": False,
+            "reply": _approval_reply(item.approval_type, item.title, {}, action="dismiss"),
+        }
 
     def _resolved(result: dict) -> dict:
         job_runtime.resolve_approval_job(thread_id, approval_id, action)
+        result.setdefault("status", "approved")
+        result.setdefault("approval_id", approval_id)
+        result.setdefault("approval_type", item.approval_type)
+        result.setdefault("graph_write", True)
+        result["reply"] = result.get("reply") or _approval_reply(
+            item.approval_type,
+            item.title,
+            result,
+        )
         return result
 
     payload = item.payload
@@ -363,6 +385,47 @@ def _scope_approval_reply(introduction: str) -> str:
         return text or fallback
     except Exception:  # noqa: BLE001 - scope is committed before optional acknowledgement generation
         return fallback
+
+
+def _approval_reply(
+    approval_type: str,
+    title: str,
+    result: dict,
+    *,
+    action: str = "approve",
+) -> str:
+    fallbacks = {
+        "gist_root": "The gist has been added to the graph.",
+        "intra_doc_staging": "The intra-document analysis has been added to the graph.",
+        "placement": "I’ve connected the source to the selected graph nodes.",
+        "reorg": "The approved graph reorganization has been applied.",
+    }
+    if action != "approve":
+        return f"I’ve dismissed {title or 'that proposal'}; it wasn’t added to the graph."
+    fallback = fallbacks.get(approval_type, "That approved change has been applied to the graph.")
+    if settings.CHAT_LLM_MODE != "live":
+        return fallback
+    try:
+        from app.llm import get_chains
+
+        instruction = (
+            "A user just approved a graph change. Acknowledge naturally in one short sentence, "
+            "state the concrete effect based only on this approval type and result, and never "
+            "reply with only a status word. Do not invent details.\n"
+            + json.dumps(
+                {"approval_type": approval_type, "title": title, "result": result},
+                ensure_ascii=False,
+                default=str,
+            )
+        )
+        reply = str(
+            get_chains().conversation.invoke({"text": instruction, "project_scope": ""}) or ""
+        ).strip()
+        if reply and reply.casefold().strip(".! ") not in {"approved", "done", "success"}:
+            return reply
+    except Exception:  # noqa: BLE001 - graph write has completed; retain a natural fallback
+        _log.exception("Approval acknowledgement generation failed for %s", approval_type)
+    return fallback
 
 
 async def astream_agent_turn(

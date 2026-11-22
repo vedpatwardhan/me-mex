@@ -80,6 +80,9 @@ me-mex/
 | **GistWorker** | Direct explicit gist commit → ROOT; summary request → `gist_root` approval; approve → ROOT + optional source URI |
 | Source gist | Short summary request with URL in any custom-field value → fetch exact source, brief completion acknowledgement, reviewable approval; no ROOT before approval |
 | Voice routing resilience | Committed-scope acknowledgement stays Conversation-only; malformed Supervisor output falls back to Conversation while active jobs remain visible |
+| Job controls | Pause/resume/cancel/remove work through both job API and Supervisor-selected `job_control` |
+| Approval result flow | Each approval type returns a natural acknowledgement; graph-write events refresh graph state |
+| Custom fields | Mute toggles reset the textarea while preserving submitted fields for the just-sent turn |
 | **IntraDocWorker** | Extract (mock LLM) → staging → commit after interrupt approve |
 | **LinkPlaceWorker** | DecisionScorer frontier keys = full vector; enqueue only; edges after approve |
 | **ReorgRecommend / Apply** | Preview → apply; no v1 cascade |

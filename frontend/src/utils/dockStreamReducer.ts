@@ -34,6 +34,18 @@ export function isScopeCommittedEvent(ev: Record<string, unknown>): boolean {
   );
 }
 
+export function isGraphWriteEvent(ev: Record<string, unknown>): boolean {
+  const details = ev.details as Record<string, unknown> | undefined;
+  const job = ev.job as Record<string, unknown> | undefined;
+  const output = job?.output as Record<string, unknown> | undefined;
+  return (
+    ev.graph_write === true ||
+    details?.graph_write === true ||
+    (ev.type === 'turn_end' && details?.status === 'approved') ||
+    (ev.type === 'job_update' && job?.status === 'done' && output?.graph_write === true)
+  );
+}
+
 function finalizeItems(items: DockItem[]): DockItem[] {
   return sortQueueItems(dedupeApprovalJobs(items));
 }
@@ -75,6 +87,7 @@ function upsertJob(items: DockItem[], job: Record<string, unknown>): DockItem[] 
     className: 'job',
     title: (job.label as string) || String(job.worker || 'Job'),
     detail: `${job.worker || 'worker'} · ${job.status || 'running'}`,
+    jobStatus: String(job.status || 'running'),
     approvalId,
     linkedJobId: jobId,
   };
@@ -128,6 +141,10 @@ export function applyStreamEvent(
   if (type === 'job_update') {
     const jobPatch = ev.job as Record<string, unknown> | undefined;
     if (jobPatch) return { ...state, items: upsertJob(state.items, jobPatch) };
+  }
+  if (type === 'job_delete') {
+    const jobId = String(ev.job_id || '');
+    return { ...state, items: state.items.filter((item) => item.id !== jobId) };
   }
   if (type === 'recommendation') {
     const cards = (ev.cards as Array<Record<string, unknown>>) || [];

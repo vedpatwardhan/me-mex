@@ -146,6 +146,27 @@ def _should_run_turn(session: RoomSession, text: str) -> bool:
     return bool(text.strip())
 
 
+def _approval_reply(result: dict[str, Any]) -> str:
+    reply = str(result.get("reply") or "").strip()
+    if reply and reply.casefold().strip(".! ") not in {"approved", "dismissed", "done"}:
+        return reply
+    if result.get("status") == "dismissed":
+        return "I dismissed that proposal. It was not added to the graph."
+    fallback = {
+        "project_scope": "Thanks for approving the project scope. I’ll use it to guide our research.",
+        "gist_root": "The gist has been added to the graph.",
+        "intra_doc_staging": "The intra-document analysis has been added to the graph.",
+        "placement": "I’ve connected the source to the selected graph nodes.",
+        "reorg": "The approved graph reorganization has been applied.",
+    }
+    approval_type = str(result.get("approval_type") or "")
+    if approval_type in fallback:
+        return fallback[approval_type]
+    if result.get("graph_write") is True:
+        return "The approved change has been applied to the graph."
+    return "That proposal has been approved."
+
+
 async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> None:
     if session.muted and not _should_run_turn(session, text):
         return
@@ -296,7 +317,7 @@ async def _consume_session_events(room: rtc.Room, session: RoomSession) -> None:
                         text=text,
                         allow_muted=True,
                     )
-            elif ev.get("type") in ("job_update", "recommendation"):
+            elif ev.get("type") in ("job_update", "job_delete", "recommendation"):
                 await room.local_participant.publish_data(
                     json.dumps({"type": ev["type"], **ev}).encode(),
                     reliable=True,
@@ -422,10 +443,15 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
         except httpx.HTTPError:
             _log.exception("resume failed")
             return
-        reply = str(result.get("reply") or result.get("status") or "Done.")
+        reply = _approval_reply(result)
         await _publish_dock_event(
             room,
-            {"type": "turn_end", "reply": reply, "graph_write": True, "details": result},
+            {
+                "type": "turn_end",
+                "reply": reply,
+                "graph_write": result.get("graph_write") is True,
+                "details": result,
+            },
         )
         if reply.strip() and speech_enabled():
             try:

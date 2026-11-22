@@ -46,7 +46,7 @@ There is **no** separate catalog / depth / insights **view mode**. Tiers from ma
 | Control | Purpose |
 |---------|---------|
 | **Mute / unmute** | Session stays up; muted = no uplink audio |
-| **Custom fields** | Key/value (arxiv id, metrics, node ids) → `context_json.custom_fields` **every turn** |
+| **Custom fields** | Key/value (arxiv id, metrics, node ids) → `context_json.custom_fields` for the submitted turn; textarea resets after the turn completes |
 | **Pin fields** | Keep values across turns (optional—[10-open-questions.md](./10-open-questions.md)) |
 | **Push-to-talk** | Optional hotkey |
 | **State** | `Muted | Listening | Thinking | Speaking | Awaiting approval` |
@@ -87,6 +87,7 @@ One **ordered list** (ranked). **Tap/voice starts a step** (context + options)�
 | **Nudge / start** | “Create ROOT with this gist”, “Deep-read this paper?”, “Connect here?”, “Reorganize crowded hub” | Opens **guided** flow: show gist preview, staging, placement scores, or reorg plan—you decide next |
 | **Pending approval** | Final commit after you’ve refined | **Approve** / **Edit** / **Dismiss** → Mongo write |
 | **Informational** | “This relates to ToDo X” | No write; optional follow-up |
+| **Job** | Background gist, deep read, retrieval, placement, reorg, scope | Running: **Pause** / **Cancel**; paused: **Resume** / **Cancel**; finished: **Remove** |
 
 **Pending approval** items appear only when a **graph write** needs your OK (after extract completes, placement candidates, reorg diff, etc.)—via `enqueue_pending_approval` and/or LangGraph **`interrupt()`** preview. **Context switches** (you talk about something else while intra-doc runs) do **not** create approval rows; see **job status** chips and [04 §12.5](./04-agent-orchestration.md#125-context-switching-foreground-vs-background).
 
@@ -101,6 +102,8 @@ One **ordered list** (ranked). **Tap/voice starts a step** (context + options)�
 | **Scope / onboarding** | Proposed project intro from **P1** thread | Scope text preview → `update_project_scope` |
 
 **Canvas coupling:** Selecting a recommendation **may** highlight affected nodes on the graph; the **approve/edit UI stays in the dock**.
+
+Approval acknowledgements are conversational for every write type. Successful approvals refresh the graph; status-only fallback text is not spoken as the complete response.
 
 ### 4.3 Voice and state
 

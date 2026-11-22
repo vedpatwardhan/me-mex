@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from app.agents import job_runtime
 from app.agents.conversation_voice import astream_conversation_voice
 from app.agents.graph import (
     astream_agent_turn,
@@ -202,6 +204,33 @@ def list_approvals(
     store = get_store()
     ctx = ToolContext(project_id=project_id, thread_id=thread_id or "ui", store=store)
     return dock_tools.list_pending_approvals(ctx)
+
+
+@router.get("/agent/jobs")
+def list_agent_jobs(project_id: str, thread_id: str):
+    return {
+        "items": [
+            job for job in job_runtime.list_jobs(thread_id) if job.get("project_id") == project_id
+        ]
+    }
+
+
+@router.post("/agent/jobs/{job_id}/{action}")
+def control_agent_job(
+    job_id: str,
+    action: Literal["pause", "resume", "cancel", "delete"],
+    project_id: str,
+    thread_id: str,
+):
+    try:
+        return job_runtime.control_job(
+            thread_id,
+            job_id,
+            action,
+            project_id=project_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/agent/nudges")

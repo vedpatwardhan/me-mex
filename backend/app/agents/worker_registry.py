@@ -22,6 +22,7 @@ def worker_handler(
         "retrieval": workers.retrieval_worker,
         "project_scope": workers.project_scope_worker,
         "scratch": workers.scratch_worker_with_context,
+        "job_control": workers.job_control_worker,
     }
     fn = table.get(worker_kind)
     if fn is None:
@@ -31,7 +32,7 @@ def worker_handler(
         if worker_kind in ("link", "reorg"):
             if worker_kind == "link":
                 return workers.link_place_worker(ctx, context)
-            return workers.reorg_recommend_worker(ctx)
+            return workers.reorg_recommend_worker(ctx, context)
         if worker_kind == "conversation":
             return workers.conversation_worker(ctx, text, context=context)
         return fn(ctx, text, context)

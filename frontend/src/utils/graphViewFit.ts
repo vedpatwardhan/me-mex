@@ -160,9 +160,7 @@ export function fitGraphView(
     Math.max(natural.w, natural.h)
   );
   const bounds =
-    sparseMinSpan !== undefined
-      ? graphBounds(nodes, { minSpan: sparseMinSpan })
-      : natural;
+    (sparseMinSpan !== undefined ? graphBounds(nodes, { minSpan: sparseMinSpan }) : null) ?? natural;
 
   let fitZoom = computeFitZoom(bounds, canvasW, canvasH);
   if (nodes.length <= 3) {

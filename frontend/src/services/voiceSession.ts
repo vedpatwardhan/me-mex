@@ -105,7 +105,10 @@ export class VoiceSession {
     const url = normalizeLiveKitUrl(rawUrl);
     const room = new Room({ adaptiveStream: true });
 
-    const attachAgentAudio = (track: { kind: Track.Kind; attach: () => HTMLMediaElement }) => {
+    const attachAgentAudio = (track: {
+      kind: Track.Kind;
+      attach: (element?: HTMLMediaElement) => HTMLMediaElement;
+    }) => {
       if (track.kind !== Track.Kind.Audio) return;
       let el = document.getElementById('agent-tts-audio') as HTMLAudioElement | null;
       if (!el) {
@@ -133,6 +136,7 @@ export class VoiceSession {
           'turn_start',
           'recommendation',
           'job_update',
+          'job_delete',
           'proactive_reply',
           'assistant_followup',
           'awaiting_approval',

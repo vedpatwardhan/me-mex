@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
 
 import { SpeechSegmentIndicator } from './SpeechSegmentIndicator';
@@ -6,7 +6,8 @@ import { useSpeechSegmentTimer } from '../hooks/useSpeechSegmentTimer';
 import type { VoiceContext } from '../services/voiceSession';
 import { VoiceSession } from '../services/voiceSession';
 import type { VoiceSessionState } from '../services/livekitService';
-import { parseCustomFields } from '../utils/dockUtils';
+import { INITIAL_CUSTOM_FIELDS, mergeOneShotCustomFields, parseCustomFields } from '../utils/dockUtils';
+import { flattenDockEvents } from '../utils/dockStreamReducer';
 
 type Props = {
   projectId?: string;
@@ -82,9 +83,12 @@ export const VoiceRail: React.FC<Props> = ({
 }) => {
   const [muted, setMuted] = useState(true);
   const [state, setState] = useState<VoiceSessionState>('Muted');
-  const [customFields, setCustomFields] = useState('arxiv_id=\nroot_id=');
+  const [customFields, setCustomFields] = useState(INITIAL_CUSTOM_FIELDS);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const sessionRef = useRef<VoiceSession | null>(null);
+  const pendingTurnFieldsRef = useRef<Record<string, string> | null>(null);
+  const resetFieldsAfterTurnRef = useRef(false);
+  const submittedTurnStartedRef = useRef(false);
   const [connecting, setConnecting] = useState(false);
   const setVoiceStateRef = useRef(setState);
   useEffect(() => {
@@ -96,30 +100,61 @@ export const VoiceRail: React.FC<Props> = ({
     [projectId],
   );
 
+  const contextForWorker = useCallback((micMuted = muted): VoiceContext => {
+    const customFieldsForInput = parseCustomFields(customFields);
+    const mergedFields = { ...(pendingTurnFieldsRef.current || {}) };
+    for (const [key, value] of Object.entries(customFieldsForInput)) {
+      if (value) mergedFields[key] = value;
+    }
+    return {
+      active_project_id: projectId || '',
+      muted: micMuted,
+      custom_fields: mergedFields,
+      selected_node_ids: selectedNodeId ? [selectedNodeId] : [],
+      thread_id: threadId,
+    };
+  }, [customFields, muted, projectId, selectedNodeId, threadId]);
+
+  const handleDockStreamEvent = useCallback(
+    (ev: Record<string, unknown>) => {
+      onDockStreamEvent?.(ev);
+      for (const event of flattenDockEvents(ev)) {
+        if (!resetFieldsAfterTurnRef.current) return;
+        if (event.type === 'turn_start') submittedTurnStartedRef.current = true;
+        if (event.type === 'turn_end' && submittedTurnStartedRef.current) {
+          resetFieldsAfterTurnRef.current = false;
+          submittedTurnStartedRef.current = false;
+          pendingTurnFieldsRef.current = null;
+          setCustomFields(INITIAL_CUSTOM_FIELDS);
+          const clearedContext = {
+            ...contextForWorker(muted),
+            custom_fields: parseCustomFields(INITIAL_CUSTOM_FIELDS),
+          };
+          onContext?.(clearedContext);
+          sessionRef.current?.publishContextFireAndForget(clearedContext);
+          return;
+        }
+      }
+    },
+    [onDockStreamEvent, onContext, muted, contextForWorker],
+  );
+
   const ensureSession = () => {
     if (!sessionRef.current) {
       sessionRef.current = new VoiceSession(
         (s) => setVoiceStateRef.current(s),
-        (ev) => onDockStreamEvent?.(ev),
+        handleDockStreamEvent,
       );
       onVoiceSession?.(sessionRef.current);
-    } else if (onDockStreamEvent) {
-      sessionRef.current.setDockEventHandler(onDockStreamEvent);
+    } else if (handleDockStreamEvent) {
+      sessionRef.current.setDockEventHandler(handleDockStreamEvent);
     }
     return sessionRef.current;
   };
 
   useEffect(() => {
-    sessionRef.current?.setDockEventHandler(onDockStreamEvent);
-  }, [onDockStreamEvent]);
-
-  const contextForWorker = (micMuted = muted): VoiceContext => ({
-    active_project_id: projectId || '',
-    muted: micMuted,
-    custom_fields: parseCustomFields(customFields),
-    selected_node_ids: selectedNodeId ? [selectedNodeId] : [],
-    thread_id: threadId,
-  });
+    sessionRef.current?.setDockEventHandler(handleDockStreamEvent);
+  }, [handleDockStreamEvent]);
 
   useEffect(() => {
     const session = sessionRef.current;
@@ -186,6 +221,13 @@ export const VoiceRail: React.FC<Props> = ({
   const setMicMuted = (micMuted: boolean) => {
     const session = ensureSession();
     if (!session.isReady()) return;
+    pendingTurnFieldsRef.current = mergeOneShotCustomFields(
+      pendingTurnFieldsRef.current,
+      customFields,
+    );
+    resetFieldsAfterTurnRef.current = true;
+    submittedTurnStartedRef.current = false;
+    setCustomFields(INITIAL_CUSTOM_FIELDS);
     const ctx = contextForWorker(micMuted);
     onContext?.(ctx);
     setVoiceError(null);
@@ -201,6 +243,10 @@ export const VoiceRail: React.FC<Props> = ({
   const endSession = () => {
     const session = sessionRef.current;
     setVoiceError(null);
+    pendingTurnFieldsRef.current = null;
+    resetFieldsAfterTurnRef.current = false;
+    submittedTurnStartedRef.current = false;
+    setCustomFields(INITIAL_CUSTOM_FIELDS);
     sessionRef.current = null;
     onVoiceSession?.(null);
     setState('Muted');

@@ -47,15 +47,39 @@ def resolve_job_records(
         job["status"] = {
             "approve": "done",
             "dismiss": "dismissed",
+            "cancel": "cancelled",
             "resolved": "resolved",
         }.get(action, "resolved")
         job["approval_resolution"] = action
         job["progress"] = {
             "approve": "approved",
             "dismiss": "dismissed",
+            "cancel": "cancelled",
             "resolved": "approval resolved",
         }.get(action, "approval resolved")
     state["jobs"] = jobs[-30:]
+    _checkpoint.save(thread_id, state)
+
+
+def update_job_record_status(
+    thread_id: str,
+    job_id: str,
+    status: str,
+    progress: str,
+) -> None:
+    state = _checkpoint_for(thread_id)
+    jobs = list(state.get("jobs") or [])
+    for job in jobs:
+        if job.get("job_id") == job_id:
+            job["status"] = status
+            job["progress"] = progress
+    state["jobs"] = jobs[-30:]
+    _checkpoint.save(thread_id, state)
+
+
+def remove_job_record(thread_id: str, job_id: str) -> None:
+    state = _checkpoint_for(thread_id)
+    state["jobs"] = [job for job in (state.get("jobs") or []) if job.get("job_id") != job_id]
     _checkpoint.save(thread_id, state)
 
 

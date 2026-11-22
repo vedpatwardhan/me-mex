@@ -3,16 +3,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DockItem } from '../components/RecommendationsDock';
 import {
   fetchApprovals,
+  fetchJobs,
   fetchNudges,
   resumeApproval,
   streamAgentTurn,
+  controlJob as controlJobRequest,
 } from '../services/dockStreamService';
+import type { JobAction } from '../services/dockStreamService';
 import type { VoiceSession } from '../services/voiceSession';
 import { reconcileQueueItems } from '../utils/dockQueueSort';
 import {
   applyStreamEvent,
   emptyDockStreamState,
   flattenDockEvents,
+  isGraphWriteEvent,
   isScopeCommittedEvent,
   resetTurnState,
 } from '../utils/dockStreamReducer';
@@ -21,22 +25,27 @@ export function useDockState(
   projectId: string,
   threadId: string,
   onScopeCommitted?: () => void,
+  onGraphCommitted?: () => void,
 ) {
   const [streamState, setStreamState] = useState(emptyDockStreamState);
   const [projectScope, setProjectScope] = useState('');
   const [voiceSession, setVoiceSession] = useState<VoiceSession | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<Set<string>>(() => new Set());
+  const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(() => new Set());
 
   const { latestReply, latestUserText, items } = streamState;
 
   const refreshDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshApprovals = useCallback(async () => {
-    const approvals = await fetchApprovals(projectId, threadId);
-    const nudges = await fetchNudges(projectId);
+    const [approvals, jobs, nudges] = await Promise.all([
+      fetchApprovals(projectId, threadId),
+      fetchJobs(projectId, threadId),
+      fetchNudges(projectId),
+    ]);
     setStreamState((s) => ({
       ...s,
-      items: reconcileQueueItems(approvals, nudges, s.items),
+      items: reconcileQueueItems([...approvals, ...jobs], nudges, s.items),
     }));
     return approvals;
   }, [projectId, threadId]);
@@ -74,8 +83,9 @@ export function useDockState(
       for (const event of flattenDockEvents(ev)) {
         setStreamState((prev) => applyStreamEvent(prev, event));
         const type = event.type as string | undefined;
-        const job = event.job as Record<string, unknown> | undefined;
         if (isScopeCommittedEvent(event)) onScopeCommitted?.();
+        if (isGraphWriteEvent(event)) onGraphCommitted?.();
+        const job = event.job as Record<string, unknown> | undefined;
         if (type === 'turn_end') void reconcilePendingApprovals();
         const shouldRefresh =
           type === 'turn_end' ||
@@ -86,7 +96,7 @@ export function useDockState(
         if (shouldRefresh) scheduleRefreshApprovals();
       }
     },
-    [scheduleRefreshApprovals, onScopeCommitted, reconcilePendingApprovals],
+    [scheduleRefreshApprovals, onScopeCommitted, onGraphCommitted, reconcilePendingApprovals],
   );
 
   const beginTurn = useCallback((userText: string) => {
@@ -136,8 +146,10 @@ export function useDockState(
           context_json: contextJson,
         });
         if (result?.scope_committed === true) onScopeCommitted?.();
+        if (result?.graph_write === true) onGraphCommitted?.();
         setStreamState((s) => ({
           ...s,
+          latestReply: typeof result?.reply === 'string' ? result.reply : s.latestReply,
           items: s.items.filter((i) => i.id !== approvalId),
         }));
         await refreshApprovals();
@@ -155,7 +167,7 @@ export function useDockState(
         throw error;
       }
     },
-    [threadId, refreshApprovals, voiceSession, voiceCtx, onScopeCommitted],
+    [threadId, refreshApprovals, voiceSession, voiceCtx, onScopeCommitted, onGraphCommitted],
   );
 
   const dismiss = useCallback(
@@ -178,16 +190,52 @@ export function useDockState(
     [threadId, voiceSession, voiceCtx],
   );
 
+  const runJobAction = useCallback(
+    async (jobId: string, action: JobAction) => {
+      setPendingJobActions((current) => new Set(current).add(jobId));
+      try {
+        const job = await controlJobRequest(projectId, threadId, jobId, action);
+        if (action === 'delete') {
+          setStreamState((state) => ({
+            ...state,
+            items: state.items.filter((item) => item.id !== jobId),
+          }));
+        } else {
+          setStreamState((state) => applyStreamEvent(state, { type: 'job_update', job }));
+        }
+      } catch (error) {
+        console.error(`Failed to ${action} job ${jobId}:`, error);
+      } finally {
+        setPendingJobActions((current) => {
+          const next = new Set(current);
+          next.delete(jobId);
+          return next;
+        });
+      }
+    },
+    [projectId, threadId],
+  );
+
+  const pauseJob = useCallback((jobId: string) => runJobAction(jobId, 'pause'), [runJobAction]);
+  const resumeJob = useCallback((jobId: string) => runJobAction(jobId, 'resume'), [runJobAction]);
+  const cancelJob = useCallback((jobId: string) => runJobAction(jobId, 'cancel'), [runJobAction]);
+  const deleteJob = useCallback((jobId: string) => runJobAction(jobId, 'delete'), [runJobAction]);
+
   return {
     latestReply,
     latestUserText,
     items,
     pendingApprovals,
+    pendingJobActions,
     projectScope,
     setProjectScope,
     runTextTurn,
     approve,
     dismiss,
+    pauseJob,
+    resumeJob,
+    cancelJob,
+    deleteJob,
     refreshApprovals,
     applyStreamEvent: applyStreamEventToState,
     beginTurn,
