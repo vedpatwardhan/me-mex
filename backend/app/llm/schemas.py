@@ -31,6 +31,7 @@ WorkerIntent = Literal[
     "retrieval",
     "status",
 ]
+ScopeRevisionMode = Literal["incremental", "replace"]
 
 
 class WorkerRoute(BaseModel):
@@ -43,6 +44,11 @@ class WorkerRoute(BaseModel):
     title: str | None = None
     content: str | None = None
     target_id: str | None = None
+
+
+class ProjectScopeResult(BaseModel):
+    revision_mode: ScopeRevisionMode
+    proposed_introduction: str
 
 
 class PassageConcept(BaseModel):

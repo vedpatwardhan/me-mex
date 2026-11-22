@@ -84,6 +84,7 @@ me-mex/
 | **ReorgRecommend / Apply** | Preview → apply; no v1 cascade |
 | **RetrievalWorker** | BFS hop mock scorer; `highlight_nodes` |
 | **ProjectScopeWorker** | Incomplete scope → no graph writes; complete → `update_project_scope` |
+| Scope revision | ProjectScope structured output chooses incremental correction vs full replace; pending proposal is the baseline when present |
 
 ### 3.3 Features / UX contracts ([02](./02-user-experience.md))
 

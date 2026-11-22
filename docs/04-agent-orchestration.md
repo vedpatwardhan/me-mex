@@ -168,7 +168,7 @@ The module [`context_preprocessor.py`](../backend/app/agents/context_preprocesso
 | **ReorgRecommendWorker** | `query_node` = mutable node in question; frontier = relocation/split targets; full probs | `write_reorg_proposal`, `preview_reorg_diff`, `enqueue_pending_approval` |
 | **ReorgApplyWorker** | None (plan already approved) | `apply_reorg_plan`, `split_section`, `relocate_under_parent`, … |
 | **RetrievalWorker** | **Seed:** Genesis (or selected node). Bounded **BFS**: each hop `DecisionScorer(query, frontier_neighbors)` with **title + description** text → expand **top‑k**; then Ministral summary | `highlight_nodes`, `query_nodes_by_embedding`, `open_passages` |
-| **ProjectScopeWorker** | Onboarding dialogue, scope draft text | `update_project_scope` |
+| **ProjectScopeWorker** | Onboarding dialogue, structured `ProjectScopeResult` (`incremental` / `replace` + complete proposal) | `update_project_scope` only on approval/explicit commit |
 
 Intra-doc **extract** is **not** a tool named `stage_intra_doc_concepts`; the **IntraDocWorker agent** runs the LLM pipeline, then **`upsert_staging_bundle`** + **`enqueue_pending_approval`** (“Review / commit intra-doc graph”).
 
@@ -253,7 +253,7 @@ Grouped by **effect**. Every entry is safe to call from pytest **without** mocki
 | **Scope-complete criteria** (agent judgment, not one-shot): **what** the work is; **where** it sits; **why** / goals; **what kinds of sources** you will explore (papers, topics, mixed paradigm)—enough to steer summaries and placement |
 | **Ready to persist** | Agent proposes scope text → you confirm → **`update_project_scope`** (Mongo project + Genesis description) → *“What would you like next?”* |
 | **Scope present** | Normal routing; **project introduction** is passed into supervisor/worker LLM prompts at invoke time |
-| **Scope update later** | Same conversation pattern or settings → `update_project_scope` |
+| **Scope update later** | ProjectScope LLM compares the latest message with the active baseline (pending proposal first, otherwise committed scope); it preserves unaffected scope on corrections and replaces it only when the conversation indicates a full redo. The complete proposal still requires approval before `update_project_scope`. |
 
 Until scope is saved, **no** gist ROOT / intra-doc / link / reorg **writes** (inquiry and gist **talk** in dock OK). Scope does **not** create graph nodes beyond Genesis metadata.
 
@@ -266,6 +266,7 @@ Until scope is saved, **no** gist ROOT / intra-doc / link / reorg **writes** (in
 | User intent (examples) | Agent | Graph write? | Voice foreground (plane 1) |
 |------------------------|-------|--------------|----------------------------|
 | Unmute on empty scope (P1) | ProjectScope worker (on dispatch) | No (until `update_project_scope`) | Convo dialogue; dispatch scope worker when persisting |
+| Scope correction vs full redo | ProjectScope worker's structured LLM result (`revision_mode`, complete proposal) | Only after explicit approval | Supervisor routes to ProjectScope; it does not classify revision mode |
 | Short summary / brief overview of a supplied paper or post (W2; “gist” wording optional) | GistWorker → resolve supplied source → fetch exact document → concise summary | No (ROOT only on explicit commit) | Convo acknowledges processing; completed worker summary returns as a separate Conversation follow-up |
 | Deep read, detailed analysis, concept extraction, or intra-doc graph of supplied source | IntraDocWorker → fetch → chunk/extract/consolidate → staging | Only after staging approval | Convo acknowledges processing; staging/approval arrives asynchronously |
 | “Save that as gist” | GistWorker | Yes (ROOT) via tool | Convo ack → async GistWorker |

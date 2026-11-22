@@ -520,87 +520,60 @@ def scratch_worker_with_context(ctx: ToolContext, text: str, context: dict) -> d
 
 def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = None) -> dict:
     from app.agents.scope_proposal import (
-        load_scope_proposal,
-        record_scope_turn,
+        normalize_scope_result,
+        project_scope_payload_json,
         update_scope_proposal,
         upsert_project_scope_approval,
     )
 
-    proj = ctx.store.get_project(ctx.project_id)
     context = context or {}
     approval_id = context.get("approval_id")
+    if not approval_id:
+        pending_scopes = [
+            item
+            for item in ctx.store.list_pending(ctx.project_id, ctx.thread_id)
+            if item.approval_type == "project_scope"
+        ]
+        if pending_scopes:
+            approval_id = pending_scopes[-1].id
     decision = context.get("supervisor_decision") or {}
     fields = context.get("custom_fields") or {}
-
-    if decision.get("intent") == "scope_save":
-        draft = load_scope_proposal(ctx.thread_id)
-        intro = str(decision.get("content") or draft.get("proposed_introduction") or "").strip()
-        if not intro:
-            recorded = record_scope_turn(ctx.thread_id, text)
-            response = get_chains().project_scope.invoke(
-                {
-                    "payload": json.dumps(
-                        {
-                            "current_scope": (proj.introduction or "").strip(),
-                            "latest_user_message": text,
-                            "draft_proposal": recorded.get("proposed_introduction", ""),
-                            "conversation_turns": recorded.get("conversation_turns", []),
-                        },
-                        ensure_ascii=False,
-                    )
-                }
-            )
-            intro = str(response or "").strip()
-        if not intro:
-            return {
-                "reply": "I don't have a complete scope proposal to save yet. Tell me what to revise.",
-                "graph_write": False,
-            }
-        update_scope_proposal(ctx.thread_id, intro)
-        if fields.get("force_scope_commit") and not context.get("voice_dispatch"):
-            project.update_project_scope(ctx, introduction=intro)
-            return {"reply": "Scope saved.", "graph_write": True}
-        aid = upsert_project_scope_approval(
-            ctx,
-            proposed_introduction=intro,
-            approval_id=str(approval_id) if approval_id else None,
-            title="Review project scope (save requested)",
-        )
-        return {
-            "reply": "Scope proposal is in the dock—approve when ready.",
-            "graph_write": False,
-            "approval_id": aid,
-            "proposal_preview": intro[:400],
-        }
-
-    committed = (proj.introduction or "").strip()
-    draft = record_scope_turn(ctx.thread_id, text)
-    reply = get_chains().project_scope.invoke(
-        {
-            "payload": json.dumps(
-                {
-                    "current_scope": committed,
-                    "latest_user_message": text,
-                    "draft_proposal": draft.get("proposed_introduction", ""),
-                    "conversation_turns": draft.get("conversation_turns", []),
-                },
-                ensure_ascii=False,
-            ),
-        }
+    payload = json.loads(project_scope_payload_json(ctx, text, context=context))
+    raw_result = get_chains().project_scope.invoke(
+        {"payload": json.dumps(payload, ensure_ascii=False)}
     )
-    proposed = str(reply or "").strip()
+    result = normalize_scope_result(raw_result, payload)
+    proposed = result.proposed_introduction.strip()
     if not proposed:
-        proposed = draft.get("proposed_introduction") or text.strip()
+        return {
+            "reply": "I couldn't prepare a scope proposal yet. Please clarify what the project covers.",
+            "graph_write": False,
+        }
+
     update_scope_proposal(ctx.thread_id, proposed)
-    summary = "Project scope proposal updated. Review it in the dock."
+    if fields.get("force_scope_commit") and not context.get("voice_dispatch"):
+        project.update_project_scope(ctx, introduction=proposed)
+        return {
+            "reply": "Scope saved.",
+            "scope_revision_mode": result.revision_mode,
+            "graph_write": True,
+        }
+
+    save_requested = decision.get("intent") == "scope_save"
+    summary = (
+        "Scope proposal is in the dock—approve when ready."
+        if save_requested
+        else "Project scope proposal updated. Review it in the dock."
+    )
     aid = upsert_project_scope_approval(
         ctx,
         proposed_introduction=proposed,
         approval_id=str(approval_id) if approval_id else None,
-        title="Review project scope",
+        title="Review project scope (save requested)" if save_requested else "Review project scope",
     )
     return {
         "reply": summary,
+        "scope_revision_mode": result.revision_mode,
         "graph_write": False,
         "approval_id": aid,
         "proposal_preview": proposed[:400],
