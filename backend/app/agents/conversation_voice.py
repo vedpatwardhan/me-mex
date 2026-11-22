@@ -111,19 +111,39 @@ async def astream_conversation_voice(
     )
     store = get_store()
     project = store.get_project(project_id)
+    briefing = build_session_briefing(
+        project_id=project_id,
+        thread_id=thread_id,
+    )
+    routing_context = {
+        **ctx_json,
+        "session_state": {
+            "active_jobs": [
+                {
+                    key: job.get(key)
+                    for key in ("job_id", "worker", "status", "label")
+                    if job.get(key) is not None
+                }
+                for job in (briefing.get("active_jobs") or [])
+            ],
+            "pending_approval_count": briefing.get("pending_approval_count") or 0,
+        },
+    }
 
     decision, effective_text, scope_blocked = resolve_voice_route(
         store=store,
         project_id=project_id,
+        thread_id=thread_id,
         text=text,
-        context_json=ctx_json,
+        context_json=routing_context,
     )
     worker_kind = decision.worker
-    briefing = build_session_briefing(
-        project_id=project_id,
-        thread_id=thread_id,
-        include_worker_result=decision.intent == "status",
-    )
+    if decision.intent == "status" and not briefing.get("worker_result_snippet"):
+        briefing = build_session_briefing(
+            project_id=project_id,
+            thread_id=thread_id,
+            include_worker_result=True,
+        )
     append_transcript_turn(thread_id, role="user", text=effective_text)
     dispatch = needs_voice_dispatch(
         decision,

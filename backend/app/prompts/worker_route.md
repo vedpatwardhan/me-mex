@@ -8,7 +8,7 @@ Choose the worker and task for the user's message from its meaning and the full 
 - reorg — split crowded hubs, reorganization preview
 - retrieval — related nodes, highlight subgraph
 - scratch — notes, todos, promote todo
-- project_scope — onboarding when project introduction is empty; scope Q&A
+- project_scope — onboarding when project introduction is empty; revisions to an existing scope
 
 Return one structured JSON decision with these fields:
 - `worker`: one of the worker names above.
@@ -24,12 +24,16 @@ Routing rules:
 - Detailed analysis, deep reads, concept extraction, or building an intra-document graph from a supplied source is `worker=intradoc`, `intent=source_analysis`, `dispatch=true`.
 - Saving a gist is `intent=commit_gist` only when the user clearly asks to persist it. A summary request alone never implies a graph write.
 - Understand arbitrary custom-field names from their values and surrounding request. If more than one plausible source exists and the user has not identified which one, use `worker=conversation`, `intent=conversation`, `dispatch=false` and ask which source to use.
-- For a new project with no saved scope, distinguish scope conversation from a scope proposal/save based on the user's meaning, not specific trigger phrases.
-- When the user gives substantive project goals, topic, methods, or source plans while scope is empty, prepare a concise candidate in `content` and set `worker=project_scope`, `intent=scope_conversation`, `dispatch=true` so it appears for review. Do not wait for the user to say “define scope” or “save scope”. Greetings and brief status questions are conversation-only and must not create a proposal.
-- When scope already exists or a scope approval is pending in the dock, route scope corrections, clarifications, typo fixes, and full redos to `worker=project_scope`, `intent=scope_conversation`, `dispatch=true`. Do not classify incremental versus replace; the ProjectScope LLM does that using the active baseline and full conversation. Pass through `custom_fields.force_scope_rewrite` unchanged as an explicit override.
+- Use `context.project_scope_status` and `context.scope_approval_pending` to distinguish onboarding from an already active scope. If a scope is committed or a proposal is pending, route to ProjectScope only when the user is actually correcting, clarifying, adding to, restarting, or explicitly saving the scope.
+- Acknowledging that scope is complete, mentioning that scope is already set, asking what comes next, or asking a general research question is conversation—not a scope revision. Do not draft a new proposal or create another scope job for those turns, even if the user mentions “scope”.
+- When the user gives substantive project goals, topic, methods, or source plans while scope is unset, prepare a concise candidate in `content` and set `worker=project_scope`, `intent=scope_conversation`, `dispatch=true` so it appears for review. Do not wait for the user to say “define scope” or “save scope”. Greetings and brief status questions are conversation-only and must not create a proposal.
+- Use `context.session_state.active_jobs` and `context.session_state.pending_approval_count` as current state. A background job or pending approval is context, not an instruction to route unrelated follow-up messages back to the same worker. Route the user's latest intent; a supplied source link by itself is not a request to summarize it again. Do not dispatch or duplicate a job for a conversation-only turn.
+- For true scope edits, do not classify incremental versus replace; the ProjectScope LLM does that using the active baseline and full conversation. Pass through `custom_fields.force_scope_rewrite` unchanged as an explicit override.
 - For scratch requests, extract the requested operation and title/content/target into the fields above; do not rely on fixed phrase matching in the worker.
 - Treat explicit `force_gist_commit` and `force_scope_commit` custom-field flags as authoritative commit requests when true.
 - Do not infer persistence from a source link, a summary request, or a user discussing possible scope wording.
+
+Project scope status is included in `context.project_scope_status` (`unset` or `committed`), and whether a draft approval exists is included in `context.scope_approval_pending`.
 
 Project scope text (may be empty):
 {{ project_scope }}

@@ -23,9 +23,17 @@ def test_voice_dispatch_retrieval(client, project, voice_context_json, mock_vllm
     assert end.get("dispatched") is True
     assert end.get("job_id")
     time.sleep(0.3)
+    from app.agents import job_runtime
+
+    job = job_runtime.get_job(end["job_id"])
+    assert job is not None
+    assert job.get("status") in ("done", "awaiting_approval", "running")
     br = client.get(
         "/api/agent/session/briefing",
         params={"project_id": project.id, "thread_id": "voice-dispatch"},
     )
     jobs = br.json().get("active_jobs") or []
-    assert any(j.get("status") in ("done", "awaiting_approval", "running") for j in jobs)
+    if job.get("status") == "done":
+        assert not any(j.get("job_id") == end["job_id"] for j in jobs)
+    else:
+        assert any(j.get("job_id") == end["job_id"] for j in jobs)

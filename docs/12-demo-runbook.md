@@ -164,8 +164,8 @@ Use a **fresh project** name like `Demo — <your topic>` so the graph stays eas
 
 | # | Action | Expected | ✓ |
 |---|--------|----------|---|
-| D1 | *“What’s the gist? What is the main contribution?”* (same URL in fields) | Gist prose in dock; still **no** `ROOT` unless you commit | |
-| D2a | **Recommended path:** wait for dock nudge *create ROOT* → review preview → **Approve** | New gist-colored `ROOT` on canvas; edge from Genesis (if wired) | |
+| D1 | *“What’s the gist? What is the main contribution?”* (same URL in fields) | Gist review proposal appears in dock; still **no** `ROOT` until approved | |
+| D2a | **Recommended path:** open gist proposal → review preview → **Approve** | New gist-colored `ROOT` on canvas with the source URI | |
 | D2b | **Fast path (demo):** add `force_gist_commit=true` to custom fields, say *“Create ROOT titled \<short title\>; gist is \<one sentence\>.”* | `ROOT` appears after turn completes (may still show approval depending on worker) | |
 
 Note `root_id` in custom fields after commit for later steps.

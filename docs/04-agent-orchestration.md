@@ -162,7 +162,7 @@ The module [`context_preprocessor.py`](../backend/app/agents/context_preprocesso
 | **Supervisor** | Turn routing on **dispatch path** | Delegates to workers |
 | **Conversation (voice, plane 1)** | Dialogue, interim ack, status from briefing — **TTS script** | **No tools** — dispatch workers for fetch/retrieval/gist/scoring |
 | **Conversation (REST harness)** | Inquiry, summary (legacy monolithic turn) | `fetch_normalized_text`, `open_passages`, `get_suggested_next_actions` until harness converges |
-| **GistWorker** | Resolve a user-supplied source reference from utterance/custom-field values; fetch and produce a concise source-grounded summary (chunk/reduce for long documents) | `fetch_normalized_text`; `create_or_update_root_gist` / `attach_source_uri` only on explicit commit |
+| **GistWorker** | Resolve a user-supplied source reference from utterance/custom-field values; fetch and produce a concise source-grounded summary (chunk/reduce for long documents) | `fetch_normalized_text`; enqueue a `gist_root` review proposal; `create_or_update_root_gist` / `attach_source_uri` only on approval or direct explicit commit |
 | **IntraDocWorker** | Chunk → extract → consolidate **LLM loop** (v1 prompts) | `fetch_normalized_text`, `upsert_staging_bundle`, `edit_staging_concept`, `enqueue_pending_approval`, `commit_intra_doc_graph` |
 | **LinkPlaceWorker** | `query_node` = `ROOT`; frontier = hub/`INSIGHT` shortlist; full prob vector → dock | `enqueue_pending_approval`, `create_root_insight_edges` on approve |
 | **ReorgRecommendWorker** | `query_node` = mutable node in question; frontier = relocation/split targets; full probs | `write_reorg_proposal`, `preview_reorg_diff`, `enqueue_pending_approval` |
@@ -267,7 +267,7 @@ Until scope is saved, **no** gist ROOT / intra-doc / link / reorg **writes** (in
 |------------------------|-------|--------------|----------------------------|
 | Unmute on empty scope (P1) | ProjectScope worker (on dispatch) | No (until `update_project_scope`) | Convo dialogue; dispatch scope worker when persisting |
 | Scope correction vs full redo | ProjectScope worker's structured LLM result (`revision_mode`, complete proposal) | Only after explicit approval | Supervisor routes to ProjectScope; it does not classify revision mode |
-| Short summary / brief overview of a supplied paper or post (W2; “gist” wording optional) | GistWorker → resolve supplied source → fetch exact document → concise summary | No (ROOT only on explicit commit) | Convo acknowledges processing; completed worker summary returns as a separate Conversation follow-up |
+| Short summary / brief overview of a supplied paper or post (W2; “gist” wording optional) | GistWorker → resolve supplied source → fetch exact document → concise summary → `gist_root` approval | No until approval | Convo acknowledges processing; completion follow-up points to the dock without repeating the gist |
 | Deep read, detailed analysis, concept extraction, or intra-doc graph of supplied source | IntraDocWorker → fetch → chunk/extract/consolidate → staging | Only after staging approval | Convo acknowledges processing; staging/approval arrives asynchronously |
 | “Save that as gist” | GistWorker | Yes (ROOT) via tool | Convo ack → async GistWorker |
 | “Deepen this ROOT / build concept graph” | IntraDocWorker (LLM extract) → staging tools | Yes (after `commit_intra_doc_graph` approve) | Convo ack → async IntraDoc job |

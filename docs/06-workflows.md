@@ -25,7 +25,7 @@ This document is the **end-to-end user journey**—what you do in the UI, when v
 
 | Mode | Graph write? | Typical path |
 |------|--------------|--------------|
-| Inquiry / gist talk | No | Conversation (+ fetch); gist text in thread |
+| Inquiry / gist talk | No until approval | Conversation + background GistWorker; completed gist appears as a reviewable `gist_root` approval |
 | Scope onboarding | Yes (project fields only) | Conversation → `update_project_scope` when agent satisfied |
 | Gist ROOT commit | Yes | Recommendation or “create ROOT with gist …” |
 | Deep read | Yes (after approve) | Three entry paths → extract → review → commit |
@@ -59,7 +59,7 @@ This document is the **end-to-end user journey**—what you do in the UI, when v
    - **What kind of sources** you expect (e.g. robotics papers, blogs, mixed)—broad **exploration paradigm**
 3. Until satisfied, agent **keeps clarifying**—no gist / intra-doc / link / reorg **writes** (inquiry OK).
 4. When satisfied, agent summarizes scope; you confirm → **`update_project_scope`** (project record + Genesis description).
-5. Agent: you’re free to ask for anything next—normal routing (W2+).
+5. After commit, acknowledging the completed scope or asking what comes next stays in Conversation. Only an actual scope edit/restart creates another proposal.
 
 Revisit scope later via conversation + `update_project_scope` or settings ([02](./02-user-experience.md)).
 
@@ -70,9 +70,9 @@ Revisit scope later via conversation + `update_project_scope` or settings ([02](
 **Example:** You provide a paper/article link in a custom field—under any field name—and ask for a short summary, brief overview, main idea, or gist.
 
 1. Supervisor routes to **GistWorker**; the worker resolves the supplied source reference from the message and custom-field values, fetches that document, and creates a concise summary from its extracted text.
-2. Conversation acknowledges that it is processing the source and does not guess at its contents. While the job runs, you can keep talking; when the worker finishes, Conversation returns a concise follow-up based only on the worker's summary. An unreadable source produces an explicit error instead of a substitute-paper summary.
-3. This inquiry does **not** create a `ROOT` in Mongo. You may discuss the result and refine your understanding.
-4. **Explicit commit only:** *“Create ROOT with this gist”* → review/approval as required → **`create_or_update_root_gist`** + optional `attach_source_uri`.
+2. Conversation acknowledges processing and does not guess at source contents. While the job runs, you can keep talking; a failed Supervisor classification falls back to Conversation-only so the turn still receives a reply.
+3. On completion, the full gist appears in a **Review / Approve** dock item as a `gist_root` proposal. The brief spoken follow-up points to the dock; it does not repeat the summary.
+4. The proposal does **not** create a `ROOT` until you approve it. Approval calls **`create_or_update_root_gist`** and attaches the supplied source URI when available. A direct explicit create-ROOT request remains supported.
 
 **Detailed analysis is W3, not W2:** *“Analyze this paper in detail,” “deep read,”* or requests for concept extraction route to IntraDocWorker, which stages concepts for review and approval.
 

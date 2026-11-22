@@ -30,6 +30,7 @@ def resolve_voice_route(
     *,
     store,
     project_id: str,
+    thread_id: str,
     text: str,
     context_json: dict[str, Any],
 ) -> tuple[WorkerRoute, str, bool]:
@@ -42,7 +43,11 @@ def resolve_voice_route(
 
     project = store.get_project(project_id)
     effective = apply_custom_fields_to_text(text, context_json or {})
-    decision = route_intent(effective, context_json or {}, project)
+    routing_context = dict(context_json or {})
+    routing_context["scope_approval_pending"] = any(
+        item.approval_type == "project_scope" for item in store.list_pending(project_id, thread_id)
+    )
+    decision = route_intent(effective, routing_context, project)
     worker = prioritize_project_scope_until_complete(
         project.introduction,
         decision.worker,

@@ -45,7 +45,11 @@ def _supervisor(state: AgentState) -> AgentState:
     )
     project = ctx.store.get_project(ctx.project_id)
     effective = apply_custom_fields_to_text(state["text"], state.get("context_json") or {})
-    context = state.get("context_json") or {}
+    context = dict(state.get("context_json") or {})
+    context["scope_approval_pending"] = any(
+        item.approval_type == "project_scope"
+        for item in ctx.store.list_pending(ctx.project_id, ctx.thread_id)
+    )
     decision = workers.route_intent(effective, context, project)
     worker = prioritize_project_scope_until_complete(project.introduction, decision.worker, context)
     if worker != decision.worker:
@@ -279,14 +283,20 @@ def resume_approval(
         approval_type=item.approval_type,
     )
     if action != "approve":
+        job_runtime.resolve_approval_job(thread_id, approval_id, action)
         return {"status": "dismissed", "approval_id": approval_id}
+
+    def _resolved(result: dict) -> dict:
+        job_runtime.resolve_approval_job(thread_id, approval_id, action)
+        return result
+
     payload = item.payload
     if item.approval_type == "placement":
         root_id = payload["root_id"]
         targets = [c[0] for c in payload.get("candidates", [])[:2]]
         append_hitl_label_trace(ctx, item, chosen_ids=targets)
         link.create_root_insight_edges(ctx, root_id=root_id, target_ids=targets)
-        return {"status": "approved", "edges": targets}
+        return _resolved({"status": "approved", "edges": targets})
     if item.approval_type == "intra_doc_staging":
         root_id = (context_json or {}).get("custom_fields", {}).get("root_id") or payload.get(
             "root_id"
@@ -297,20 +307,26 @@ def resume_approval(
             root_id = bundle.root_id
         if not root_id:
             raise ValueError("root_id required to commit staging")
-        return staging.commit_intra_doc_graph(ctx, staging_key=staging_key, root_id=root_id)
+        return _resolved(
+            staging.commit_intra_doc_graph(ctx, staging_key=staging_key, root_id=root_id)
+        )
     if item.approval_type == "reorg":
         append_hitl_label_trace(ctx, item)
-        return reorg.apply_reorg_plan(ctx, proposal_id=payload["proposal_id"])
+        return _resolved(reorg.apply_reorg_plan(ctx, proposal_id=payload["proposal_id"]))
     if item.approval_type == "gist_root":
-        gist.create_or_update_root_gist(
+        created = gist.create_or_update_root_gist(
             ctx,
             title=payload.get("title", "Untitled"),
             gist=payload.get("gist", ""),
         )
-        return {"status": "approved", "approval_id": approval_id}
+        source_uri = payload.get("source_uri")
+        if created.get("root_id") and source_uri:
+            gist.attach_source_uri(ctx, root_id=created["root_id"], uri=str(source_uri))
+        return _resolved({"status": "approved", "approval_id": approval_id, "result": created})
     if item.approval_type == "project_scope":
         intro = payload.get("proposed_introduction") or payload.get("introduction") or ""
         project.update_project_scope(ctx, introduction=str(intro))
+        job_runtime.resolve_approval_job(thread_id, approval_id, action)
         return {
             "status": "approved",
             "approval_id": approval_id,
@@ -319,7 +335,7 @@ def resume_approval(
             "graph_write": True,
             "reply": _scope_approval_reply(str(intro)),
         }
-    return {"status": "approved", "approval_id": approval_id}
+    return _resolved({"status": "approved", "approval_id": approval_id})
 
 
 def _scope_approval_reply(introduction: str) -> str:

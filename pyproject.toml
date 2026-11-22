@@ -54,6 +54,7 @@ markers = [
     "vllm: requires live Colab vLLM + LoRA",
     "mongodb: requires MongoDB",
     "slow: long-running tests",
+    "voice_plane: voice conversation and dispatch HTTP/SSE tests (included in default CI)",
     "livekit: LiveKit token/worker smokes (excluded from default CI)",
 ]
 

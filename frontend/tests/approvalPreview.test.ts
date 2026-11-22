@@ -10,6 +10,16 @@ describe('formatApprovalReview', () => {
     expect(md).toBe('Learn RSI and save notes.');
   });
 
+  it('shows the proposed gist and source in an approval review', () => {
+    const md = formatApprovalReview('gist_root', {
+      title: 'Paper title',
+      gist: 'A concise source-grounded gist.',
+      source_uri: 'https://arxiv.org/pdf/2605.11550',
+    });
+    expect(md).toContain('Paper title');
+    expect(md).toContain('A concise source-grounded gist.');
+  });
+
   it('formats placement candidates', () => {
     const md = formatApprovalReview('placement', {
       root_id: 'n_root',

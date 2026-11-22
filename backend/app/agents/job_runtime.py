@@ -52,6 +52,47 @@ def get_job(job_id: str) -> dict[str, Any] | None:
         return dict(job) if job else None
 
 
+def resolve_approval_job(thread_id: str, approval_id: str, action: str) -> None:
+    """Close the runtime/checkpoint job associated with a resolved approval."""
+    resolved_ids: list[str] = []
+    with _registry_lock:
+        for jid in _by_thread.get(thread_id, []):
+            job = _jobs.get(jid)
+            if not job or approval_id not in {
+                job.get("approval_id"),
+                job.get("recommendation_id"),
+            }:
+                continue
+            job["status"] = "done" if action == "approve" else "dismissed"
+            job["approval_resolution"] = action
+            job["progress"] = "approved" if action == "approve" else "dismissed"
+            resolved_ids.append(jid)
+
+    from app.agents.session_plane import resolve_job_records
+
+    resolve_job_records(thread_id, resolved_ids, action, approval_id=approval_id)
+
+
+def reconcile_pending_approvals(thread_id: str, pending_approval_ids: set[str]) -> None:
+    """Drop stale awaiting-approval status when the approval is no longer pending."""
+    resolved_ids: list[str] = []
+    with _registry_lock:
+        for jid in _by_thread.get(thread_id, []):
+            job = _jobs.get(jid)
+            if not job or job.get("status") != "awaiting_approval":
+                continue
+            approval_id = job.get("approval_id") or job.get("recommendation_id")
+            if approval_id and approval_id not in pending_approval_ids:
+                job["status"] = "resolved"
+                job["progress"] = "approval resolved"
+                resolved_ids.append(jid)
+
+    if resolved_ids:
+        from app.agents.session_plane import resolve_job_records
+
+        resolve_job_records(thread_id, resolved_ids, "resolved")
+
+
 def resume_job(job_id: str) -> dict[str, Any] | None:
     with _registry_lock:
         job = _jobs.get(job_id)

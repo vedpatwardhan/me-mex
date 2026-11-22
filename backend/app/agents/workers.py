@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -18,6 +19,8 @@ from app.services.decision_scorer import ScorerNode, get_decision_scorer
 from app.services.decision_trace_context import decision_trace_scope
 from app.tools import dock, gist, link, project, reorg, staging
 from app.tools import fetch as fetch_tool
+
+_log = logging.getLogger("memex.v2.workers")
 
 
 def _scorer_node(store: Store, node_id: str) -> ScorerNode:
@@ -42,16 +45,25 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
             dispatch=True,
         )
     intro = (project.introduction or "").strip()
-    payload = json.dumps({"text": text, "context": context}, ensure_ascii=False)
-    result = get_chains().supervisor.invoke(
-        {
-            "text": text,
-            "context": context,
-            "project_scope": intro if intro else "(empty)",
-            "introduction": intro,
-            "payload": payload,
-        }
-    )
+    routing_context = {
+        **context,
+        "project_scope_status": "committed" if intro else "unset",
+        "scope_approval_pending": bool(context.get("scope_approval_pending")),
+    }
+    payload = json.dumps({"text": text, "context": routing_context}, ensure_ascii=False)
+    try:
+        result = get_chains().supervisor.invoke(
+            {
+                "text": text,
+                "context": routing_context,
+                "project_scope": intro if intro else "(empty)",
+                "introduction": intro,
+                "payload": payload,
+            }
+        )
+    except Exception:  # noqa: BLE001 - routing failure must not swallow the conversation turn
+        _log.exception("Supervisor routing failed; falling back to conversation-only")
+        return WorkerRoute(worker="conversation", intent="conversation", dispatch=False)
     if isinstance(result, WorkerRoute):
         decision = result.model_copy(update={"source_error": None})
     else:
@@ -204,11 +216,23 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
             "graph_write": False,
             "error": True,
         }
+    title = source_title or "Untitled source"
+    approval_id = dock.enqueue_pending_approval(
+        ctx,
+        approval_type="gist_root",
+        title=f"Review gist: {title}",
+        payload={
+            "title": title,
+            "gist": gist_text,
+            "source_uri": source.url or fields.get("url") or fields.get("arxiv_id"),
+        },
+    )
     return {
-        "reply": gist_text,
+        "reply": "Gist ready for review in the dock. Approve it there to add it to the graph.",
         "source_summary": gist_text,
-        "source_title": source_title,
+        "source_title": title,
         "source_url": source.url,
+        "approval_id": approval_id,
         "graph_write": False,
     }
 

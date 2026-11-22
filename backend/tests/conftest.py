@@ -41,6 +41,20 @@ def reset_store_singleton():
 
 
 @pytest.fixture(autouse=True)
+def reset_job_runtime():
+    """Keep the process-local job ledger isolated between tests."""
+    from app.agents import job_runtime
+
+    with job_runtime._registry_lock:
+        job_runtime._jobs.clear()
+        job_runtime._by_thread.clear()
+    yield
+    with job_runtime._registry_lock:
+        job_runtime._jobs.clear()
+        job_runtime._by_thread.clear()
+
+
+@pytest.fixture(autouse=True)
 def reset_llm_overrides():
     set_chains_override(None)
     set_recorded_intradoc(None)

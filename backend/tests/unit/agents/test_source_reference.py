@@ -6,6 +6,7 @@ from app.agents.workers import _summarize_source
 from app.db import ToolContext
 from app.llm import get_chains, set_chains_override
 from app.llm.schemas import WorkerRoute
+from app.prompts import load_prompt
 from langchain_core.runnables import RunnableLambda
 
 
@@ -152,6 +153,52 @@ def test_short_scope_chit_chat_does_not_dispatch_approval_job(empty_project):
     assert resolved.dispatch is False
 
 
+def test_committed_scope_state_and_prompt_disambiguate_acknowledgement_from_revision(
+    project_scoped,
+):
+    base = get_chains()
+    seen = {}
+
+    def supervisor(inputs):
+        seen.update(inputs)
+        return WorkerRoute(worker="conversation", intent="conversation", dispatch=False)
+
+    set_chains_override(replace(base, supervisor=RunnableLambda(supervisor)))
+    decision = workers.route_intent(
+        "The project scope is done; what's next?",
+        {"scope_approval_pending": False},
+        project_scoped,
+    )
+
+    assert (decision.worker, decision.intent, decision.dispatch) == (
+        "conversation",
+        "conversation",
+        False,
+    )
+    assert seen["context"]["project_scope_status"] == "committed"
+    assert seen["context"]["scope_approval_pending"] is False
+    prompt = load_prompt("worker_route")
+    assert "Acknowledging that scope is complete" in prompt
+    assert "what comes next" in prompt
+
+
+def test_supervisor_failure_falls_back_to_conversation_only(project):
+    base = get_chains()
+
+    def fail(_inputs):
+        raise RuntimeError("malformed structured output")
+
+    set_chains_override(replace(base, supervisor=RunnableLambda(fail)))
+
+    decision = workers.route_intent("Let's discuss this idea generally.", {}, project)
+
+    assert (decision.worker, decision.intent, decision.dispatch) == (
+        "conversation",
+        "conversation",
+        False,
+    )
+
+
 def test_gist_worker_fetches_resolved_source_and_summarizes_extracted_text(
     store, project, monkeypatch
 ):
@@ -187,6 +234,12 @@ def test_gist_worker_fetches_resolved_source_and_summarizes_extracted_text(
     assert out["source_summary"] == "A concise, source-grounded summary of the May 2026 paper."
     assert out["source_url"] == fetched_urls[0]
     assert out["graph_write"] is False
+    assert out["approval_id"]
+    approval = store.list_pending(project.id, "gist-source")[-1]
+    assert approval.approval_type == "gist_root"
+    assert approval.payload["title"] == "Paper from May 2026"
+    assert approval.payload["gist"] == out["source_summary"]
+    assert approval.payload["source_uri"] == fetched_urls[0]
 
 
 def test_gist_worker_does_not_summarize_request_when_fetch_is_empty(store, project, monkeypatch):

@@ -77,8 +77,9 @@ me-mex/
 |-------|--------|
 | **Supervisor** | Routes P1, W2, W3, W4, W5, W11 utterances to correct worker (table [04 §8](./04-agent-orchestration.md#8-supervisor-routing-intent--agent)) |
 | **Conversation** | Summary/gist talk **no** ROOT without explicit persist |
-| **GistWorker** | Direct gist command → ROOT; optional attach |
-| Source gist | Short summary request with URL in any custom-field value → fetch exact source, no implicit ROOT; completed voice job returns grounded follow-up |
+| **GistWorker** | Direct explicit gist commit → ROOT; summary request → `gist_root` approval; approve → ROOT + optional source URI |
+| Source gist | Short summary request with URL in any custom-field value → fetch exact source, brief completion acknowledgement, reviewable approval; no ROOT before approval |
+| Voice routing resilience | Committed-scope acknowledgement stays Conversation-only; malformed Supervisor output falls back to Conversation while active jobs remain visible |
 | **IntraDocWorker** | Extract (mock LLM) → staging → commit after interrupt approve |
 | **LinkPlaceWorker** | DecisionScorer frontier keys = full vector; enqueue only; edges after approve |
 | **ReorgRecommend / Apply** | Preview → apply; no v1 cascade |
@@ -117,7 +118,7 @@ Marker **`voice_plane`** (default CI; HTTP/SSE only, no LiveKit room).
 | Chit-chat skips worker | `test_voice_chit_chat_no_graph.py` |
 | Briefing API | `test_session_briefing_api.py` |
 | Worker reply not hot-path TTS | `test_streaming_voice_filter.py` |
-| Background source gist is acknowledged, then returned from the completed worker result | `test_voice_source_gist_flow.py` |
+| Background source gist is acknowledged, then becomes a brief follow-up plus Review/Approve ROOT proposal | `test_voice_source_gist_flow.py`, `test_session_plane_gist_followup.py` |
 | WorkflowAgent metadata | `test_workflow_agent.py` |
 | §12.13 surface | `test_voice_spec_invariants.py` |
 | W9 voice path | `test_workflow_w9_voice_summary.py` |
