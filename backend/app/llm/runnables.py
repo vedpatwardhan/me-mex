@@ -26,7 +26,13 @@ def _to_openai_messages(messages: list[BaseMessage]) -> list[dict[str, Any]]:
     return out
 
 
-def structured_llm(schema: type[T], *, caller: str, max_tokens: int = 2048) -> Runnable:
+def structured_llm(
+    schema: type[T],
+    *,
+    caller: str,
+    max_tokens: int = 2048,
+    max_retries: int = 2,
+) -> Runnable:
     """Prompt template output → validated Pydantic via vLLM guided JSON."""
 
     def _run(value: ChatPromptValue | dict) -> T:
@@ -38,6 +44,7 @@ def structured_llm(schema: type[T], *, caller: str, max_tokens: int = 2048) -> R
             messages,
             schema,
             max_tokens=max_tokens,
+            max_retries=max_retries,
             enable_reasoning=False,
             caller=caller,
         )

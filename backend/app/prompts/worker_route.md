@@ -15,6 +15,7 @@ Return one structured JSON decision with these fields:
 - `worker`: one of the worker names above.
 - `intent`: `conversation`, `source_summary`, `source_analysis`, `commit_gist`, `create_note`, `create_todo`, `promote_todo`, `scope_conversation`, `scope_save`, `link`, `reorg`, `retrieval`, `status`, or `job_control`.
 - `dispatch`: true only when the selected specialist worker needs to run for this turn. Conversation-only replies use false.
+- `reply`: a concise user-facing response when `worker=conversation`; null for specialist dispatch. Keep it to a few short sentences and answer only from the user's message, committed project scope, and `context.session_state.completed_worker_results`. Active jobs and approvals are status only. Never infer source contents from links or titles.
 - `source_field`: exact custom-field key holding the selected source, when applicable; null for a source in the utterance or no selected field.
 - `source_reference`: exact URL or arXiv ID value supplied by the user, when applicable. Never invent or rewrite a source location.
 - `title`, `content`, `target_id`: fill from the user's explicit request/context when required by the selected intent; otherwise null.
@@ -35,11 +36,11 @@ Routing rules:
 - For true scope edits, do not classify incremental versus replace; the ProjectScope LLM does that using the active baseline and full conversation. Pass through `custom_fields.force_scope_rewrite` unchanged as an explicit override.
 - For scratch requests, extract the requested operation and title/content/target into the fields above; do not rely on fixed phrase matching in the worker.
 - For “connect X to Y” / placement requests, resolve X and Y against `context.graph_candidates` and return their ids in `root_id` and `target_ids`. If either node cannot be identified unambiguously, ask a concise clarification with `worker=conversation`, `dispatch=false`; do not dispatch a link job that cannot perform the requested connection.
-- Use `context.routing_memory.recent_turns` to resolve references such as “it”, “that paper”, or “the one we just approved”. Use `context.routing_memory.recent_graph_changes` and its summary to identify recently committed graph nodes; these records include exact IDs and node kinds. For a follow-up like “connect it with Genesis”, use the uniquely referenced recent ROOT as `root_id` and Genesis as a target. IDs and kinds in `context.graph_candidates` / `recent_graph_changes` are authoritative; never reverse source and target roles. If the referent is not unique, ask a concise clarification instead of guessing.
+- Use `context.routing_memory.recent_turns` to resolve references such as “it”, “that paper”, or “the one we just approved”. Use `current_source` and `recent_graph_changes` to identify the paper most recently being processed and whether it has a committed ROOT. For a follow-up like “connect it with Genesis”, return that paper's ROOT in `root_id` and Genesis in `target_ids`; put only destination nodes in `target_ids`, never the source ROOT. IDs and kinds in `context.graph_candidates` / `recent_graph_changes` are authoritative. If the current source has no ROOT yet, or the referent is not unique, ask a concise clarification instead of selecting an older paper.
 - Treat explicit `force_gist_commit` and `force_scope_commit` custom-field flags as authoritative commit requests when true.
 - Do not infer persistence from a source link, a summary request, or a user discussing possible scope wording.
 
-Project scope status is included in `context.project_scope_status` (`unset` or `committed`), and whether a draft approval exists is included in `context.scope_approval_pending`.
+Project scope status is included in `context.project_scope_status` (`unset` or `committed`), and whether a draft approval exists is included in `context.scope_approval_pending`. `context.session_state.completed_worker_results` contains the only worker-produced evidence allowed in a conversation `reply`.
 The current project's candidate graph nodes are included in `context.graph_candidates` as `{{id, title, node_kind}}` records for link-target resolution.
 `context.routing_memory` contains a bounded rolling summary of recent graph changes and recent user/assistant turns for resolving follow-up references.
 

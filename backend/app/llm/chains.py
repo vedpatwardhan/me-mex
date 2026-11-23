@@ -51,9 +51,10 @@ def _concepts_from_consolidated(
                 "concept_id": f"c{i + 1}_{uuid.uuid4().hex[:6]}",
                 "title": c.title,
                 "description": c.description,
+                "passage_indices": sorted(set(c.passage_indices)),
             }
         )
-    return out or [dict(c) for c in STUB_CONCEPTS]
+    return out
 
 
 # --- Live chains (prompt | LangChain Runnable → vLLM) ---
@@ -72,7 +73,7 @@ def _live_supervisor() -> Runnable:
             ("human", "{payload}"),
         ]
     )
-    return prompt | structured_llm(WorkerRoute, caller="Supervisor.classify", max_tokens=256)
+    return prompt | structured_llm(WorkerRoute, caller="Supervisor.classify", max_tokens=512)
 
 
 def _live_conversation() -> Runnable:
@@ -149,12 +150,16 @@ def _live_intradoc() -> Runnable:
         ConsolidateResult,
         caller="IntraDoc.reduce",
         max_tokens=settings.CONSOLIDATION_MAX_TOKENS,
+        max_retries=1,
     )
 
-    def _intradoc(inputs: dict[str, Any]) -> list[dict[str, Any]]:
+    def _intradoc(inputs: dict[str, Any]) -> dict[str, Any]:
         text = inputs.get("text") or ""
         doc_title = inputs.get("doc_title") or "Document"
         user_intent = inputs.get("user_intent") or ""
+        checkpoint = inputs.get("checkpoint")
+        if callable(checkpoint):
+            checkpoint()
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=passage_chunk_size_chars(),
             chunk_overlap=0,
@@ -175,18 +180,71 @@ def _live_intradoc() -> Runnable:
             }
             for i, chunk in enumerate(chunks)
         ]
-        mapped: list[PassageExtractResult] = map_chain.batch(map_inputs)
-        reduce_payload = json.dumps(
-            {
-                "user_intent": user_intent,
-                "raw_passages": [m.model_dump() for m in mapped],
-            },
-            ensure_ascii=False,
-        )
-        consolidated: ConsolidateResult = reduce_chain.invoke(
-            {"doc_title": doc_title, "reduce_payload": reduce_payload}
-        )
-        return _concepts_from_consolidated(consolidated)
+        concurrency = max(1, settings.INGEST_EXTRACTION_CONCURRENCY)
+        raw_concepts: list[dict[str, Any]] = []
+        for start in range(0, len(map_inputs), concurrency):
+            if callable(checkpoint):
+                checkpoint()
+            mapped: list[PassageExtractResult] = map_chain.batch(
+                map_inputs[start : start + concurrency],
+                config={"max_concurrency": concurrency},
+            )
+            for offset, result in enumerate(mapped):
+                passage_index = start + offset
+                raw_concepts.extend(
+                    {
+                        "raw_concept_id": f"{passage_index}:{concept.idx}",
+                        "title": concept.title,
+                        "description": concept.description,
+                        "passage_indices": [passage_index],
+                    }
+                    for concept in result.concepts
+                )
+            if callable(checkpoint):
+                checkpoint()
+
+        def reduce_group(
+            concepts: list[dict[str, Any]], section_summaries: list[str]
+        ) -> ConsolidateResult:
+            if callable(checkpoint):
+                checkpoint()
+            payload = json.dumps(
+                {
+                    "user_intent": user_intent,
+                    "section_summaries": section_summaries,
+                    "raw_concepts": concepts,
+                },
+                ensure_ascii=False,
+            )
+            result: ConsolidateResult = reduce_chain.invoke(
+                {"doc_title": doc_title, "reduce_payload": payload}
+            )
+            if callable(checkpoint):
+                checkpoint()
+            return result
+
+        if not raw_concepts:
+            consolidated = ConsolidateResult(doc_description="", concepts=[])
+        else:
+            current = raw_concepts
+            group_size = 12
+            while len(current) > group_size:
+                reduced_groups: list[ConsolidateResult] = []
+                for start in range(0, len(current), group_size):
+                    reduced_groups.append(reduce_group(current[start : start + group_size], []))
+                current = [
+                    concept
+                    for group in reduced_groups
+                    for concept in _concepts_from_consolidated(group)
+                ]
+            consolidated = reduce_group(current, [])
+
+        return {
+            "doc_description": consolidated.doc_description,
+            "doc_type": consolidated.doc_type,
+            "concepts": _concepts_from_consolidated(consolidated),
+            "passages": [{"passage_index": i, "text": chunk} for i, chunk in enumerate(chunks)],
+        }
 
     return RunnableLambda(_intradoc)
 
@@ -251,22 +309,29 @@ def _stub_retrieval() -> Runnable:
 
 
 def _stub_intradoc() -> Runnable:
-    def _run(inp: dict) -> list[dict[str, Any]]:
-        if _recorded_intradoc:
-            return [
-                {
-                    "concept_id": f"c{i + 1}_{uuid.uuid4().hex[:6]}",
-                    "title": r["title"],
-                    "description": r.get("description", ""),
-                }
-                for i, r in enumerate(_recorded_intradoc)
-            ]
+    def _run(inp: dict) -> dict[str, Any]:
         text = (inp.get("text") or "").strip()
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=passage_chunk_size_chars(),
             chunk_overlap=0,
         )
         chunks = splitter.split_text(text) if text else [""]
+        if _recorded_intradoc:
+            concepts = [
+                {
+                    "concept_id": f"c{i + 1}_{uuid.uuid4().hex[:6]}",
+                    "title": r["title"],
+                    "description": r.get("description", ""),
+                    "passage_indices": r.get("passage_indices") or list(range(len(chunks))),
+                }
+                for i, r in enumerate(_recorded_intradoc)
+            ]
+            return {
+                "doc_description": "Recorded document summary.",
+                "doc_type": "paper",
+                "concepts": concepts,
+                "passages": [{"passage_index": i, "text": chunk} for i, chunk in enumerate(chunks)],
+            }
         raw: list[PassageExtractResult] = []
         for i, chunk in enumerate(chunks):
             snippet = re.sub(r"\s+", " ", chunk.strip())[:80]
@@ -292,7 +357,12 @@ def _stub_intradoc() -> Runnable:
                 for i, c in enumerate(raw)
             ],
         )
-        return _concepts_from_consolidated(consolidated)
+        return {
+            "doc_description": consolidated.doc_description,
+            "doc_type": consolidated.doc_type,
+            "concepts": _concepts_from_consolidated(consolidated),
+            "passages": [{"passage_index": i, "text": chunk} for i, chunk in enumerate(chunks)],
+        }
 
     return RunnableLambda(_run)
 

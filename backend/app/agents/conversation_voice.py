@@ -8,17 +8,19 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.agents import job_runtime
+from app.agents.context_preprocessor import graph_candidates_for_supervisor
 from app.agents.job_affinity import resolve_job_dispatch
 from app.agents.session_plane import (
     append_transcript_turn,
     build_routing_memory,
     build_session_briefing,
+    record_routing_source,
 )
 from app.agents.source_reference import resolve_source_reference
 from app.agents.voice_dispatch import (
     is_voice_turn,
     needs_voice_dispatch,
-    resolve_voice_route,
+    resolve_voice_route_async,
 )
 from app.agents.worker_registry import worker_handler
 from app.config import settings
@@ -141,6 +143,7 @@ async def astream_conversation_voice(
     )
     routing_context = {
         **ctx_json,
+        "graph_candidates": graph_candidates_for_supervisor(store, project_id),
         "routing_memory": build_routing_memory(thread_id),
         "session_state": {
             "active_jobs": [
@@ -152,10 +155,11 @@ async def astream_conversation_voice(
                 for job in (briefing.get("active_jobs") or [])
             ],
             "pending_approval_count": briefing.get("pending_approval_count") or 0,
+            "completed_worker_results": briefing.get("completed_worker_results") or [],
         },
     }
 
-    decision, effective_text, scope_blocked = resolve_voice_route(
+    decision, effective_text, scope_blocked = await resolve_voice_route_async(
         store=store,
         project_id=project_id,
         thread_id=thread_id,
@@ -192,6 +196,22 @@ async def astream_conversation_voice(
             ],
         }
         return
+    if decision.source_error == "link_resolution":
+        reply = str(decision.content or "Please clarify which ROOT and destination node to link.")
+        append_transcript_turn(thread_id, role="user", text=effective_text)
+        append_transcript_turn(thread_id, role="assistant", text=reply)
+        for i in range(0, len(reply), 32):
+            yield {"type": "token", "content": reply[i : i + 32], "source": "conversation"}
+        yield {
+            "type": "turn_end",
+            "reply": reply,
+            "graph_write": False,
+            "dispatched": False,
+            "worker_kind": "conversation",
+            "details": {"route": "link_clarification"},
+            "jobs": job_runtime.list_jobs(thread_id),
+        }
+        return
     if decision.intent == "status" and not briefing.get("worker_result_snippet"):
         briefing = build_session_briefing(
             project_id=project_id,
@@ -204,6 +224,41 @@ async def astream_conversation_voice(
         voice_turn=voice,
         scope_blocked=scope_blocked,
     )
+    if dispatch and worker_kind in {"gist", "intradoc"}:
+        fields = routing_context.get("custom_fields") or {}
+        selected_roots = [
+            node_id
+            for node_id in routing_context.get("selected_node_ids") or []
+            if any(
+                node.get("id") == node_id and node.get("node_kind") == "ROOT"
+                for node in routing_context.get("graph_candidates") or []
+            )
+        ]
+        source = resolve_source_reference(
+            effective_text,
+            fields,
+            selected_reference=decision.source_reference,
+            selected_field=decision.source_field,
+        )
+        existing_source_root = next(
+            (
+                node.id
+                for node in store.list_nodes(project_id)
+                if source.url and node.node_kind.value == "ROOT" and node.source_uri == source.url
+            ),
+            None,
+        )
+        record_routing_source(
+            thread_id,
+            worker=worker_kind,
+            source_url=source.url,
+            title=decision.title or fields.get("title"),
+            root_id=(
+                fields.get("root_id")
+                or (selected_roots[0] if len(selected_roots) == 1 else None)
+                or existing_source_root
+            ),
+        )
     plan = resolve_job_dispatch(
         thread_id=thread_id,
         project_id=project_id,
@@ -219,9 +274,6 @@ async def astream_conversation_voice(
     already_running = dispatch and plan.reason == "already_running"
     dispatch_pending = bool(worker_fn) or already_running
 
-    if voice and worker_fn:
-        job_runtime.park_active_jobs(thread_id)
-
     tokens: list[str] = []
     if dispatch_pending:
         reply_parts = _background_worker_acknowledgement(
@@ -233,15 +285,21 @@ async def astream_conversation_voice(
             tokens.append(piece)
             yield {"type": "token", "content": piece, "source": "conversation"}
     else:
-        inp = _conversation_prompt_inputs(
-            text=text,
-            briefing=briefing,
-            project_scope=project.introduction or "",
-            user_fields=ctx_json.get("custom_fields") or {},
-        )
-        async for piece in _astream_voice_conversation_reply(inp):
-            tokens.append(piece)
-            yield {"type": "token", "content": piece, "source": "conversation"}
+        if decision.reply:
+            for i in range(0, len(decision.reply), 32):
+                piece = decision.reply[i : i + 32]
+                tokens.append(piece)
+                yield {"type": "token", "content": piece, "source": "conversation"}
+        else:
+            inp = _conversation_prompt_inputs(
+                text=text,
+                briefing=briefing,
+                project_scope=project.introduction or "",
+                user_fields=ctx_json.get("custom_fields") or {},
+            )
+            async for piece in _astream_voice_conversation_reply(inp):
+                tokens.append(piece)
+                yield {"type": "token", "content": piece, "source": "conversation"}
 
     reply = "".join(tokens)
 

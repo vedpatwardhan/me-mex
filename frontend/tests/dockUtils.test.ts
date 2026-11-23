@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  customFieldsForContext,
   INITIAL_CUSTOM_FIELDS,
   mergeOneShotCustomFields,
   parseCustomFields,
@@ -17,5 +18,24 @@ describe('parseCustomFields', () => {
     expect(afterReset).toEqual({ paper: 'https://example.test/a.pdf' });
     expect(INITIAL_CUSTOM_FIELDS).toBe('');
     expect(parseCustomFields(INITIAL_CUSTOM_FIELDS)).toEqual({});
+  });
+
+  it('does not carry submitted fields into an unmuted next turn', () => {
+    const pending = mergeOneShotCustomFields(null, 'paper=https://example.test/first.pdf');
+    const nextTurn = customFieldsForContext(
+      pending,
+      'paper=https://example.test/second.pdf',
+      false,
+    );
+
+    expect(nextTurn).toEqual({ paper: 'https://example.test/second.pdf' });
+  });
+
+  it('keeps the submitted fields on the muted flush context', () => {
+    const pending = mergeOneShotCustomFields(null, 'paper=https://example.test/first.pdf');
+
+    expect(customFieldsForContext(pending, '', true)).toEqual({
+      paper: 'https://example.test/first.pdf',
+    });
   });
 });

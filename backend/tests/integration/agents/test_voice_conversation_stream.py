@@ -38,6 +38,53 @@ def test_voice_conversation_stream(client, project, voice_context_json, mock_vll
 
 
 @pytest.mark.voice_plane
+def test_supervisor_reply_avoids_a_second_sequential_conversation_call(
+    client, project_scoped, monkeypatch
+):
+    base = get_chains()
+    conversation_called = False
+
+    def fail_conversation(_inputs):
+        nonlocal conversation_called
+        conversation_called = True
+        raise AssertionError("Supervisor already produced the conversation reply")
+
+    supervisor = RunnableLambda(
+        lambda _inputs: WorkerRoute(
+            worker="conversation",
+            intent="conversation",
+            dispatch=False,
+            reply="The project is scoped around RSI research.",
+        )
+    )
+    set_chains_override(
+        replace(
+            base,
+            supervisor=supervisor,
+            conversation=RunnableLambda(fail_conversation),
+        )
+    )
+    response = client.post(
+        "/api/voice/conversation/stream",
+        json={
+            "text": "What is this project about?",
+            "thread_id": "voice-supervisor-reply",
+            "context_json": {
+                "voice_turn": True,
+                "active_project_id": project_scoped.id,
+                "project_id": project_scoped.id,
+                "custom_fields": {},
+            },
+        },
+    )
+
+    chunks = list(iter_sse_data(response))
+    end = next(chunk for chunk in chunks if chunk.get("type") == "turn_end")
+    assert end["reply"] == "The project is scoped around RSI research."
+    assert conversation_called is False
+
+
+@pytest.mark.voice_plane
 def test_conversation_turn_does_not_park_background_jobs(
     client, project_scoped, mock_vllm_chat, monkeypatch
 ):
@@ -64,6 +111,64 @@ def test_conversation_turn_does_not_park_background_jobs(
     end = next(chunk for chunk in chunks if chunk.get("type") == "turn_end")
     assert end["details"]["route"] == "conversation"
     assert parked == []
+
+
+@pytest.mark.voice_plane
+def test_gist_for_another_source_leaves_running_intradoc_job_running(
+    client, project_scoped, monkeypatch
+):
+    from app.agents import conversation_voice, job_runtime
+
+    thread_id = "voice-independent-jobs"
+    existing = {
+        "job_id": "intradoc-paper-one",
+        "worker": "intradoc",
+        "kind": "intradoc",
+        "thread_id": thread_id,
+        "project_id": project_scoped.id,
+        "status": "running",
+        "affinity_key": "intradoc:first-source",
+    }
+    job_runtime._jobs[existing["job_id"]] = existing
+    job_runtime._by_thread[thread_id] = [existing["job_id"]]
+    base = get_chains()
+
+    def route(_inputs):
+        return WorkerRoute(
+            worker="gist",
+            intent="source_summary",
+            dispatch=True,
+            source_field="paper",
+            source_reference="https://example.test/second.pdf",
+        )
+
+    finished = threading.Event()
+
+    def gist_stub(_ctx, _text, _context):
+        finished.set()
+        return {"reply": "Gist ready.", "graph_write": False}
+
+    monkeypatch.setattr(conversation_voice, "worker_handler", lambda _worker: gist_stub)
+    set_chains_override(replace(base, supervisor=RunnableLambda(route)))
+    response = client.post(
+        "/api/voice/conversation/stream",
+        json={
+            "text": "Give me a broad overview of this other paper.\npaper=https://example.test/second.pdf",
+            "thread_id": thread_id,
+            "context_json": {
+                "voice_turn": True,
+                "active_project_id": project_scoped.id,
+                "custom_fields": {"paper": "https://example.test/second.pdf"},
+            },
+        },
+    )
+    end = next(chunk for chunk in iter_sse_data(response) if chunk.get("type") == "turn_end")
+
+    assert response.status_code == 200
+    assert end["worker_kind"] == "gist"
+    assert end["dispatched"] is True
+    assert finished.wait(timeout=2)
+    assert job_runtime.get_job(existing["job_id"])["status"] == "running"
 
 
 @pytest.mark.voice_plane
@@ -269,6 +374,11 @@ def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
         thread_id="voice-link-targets",
         store=store,
     )
+    earlier = gist.create_or_update_root_gist(
+        ctx,
+        title="An earlier paper",
+        gist="Earlier source gist.",
+    )
     dawn = gist.create_or_update_root_gist(
         ctx,
         title="The DAWN of World-Action Interactive Models",
@@ -291,7 +401,22 @@ def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
         thread_id=thread_id,
         operation="gist_root",
         payload={},
+        result={"result": {"root_id": earlier["root_id"]}},
+    )
+    session_plane.record_recent_graph_change(
+        store=store,
+        project_id=project_scoped.id,
+        thread_id=thread_id,
+        operation="gist_root",
+        payload={},
         result={"result": {"root_id": dawn["root_id"]}},
+    )
+    session_plane.record_routing_source(
+        thread_id,
+        worker="gist",
+        source_url="https://arxiv.org/pdf/dawn.pdf",
+        title="The DAWN of World-Action Interactive Models",
+        root_id=dawn["root_id"],
     )
 
     def supervisor(inputs):
@@ -307,8 +432,9 @@ def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
             worker="link",
             intent="link",
             dispatch=True,
-            root_id=dawn["root_id"],
-            target_ids=[genesis_id],
+            root_id=genesis_id,
+            target_id=genesis_id,
+            target_ids=[earlier["root_id"]],
         )
 
     set_chains_override(replace(base, supervisor=RunnableLambda(supervisor)))

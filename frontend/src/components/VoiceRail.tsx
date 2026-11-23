@@ -6,7 +6,12 @@ import { useSpeechSegmentTimer } from '../hooks/useSpeechSegmentTimer';
 import type { VoiceContext } from '../services/voiceSession';
 import { VoiceSession } from '../services/voiceSession';
 import type { VoiceSessionState } from '../services/livekitService';
-import { INITIAL_CUSTOM_FIELDS, mergeOneShotCustomFields, parseCustomFields } from '../utils/dockUtils';
+import {
+  customFieldsForContext,
+  INITIAL_CUSTOM_FIELDS,
+  mergeOneShotCustomFields,
+  parseCustomFields,
+} from '../utils/dockUtils';
 import { flattenDockEvents } from '../utils/dockStreamReducer';
 
 type Props = {
@@ -101,15 +106,14 @@ export const VoiceRail: React.FC<Props> = ({
   );
 
   const contextForWorker = useCallback((micMuted = muted): VoiceContext => {
-    const customFieldsForInput = parseCustomFields(customFields);
-    const mergedFields = { ...(pendingTurnFieldsRef.current || {}) };
-    for (const [key, value] of Object.entries(customFieldsForInput)) {
-      if (value) mergedFields[key] = value;
-    }
     return {
       active_project_id: projectId || '',
       muted: micMuted,
-      custom_fields: mergedFields,
+      custom_fields: customFieldsForContext(
+        pendingTurnFieldsRef.current,
+        customFields,
+        micMuted,
+      ),
       selected_node_ids: selectedNodeId ? [selectedNodeId] : [],
       thread_id: threadId,
     };
@@ -119,19 +123,20 @@ export const VoiceRail: React.FC<Props> = ({
     (ev: Record<string, unknown>) => {
       onDockStreamEvent?.(ev);
       for (const event of flattenDockEvents(ev)) {
-        if (!resetFieldsAfterTurnRef.current) return;
-        if (event.type === 'turn_start') submittedTurnStartedRef.current = true;
-        if (event.type === 'turn_end' && submittedTurnStartedRef.current) {
-          resetFieldsAfterTurnRef.current = false;
+        if (event.type === 'turn_start') {
+          submittedTurnStartedRef.current = true;
+          continue;
+        }
+        if (event.type === 'turn_end') {
+          const flushCompleted =
+            resetFieldsAfterTurnRef.current && submittedTurnStartedRef.current;
           submittedTurnStartedRef.current = false;
+          if (!flushCompleted) continue;
+          resetFieldsAfterTurnRef.current = false;
           pendingTurnFieldsRef.current = null;
-          setCustomFields(INITIAL_CUSTOM_FIELDS);
-          const clearedContext = {
-            ...contextForWorker(muted),
-            custom_fields: parseCustomFields(INITIAL_CUSTOM_FIELDS),
-          };
-          onContext?.(clearedContext);
-          sessionRef.current?.publishContextFireAndForget(clearedContext);
+          const nextContext = contextForWorker(muted);
+          onContext?.(nextContext);
+          sessionRef.current?.publishContextFireAndForget(nextContext);
           return;
         }
       }
@@ -221,13 +226,14 @@ export const VoiceRail: React.FC<Props> = ({
   const setMicMuted = (micMuted: boolean) => {
     const session = ensureSession();
     if (!session.isReady()) return;
-    pendingTurnFieldsRef.current = mergeOneShotCustomFields(
-      pendingTurnFieldsRef.current,
-      customFields,
-    );
-    resetFieldsAfterTurnRef.current = true;
-    submittedTurnStartedRef.current = false;
-    setCustomFields(INITIAL_CUSTOM_FIELDS);
+    if (micMuted) {
+      pendingTurnFieldsRef.current = mergeOneShotCustomFields(
+        pendingTurnFieldsRef.current,
+        customFields,
+      );
+      resetFieldsAfterTurnRef.current = true;
+      setCustomFields(INITIAL_CUSTOM_FIELDS);
+    }
     const ctx = contextForWorker(micMuted);
     onContext?.(ctx);
     setVoiceError(null);
@@ -302,19 +308,6 @@ export const VoiceRail: React.FC<Props> = ({
         onToggleMute={() => setMicMuted(!muted)}
         onEnd={endSession}
       />
-
-      {connected && muted ? (
-        <button
-          type="button"
-          className="w-full rounded-lg border border-slate-600/80 bg-slate-800/50 px-3 py-2 text-left text-xs text-slate-300 transition hover:border-slate-500 hover:bg-slate-800"
-          onClick={() => {
-            const s = ensureSession();
-            if (s.isReady()) void s.sendAgentTurn('', contextForWorker(true));
-          }}
-        >
-          Send turn with custom fields only
-        </button>
-      ) : null}
 
       {!projectIntroduction?.trim() && connected ? (
         <p className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-xs leading-relaxed text-cyan-200/90">

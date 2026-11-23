@@ -285,6 +285,7 @@ def dispatch_background_worker(
     pid = project_id or ctx.project_id
     affinity_key = (plan.affinity_key if plan else "") or f"{worker_kind}:{pid}"
     dispatch_ctx = dict(context)
+    dispatch_ctx["affinity_key"] = affinity_key
     if plan and plan.approval_id:
         dispatch_ctx["approval_id"] = plan.approval_id
     if plan and plan.action == "update":

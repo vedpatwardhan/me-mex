@@ -41,6 +41,7 @@ class WorkerRoute(BaseModel):
     worker: WorkerName
     intent: WorkerIntent
     dispatch: bool
+    reply: str | None = None
     source_field: str | None = None
     source_reference: str | None = None
     source_error: str | None = None

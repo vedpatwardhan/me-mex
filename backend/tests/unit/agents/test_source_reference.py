@@ -181,7 +181,7 @@ def test_committed_scope_state_and_prompt_disambiguate_acknowledgement_from_revi
     assert "Acknowledging that scope is complete" in prompt
     assert "what comes next" in prompt
     assert "context.routing_memory.recent_turns" in prompt
-    assert "never reverse source and target roles" in prompt
+    assert "never the source ROOT" in prompt
 
 
 def test_supervisor_failure_falls_back_to_conversation_only(project):
@@ -288,13 +288,19 @@ def test_intradoc_uses_same_field_independent_source_resolution(store, project, 
         replace(
             base,
             intradoc=RunnableLambda(
-                lambda inputs: [
-                    {
-                        "concept_id": "concept-1",
-                        "title": "Actual paper concept",
-                        "description": inputs["text"],
-                    }
-                ]
+                lambda inputs: {
+                    "doc_description": "Grounded document description.",
+                    "doc_type": "paper",
+                    "concepts": [
+                        {
+                            "concept_id": "concept-1",
+                            "title": "Actual paper concept",
+                            "description": inputs["text"],
+                            "passage_indices": [0],
+                        }
+                    ],
+                    "passages": [{"passage_index": 0, "text": inputs["text"]}],
+                }
             ),
         )
     )
@@ -313,6 +319,9 @@ def test_intradoc_uses_same_field_independent_source_resolution(store, project, 
     assert staging_bundle.pending_url == fetched_urls[0]
     assert staging_bundle.content_hash == "intradoc-content-hash"
     assert staging_bundle.concepts[0].title == "Actual paper concept"
+    assert staging_bundle.concepts[0].passage_indices == [0]
+    assert staging_bundle.passages[0].text.startswith("# Detailed Paper")
+    assert staging_bundle.doc_description == "Grounded document description."
 
 
 def test_long_source_gist_uses_map_reduce_summaries(monkeypatch):

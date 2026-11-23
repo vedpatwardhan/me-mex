@@ -31,12 +31,14 @@ def test_route_uses_langchain_supervisor():
 
 
 def test_intradoc_chain_invoke():
-    concepts = get_chains().intradoc.invoke(
+    analysis = get_chains().intradoc.invoke(
         {
             "text": "We propose a new manipulation policy.",
             "doc_title": "Paper",
             "user_intent": "deep read",
         }
     )
-    assert len(concepts) >= 1
-    assert concepts[0]["title"]
+    assert len(analysis["concepts"]) >= 1
+    assert analysis["concepts"][0]["title"]
+    assert analysis["doc_description"]
+    assert analysis["passages"]

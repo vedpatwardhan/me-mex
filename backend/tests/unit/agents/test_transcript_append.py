@@ -24,6 +24,8 @@ def test_routing_memory_is_bounded_and_includes_committed_graph_nodes(
         description="Gist",
         node_kind=NodeKind.ROOT,
         project_id=project.id,
+        source_uri="https://example.test/dawn.pdf",
+        metadata={"source_uri": "https://example.test/dawn.pdf"},
     )
     store.upsert_node(root)
 
@@ -33,6 +35,12 @@ def test_routing_memory_is_bounded_and_includes_committed_graph_nodes(
             role="user" if index % 2 == 0 else "assistant",
             text=f"turn-{index}: " + "x" * 700,
         )
+    session_plane.record_routing_source(
+        thread_id,
+        worker="gist",
+        source_url=root.source_uri,
+        title=root.title,
+    )
     session_plane.record_recent_graph_change(
         store=store,
         project_id=project.id,
@@ -49,7 +57,16 @@ def test_routing_memory_is_bounded_and_includes_committed_graph_nodes(
     assert memory["recent_graph_changes"] == [
         {
             "operation": "gist_root",
-            "nodes": [{"id": root.id, "title": "The DAWN paper", "node_kind": "ROOT"}],
+            "nodes": [
+                {
+                    "id": root.id,
+                    "title": "The DAWN paper",
+                    "node_kind": "ROOT",
+                    "source_uri": root.source_uri,
+                }
+            ],
         }
     ]
     assert "The DAWN paper" in memory["summary"]
+    assert memory["current_source"]["root_id"] == root.id
+    assert memory["focus_root"]["id"] == root.id

@@ -114,14 +114,24 @@ class StagingConcept(BaseModel):
     concept_id: str
     title: str
     description: str = ""
+    passage_indices: list[int] = Field(default_factory=list)
     dropped: bool = False
+
+
+class StagingPassage(BaseModel):
+    passage_index: int
+    text: str
 
 
 class StagingBundle(BaseModel):
     root_id: str | None = None
     pending_url: str | None = None
+    source_title: str = ""
+    doc_description: str = ""
+    doc_type: str = "paper"
     content_hash: str = ""
     concepts: list[StagingConcept] = Field(default_factory=list)
+    passages: list[StagingPassage] = Field(default_factory=list)
     updated_at: float = Field(default_factory=time.time)
 
 

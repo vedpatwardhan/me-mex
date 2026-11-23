@@ -32,8 +32,21 @@ def affinity_key_for_worker(
     if worker_kind == "project_scope":
         return f"scope:{project_id}"
     if worker_kind == "intradoc":
-        root = fields.get("root_id") or fields.get("staging_key") or ""
-        return f"intradoc:{root or project_id}"
+        root = fields.get("root_id") or ""
+        decision = context_json.get("supervisor_decision") or {}
+        source = (
+            resolve_source_reference(
+                "",
+                fields,
+                selected_reference=decision.get("source_reference"),
+                selected_field=decision.get("source_field"),
+            ).url
+            or ""
+        )
+        token = root or source or fields.get("staging_key") or project_id
+        if source and not root:
+            token = hashlib.sha256(source.encode()).hexdigest()[:12]
+        return f"intradoc:{token}"
     if worker_kind == "gist":
         root = fields.get("root_id") or ""
         decision = context_json.get("supervisor_decision") or {}
@@ -75,9 +88,22 @@ def _open_job_for_affinity(jobs: list[dict[str, Any]], affinity_key: str) -> dic
     return None
 
 
-def _approval_for_type(pending: list, approval_type: str) -> Any | None:
+def _approval_for_type(
+    pending: list,
+    approval_type: str,
+    affinity_key: str,
+    project_id: str,
+) -> Any | None:
     for item in pending:
-        if item.approval_type == approval_type and item.status == "pending":
+        payload = item.payload or {}
+        expected_affinity = payload.get("affinity_key")
+        if not expected_affinity and approval_type == "project_scope":
+            expected_affinity = f"scope:{project_id}"
+        if (
+            item.approval_type == approval_type
+            and item.status == "pending"
+            and expected_affinity == affinity_key
+        ):
             return item
     return None
 
@@ -114,6 +140,14 @@ def resolve_job_dispatch(
                 affinity_key=affinity_key,
                 reason="already_running",
             )
+        if open_job.get("status") == "awaiting_approval" and worker_kind != "project_scope":
+            return JobDispatchPlan(
+                action="skip",
+                job_id=open_job.get("job_id"),
+                approval_id=open_job.get("recommendation_id") or open_job.get("approval_id"),
+                affinity_key=affinity_key,
+                reason="pending_approval_match",
+            )
         return JobDispatchPlan(
             action="update",
             job_id=open_job.get("job_id"),
@@ -131,7 +165,7 @@ def resolve_job_dispatch(
     }
     atype = approval_type_map.get(worker_kind)
     if atype:
-        pending = _approval_for_type(pending_approvals, atype)
+        pending = _approval_for_type(pending_approvals, atype, affinity_key, project_id)
         if pending:
             linked = _open_job_for_affinity(jobs, affinity_key)
             return JobDispatchPlan(

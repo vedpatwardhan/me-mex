@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
 from typing import Any
 
 from app.agents import job_runtime
@@ -16,23 +18,33 @@ from app.services.checkpoints import JsonCheckpointStore
 from app.tools import dock as dock_tools
 
 _checkpoint = JsonCheckpointStore()
+_checkpoint_lock = threading.RLock()
 
 
 def _checkpoint_for(thread_id: str) -> dict[str, Any]:
-    return _checkpoint.load(thread_id) or {}
+    with _checkpoint_lock:
+        return _checkpoint.load(thread_id) or {}
+
+
+@contextmanager
+def _update_checkpoint(thread_id: str):
+    with _checkpoint_lock:
+        state = _checkpoint_for(thread_id)
+        yield state
+        _checkpoint.save(thread_id, state)
 
 
 def append_transcript_turn(thread_id: str, *, role: str, text: str) -> None:
-    state = _checkpoint_for(thread_id)
-    transcript: list[dict[str, str]] = list(state.get("transcript") or [])
-    transcript.append({"role": role, "text": (text or "")[:2000]})
-    state["transcript"] = transcript[-50:]
-    _checkpoint.save(thread_id, state)
+    with _update_checkpoint(thread_id) as state:
+        transcript: list[dict[str, str]] = list(state.get("transcript") or [])
+        transcript.append({"role": role, "text": (text or "")[:2000]})
+        state["transcript"] = transcript[-50:]
 
 
 def build_routing_memory(thread_id: str) -> dict[str, Any]:
     """Return bounded recent dialogue and graph facts for Supervisor coreference."""
-    state = _checkpoint_for(thread_id)
+    with _checkpoint_lock:
+        state = _checkpoint_for(thread_id)
     turns = [
         {
             "role": str(turn.get("role") or ""),
@@ -42,6 +54,15 @@ def build_routing_memory(thread_id: str) -> dict[str, Any]:
         if turn.get("role") in {"user", "assistant"} and turn.get("text")
     ]
     graph_changes = list(state.get("recent_graph_changes") or [])[-4:]
+    focus_root = next(
+        (
+            node
+            for change in reversed(graph_changes)
+            for node in reversed(change.get("nodes", []))
+            if node.get("node_kind") == "ROOT"
+        ),
+        None,
+    )
     summary = "; ".join(
         f"{change.get('operation', 'updated')} {node.get('node_kind', 'node')} "
         f"'{node.get('title', '')}' (id={node.get('id')})"
@@ -52,7 +73,27 @@ def build_routing_memory(thread_id: str) -> dict[str, Any]:
         "summary": summary[:1200],
         "recent_graph_changes": graph_changes,
         "recent_turns": turns,
+        "focus_root": focus_root,
+        "current_source": state.get("current_source"),
     }
+
+
+def record_routing_source(
+    thread_id: str,
+    *,
+    worker: str,
+    source_url: str | None,
+    title: str | None = None,
+    root_id: str | None = None,
+) -> None:
+    """Remember the source currently being processed, including whether it has a ROOT."""
+    with _update_checkpoint(thread_id) as state:
+        state["current_source"] = {
+            "worker": worker,
+            "source_url": source_url or "",
+            "title": (title or "")[:180],
+            "root_id": root_id or "",
+        }
 
 
 def record_recent_graph_change(
@@ -94,17 +135,35 @@ def record_recent_graph_change(
             continue
         if node.project_id != project_id:
             continue
-        nodes.append({"id": node.id, "title": node.title[:180], "node_kind": node.node_kind.value})
+        node_record = {"id": node.id, "title": node.title[:180], "node_kind": node.node_kind.value}
+        if node.node_kind.value == "ROOT" and node.source_uri:
+            node_record["source_uri"] = node.source_uri
+        nodes.append(node_record)
         if len(nodes) == 8:
             break
     if not nodes:
         return
 
-    state = _checkpoint_for(thread_id)
-    changes = list(state.get("recent_graph_changes") or [])
-    changes.append({"operation": operation, "nodes": nodes})
-    state["recent_graph_changes"] = changes[-4:]
-    _checkpoint.save(thread_id, state)
+    with _update_checkpoint(thread_id) as state:
+        changes = list(state.get("recent_graph_changes") or [])
+        changes.append({"operation": operation, "nodes": nodes})
+        state["recent_graph_changes"] = changes[-4:]
+        current_source = state.get("current_source") or {}
+        for node in nodes:
+            if (
+                node.get("node_kind") == "ROOT"
+                and not current_source.get("root_id")
+                and (
+                    node.get("source_uri") == current_source.get("source_url")
+                    or (
+                        not current_source.get("source_url")
+                        and operation in {"gist_root", "gist", "intradoc", "intra_doc_staging"}
+                    )
+                )
+            ):
+                current_source["root_id"] = node["id"]
+                current_source["title"] = node["title"]
+                state["current_source"] = current_source
 
 
 def resolve_job_records(
@@ -115,28 +174,27 @@ def resolve_job_records(
     approval_id: str | None = None,
 ) -> None:
     """Persist approval resolution into the checkpoint's job snapshots."""
-    state = _checkpoint_for(thread_id)
-    ids = set(job_ids)
-    jobs = list(state.get("jobs") or [])
-    for job in jobs:
-        job_approval_id = job.get("approval_id") or job.get("recommendation_id")
-        if job.get("job_id") not in ids and job_approval_id != approval_id:
-            continue
-        job["status"] = {
-            "approve": "done",
-            "dismiss": "dismissed",
-            "cancel": "cancelled",
-            "resolved": "resolved",
-        }.get(action, "resolved")
-        job["approval_resolution"] = action
-        job["progress"] = {
-            "approve": "approved",
-            "dismiss": "dismissed",
-            "cancel": "cancelled",
-            "resolved": "approval resolved",
-        }.get(action, "approval resolved")
-    state["jobs"] = jobs[-30:]
-    _checkpoint.save(thread_id, state)
+    with _update_checkpoint(thread_id) as state:
+        ids = set(job_ids)
+        jobs = list(state.get("jobs") or [])
+        for job in jobs:
+            job_approval_id = job.get("approval_id") or job.get("recommendation_id")
+            if job.get("job_id") not in ids and job_approval_id != approval_id:
+                continue
+            job["status"] = {
+                "approve": "done",
+                "dismiss": "dismissed",
+                "cancel": "cancelled",
+                "resolved": "resolved",
+            }.get(action, "resolved")
+            job["approval_resolution"] = action
+            job["progress"] = {
+                "approve": "approved",
+                "dismiss": "dismissed",
+                "cancel": "cancelled",
+                "resolved": "approval resolved",
+            }.get(action, "approval resolved")
+        state["jobs"] = jobs[-30:]
 
 
 def update_job_record_status(
@@ -145,20 +203,18 @@ def update_job_record_status(
     status: str,
     progress: str,
 ) -> None:
-    state = _checkpoint_for(thread_id)
-    jobs = list(state.get("jobs") or [])
-    for job in jobs:
-        if job.get("job_id") == job_id:
-            job["status"] = status
-            job["progress"] = progress
-    state["jobs"] = jobs[-30:]
-    _checkpoint.save(thread_id, state)
+    with _update_checkpoint(thread_id) as state:
+        jobs = list(state.get("jobs") or [])
+        for job in jobs:
+            if job.get("job_id") == job_id:
+                job["status"] = status
+                job["progress"] = progress
+        state["jobs"] = jobs[-30:]
 
 
 def remove_job_record(thread_id: str, job_id: str) -> None:
-    state = _checkpoint_for(thread_id)
-    state["jobs"] = [job for job in (state.get("jobs") or []) if job.get("job_id") != job_id]
-    _checkpoint.save(thread_id, state)
+    with _update_checkpoint(thread_id) as state:
+        state["jobs"] = [job for job in (state.get("jobs") or []) if job.get("job_id") != job_id]
 
 
 def observer_ingest_job(
@@ -168,21 +224,9 @@ def observer_ingest_job(
     job: dict[str, Any],
     worker_output: dict[str, Any],
 ) -> None:
-    state = _checkpoint_for(thread_id)
-    jobs: list[dict[str, Any]] = list(state.get("jobs") or [])
     jid = job.get("job_id")
-    jobs = [j for j in jobs if j.get("job_id") != jid]
-    jobs.append(dict(job))
-    state["jobs"] = jobs[-30:]
-    state["last_worker"] = job.get("worker") or job.get("kind")
-    state["last_route"] = job.get("worker") or job.get("kind")
     snippet = (worker_output.get("reply") or "")[:400]
-    if snippet:
-        state["last_worker_result_snippet"] = snippet
-
     wa = run_workflow_agent(job=job, worker_output=worker_output)
-    state["recommendation_cards"] = wa.get("recommendation_cards") or []
-    state["proactive_script"] = wa.get("proactive_script") or ""
     gist_followup = None
     if (
         (job.get("worker") or job.get("kind")) == "gist"
@@ -194,8 +238,19 @@ def observer_ingest_job(
         )
     ):
         gist_followup = _compose_gist_followup(job, worker_output)
-        state["last_worker_result_snippet"] = gist_followup[:400]
-    _checkpoint.save(thread_id, state)
+    with _update_checkpoint(thread_id) as state:
+        jobs: list[dict[str, Any]] = list(state.get("jobs") or [])
+        jobs = [j for j in jobs if j.get("job_id") != jid]
+        jobs.append(dict(job))
+        state["jobs"] = jobs[-30:]
+        state["last_worker"] = job.get("worker") or job.get("kind")
+        state["last_route"] = job.get("worker") or job.get("kind")
+        if snippet:
+            state["last_worker_result_snippet"] = snippet
+        state["recommendation_cards"] = wa.get("recommendation_cards") or []
+        state["proactive_script"] = wa.get("proactive_script") or ""
+        if gist_followup:
+            state["last_worker_result_snippet"] = gist_followup[:400]
 
     if job.get("status") == "done" and worker_output.get("graph_write"):
         record_recent_graph_change(

@@ -12,6 +12,7 @@ from app.agents.context_preprocessor import apply_custom_fields_to_text
 from app.agents.source_reference import resolve_source_reference
 from app.config import settings
 from app.db import Store, ToolContext
+from app.errors import NotFoundError
 from app.llm import get_chains
 from app.llm.budget import passage_chunk_size_chars
 from app.llm.schemas import WorkerRoute
@@ -237,6 +238,7 @@ def gist_worker(ctx: ToolContext, text: str, context: dict) -> dict:
             "title": title,
             "gist": gist_text,
             "source_uri": source.url or fields.get("url") or fields.get("arxiv_id"),
+            "affinity_key": context.get("affinity_key"),
         },
     )
     return {
@@ -254,6 +256,17 @@ def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
     fields = context.get("custom_fields") or {}
     decision = context.get("supervisor_decision") or {}
     root_id = fields.get("root_id")
+    if not root_id:
+        selected_roots = []
+        for node_id in context.get("selected_node_ids") or []:
+            try:
+                node = ctx.store.get_node(str(node_id))
+            except NotFoundError:  # A stale canvas selection should not block a deep read.
+                continue
+            if node.project_id == ctx.project_id and node.node_kind.value == "ROOT":
+                selected_roots.append(node.id)
+        if len(selected_roots) == 1:
+            root_id = selected_roots[0]
     source = resolve_source_reference(
         text,
         fields,
@@ -301,17 +314,45 @@ def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
             "graph_write": False,
             "error": True,
         }
+    if root_id:
+        try:
+            root = ctx.store.get_node(str(root_id))
+        except NotFoundError:
+            return {"reply": "The selected ROOT no longer exists in this project.", "error": True}
+        if root.project_id != ctx.project_id or root.node_kind.value != "ROOT":
+            return {
+                "reply": "A deep read must be attached to a ROOT in the active project.",
+                "error": True,
+                "graph_write": False,
+            }
 
     _job_checkpoint(context)
-    concepts = get_chains().intradoc.invoke(
-        {"text": doc_text, "doc_title": title, "user_intent": text}
+    analysis = get_chains().intradoc.invoke(
+        {
+            "text": doc_text,
+            "doc_title": title,
+            "user_intent": text,
+            "checkpoint": lambda: _job_checkpoint(context),
+        }
     )
     _job_checkpoint(context)
+    concepts = analysis.get("concepts") or []
+    if not concepts:
+        return {
+            "reply": "I couldn't extract grounded concepts from that document, so nothing was staged.",
+            "source_url": url,
+            "error": True,
+            "graph_write": False,
+        }
     key_out = staging.upsert_staging_bundle(
         ctx,
-        root_id=root_id,
+        root_id=str(root_id) if root_id else None,
         pending_url=url,
         concepts=concepts,
+        passages=analysis.get("passages") or [],
+        source_title=title,
+        doc_description=str(analysis.get("doc_description") or ""),
+        doc_type=str(analysis.get("doc_type") or "paper"),
         content_hash=content_hash,
     )
     _job_checkpoint(context)
@@ -319,12 +360,14 @@ def intradoc_worker(ctx: ToolContext, text: str, context: dict) -> dict:
         ctx,
         approval_type="intra_doc_staging",
         title="Review intra-doc staging",
-        payload=key_out,
+        payload={**key_out, "affinity_key": context.get("affinity_key")},
     )
     return {
         "reply": "Staging ready for review.",
         "approval_id": approval_id,
         "source_url": url,
+        "source_title": title,
+        "doc_description": analysis.get("doc_description") or "",
         "graph_write": False,
     }
 
@@ -408,7 +451,7 @@ def link_place_worker(ctx: ToolContext, context: dict) -> dict:
         selected_roots = [
             node_id
             for node_id in (context.get("selected_node_ids") or [])
-            if ctx.store.get_node(str(node_id)).node_kind.value == "ROOT"
+            if _is_project_root(ctx.store, str(node_id), ctx.project_id)
         ]
         if len(selected_roots) == 1:
             root_id = selected_roots[0]
@@ -418,7 +461,14 @@ def link_place_worker(ctx: ToolContext, context: dict) -> dict:
             "graph_write": False,
             "error": True,
         }
-    root = ctx.store.get_node(str(root_id))
+    try:
+        root = ctx.store.get_node(str(root_id))
+    except NotFoundError:
+        return {
+            "reply": "I couldn't find the source ROOT in this project. Please select it or clarify the paper title.",
+            "graph_write": False,
+            "error": True,
+        }
     if root.project_id != ctx.project_id or root.node_kind.value != "ROOT":
         return {
             "reply": "The source for a connection must be a ROOT node.",
@@ -437,7 +487,14 @@ def link_place_worker(ctx: ToolContext, context: dict) -> dict:
     if selected_targets:
         targets = []
         for target_id in selected_targets:
-            target = ctx.store.get_node(str(target_id))
+            try:
+                target = ctx.store.get_node(str(target_id))
+            except NotFoundError:
+                return {
+                    "reply": "I couldn't find one of the requested target nodes in this project.",
+                    "graph_write": False,
+                    "error": True,
+                }
             if target.project_id != ctx.project_id or target.node_kind.value == "CONCEPT_I":
                 return {
                     "reply": "I couldn't validate one of the requested connection targets.",
@@ -475,13 +532,25 @@ def link_place_worker(ctx: ToolContext, context: dict) -> dict:
         ctx,
         approval_type="placement",
         title=f"Connect {root.title}?",
-        payload={"root_id": root.id, "candidates": ranked[:5]},
+        payload={
+            "root_id": root.id,
+            "candidates": ranked[:5],
+            "affinity_key": context.get("affinity_key"),
+        },
     )
     return {
         "reply": f"Placement proposal for {root.title} is ready for review.",
         "approval_id": approval_id,
         "graph_write": False,
     }
+
+
+def _is_project_root(store: Store, node_id: str, project_id: str) -> bool:
+    try:
+        node = store.get_node(node_id)
+    except NotFoundError:
+        return False
+    return node.project_id == project_id and node.node_kind.value == "ROOT"
 
 
 def reorg_recommend_worker(ctx: ToolContext, context: dict | None = None) -> dict:

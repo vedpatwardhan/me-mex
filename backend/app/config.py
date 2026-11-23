@@ -82,7 +82,7 @@ class Settings:
     VOICE_FOREGROUND_MAX_TOKENS: int = int(os.getenv("VOICE_FOREGROUND_MAX_TOKENS", "220"))
     WORKFLOW_AGENT_MAX_TOKENS: int = int(os.getenv("WORKFLOW_AGENT_MAX_TOKENS", "256"))
     VOICE_KEYWORD_DISPATCH: bool = _env_bool("VOICE_KEYWORD_DISPATCH", "false")
-    INGEST_EXTRACTION_CONCURRENCY: int = int(os.getenv("INGEST_EXTRACTION_CONCURRENCY", "4"))
+    INGEST_EXTRACTION_CONCURRENCY: int = int(os.getenv("INGEST_EXTRACTION_CONCURRENCY", "2"))
 
     # Graph traversal (RetrievalWorker BFS)
     MAX_TRAVERSAL_DEPTH: int = int(os.getenv("MAX_TRAVERSAL_DEPTH", "5"))

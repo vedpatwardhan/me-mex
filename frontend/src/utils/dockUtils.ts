@@ -23,3 +23,15 @@ export function mergeOneShotCustomFields(
   }
   return merged;
 }
+
+export function customFieldsForContext(
+  pending: Record<string, string> | null,
+  currentText: string,
+  includePending: boolean,
+): Record<string, string> {
+  const fields = includePending ? { ...(pending || {}) } : {};
+  for (const [key, value] of Object.entries(parseCustomFields(currentText))) {
+    if (value) fields[key] = value;
+  }
+  return fields;
+}

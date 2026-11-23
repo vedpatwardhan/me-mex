@@ -19,6 +19,7 @@ from app.agents.context_preprocessor import (
     prioritize_project_scope_until_complete,
 )
 from app.agents.jobs import job_from_worker_turn
+from app.agents.voice_dispatch import normalize_link_decision
 from app.config import settings
 from app.db import ToolContext, get_store
 from app.services.checkpoints import JsonCheckpointStore
@@ -77,6 +78,25 @@ def _supervisor(state: AgentState) -> AgentState:
                 "intent": "scope_conversation",
                 "dispatch": True,
             }
+        )
+    decision = normalize_link_decision(decision, context)
+    if decision.dispatch and decision.worker in {"gist", "intradoc"}:
+        from app.agents.session_plane import record_routing_source
+        from app.agents.source_reference import resolve_source_reference
+
+        fields = context.get("custom_fields") or {}
+        source = resolve_source_reference(
+            effective,
+            fields,
+            selected_reference=decision.source_reference,
+            selected_field=decision.source_field,
+        )
+        record_routing_source(
+            state["thread_id"],
+            worker=decision.worker,
+            source_url=source.url,
+            title=decision.title or fields.get("title"),
+            root_id=fields.get("root_id"),
         )
     return {
         **state,
@@ -240,7 +260,6 @@ def run_agent_turn(
     context_json: dict | None = None,
     checkpointer: JsonCheckpointStore | None = None,
 ) -> dict:
-    job_runtime.park_active_jobs(thread_id)
     graph = get_compiled_graph()
     state: AgentState = {
         "text": text,
@@ -336,17 +355,47 @@ def resume_approval(
         link.create_root_insight_edges(ctx, root_id=root_id, target_ids=targets)
         return _resolved({"status": "approved", "edges": targets})
     if item.approval_type == "intra_doc_staging":
-        root_id = (context_json or {}).get("custom_fields", {}).get("root_id") or payload.get(
-            "root_id"
-        )
         staging_key = payload.get("staging_key")
-        if not root_id:
-            bundle = store.get_staging(staging_key)
-            root_id = bundle.root_id
-        if not root_id:
-            raise ValueError("root_id required to commit staging")
+        bundle = store.get_staging(staging_key)
+        root_id = (
+            (context_json or {}).get("custom_fields", {}).get("root_id")
+            or payload.get("root_id")
+            or bundle.root_id
+        )
+        if root_id:
+            root = store.get_node(str(root_id))
+            if root.project_id != project_id or root.node_kind.value != "ROOT":
+                raise ValueError("Intra-doc commit requires a ROOT in the active project")
+        elif bundle.pending_url:
+            existing_root = next(
+                (
+                    node
+                    for node in store.list_nodes(project_id)
+                    if node.node_kind.value == "ROOT" and node.source_uri == bundle.pending_url
+                ),
+                None,
+            )
+            if existing_root:
+                root_id = existing_root.id
+            else:
+                created = gist.create_or_update_root_gist(
+                    ctx,
+                    title=bundle.source_title or "Untitled source",
+                    gist=bundle.doc_description,
+                )
+                root_id = created["root_id"]
+                gist.attach_source_uri(ctx, root_id=root_id, uri=bundle.pending_url)
+        else:
+            created = gist.create_or_update_root_gist(
+                ctx,
+                title=bundle.source_title or "Untitled source",
+                gist=bundle.doc_description,
+            )
+            root_id = created["root_id"]
+        bundle.root_id = str(root_id)
+        store.upsert_staging(staging_key, bundle)
         return _resolved(
-            staging.commit_intra_doc_graph(ctx, staging_key=staging_key, root_id=root_id)
+            staging.commit_intra_doc_graph(ctx, staging_key=staging_key, root_id=str(root_id))
         )
     if item.approval_type == "reorg":
         append_hitl_label_trace(ctx, item)
@@ -456,9 +505,6 @@ async def astream_agent_turn(
     from app.agents.voice_dispatch import is_voice_turn
 
     voice = is_voice_turn(context_json)
-    for job in job_runtime.park_active_jobs(thread_id):
-        yield {"type": "custom", "job": job}
-
     graph = get_compiled_graph()
     state: AgentState = {
         "text": text,

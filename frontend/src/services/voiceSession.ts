@@ -252,25 +252,6 @@ export class VoiceSession {
     this.publishContextFireAndForget(ctx);
   }
 
-  async sendAgentTurn(text: string, ctx: VoiceContext) {
-    if (!this.room || !this.isReady()) return;
-    await this.room.localParticipant.publishData(
-      new TextEncoder().encode(
-        JSON.stringify({
-          type: 'agent_turn',
-          text,
-          context_json: {
-            active_project_id: ctx.active_project_id,
-            muted: ctx.muted,
-            custom_fields: ctx.custom_fields,
-            selected_node_ids: ctx.selected_node_ids,
-          },
-        }),
-      ),
-      { reliable: true },
-    );
-  }
-
   async sendApproval(approvalId: string, action: 'approve' | 'cancel', ctx: VoiceContext) {
     if (!this.room || !this.isReady()) return;
     await this.room.localParticipant.publishData(

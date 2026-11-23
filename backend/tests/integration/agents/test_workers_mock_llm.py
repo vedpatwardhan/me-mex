@@ -11,13 +11,15 @@ def test_mock_vllm_chat_fixture(mock_vllm_chat, store, project):
 
 
 def test_recorded_intradoc_fixture(recorded_intra_doc_chunks):
-    concepts = get_chains().intradoc.invoke(
+    analysis = get_chains().intradoc.invoke(
         {
             "text": "passage one\n\npassage two",
             "doc_title": "FixtureDoc",
             "user_intent": "deep read",
         }
     )
-    titles = {c["title"] for c in concepts}
+    titles = {c["title"] for c in analysis["concepts"]}
     assert "Sim-to-real transfer" in titles
     assert "Contact-rich manipulation" in titles
+    assert analysis["passages"]
+    assert all(concept["passage_indices"] for concept in analysis["concepts"])

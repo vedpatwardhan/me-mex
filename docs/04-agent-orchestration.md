@@ -401,15 +401,16 @@ When the user **asks for recommendations** explicitly, plane 1 Conversation may 
 |-------|----------|
 | **Foreground** | **Conversation (plane 1)** on every utterance; streams dialogue + handles barge-in. **Supervisor** runs on **dispatch** only. |
 | **Background** | Heavy worker subgraphs (**IntraDocWorker**, long placement/reorg scoring) registered as **`jobs`** with their own progress streams. |
-| **On context switch** | User changes topic or selects another ROOT → foreground routes the **new** intent; background job **parks** at last checkpoint (`jobs.status` → `paused` or stays `running` if safe to continue in parallel). **No approval** required to switch context. |
-| **Resume background** | User returns (“continue the ERA deep read”) → supervisor routes to same `job_id`; `Command(resume=…)` or new invocation loads checkpoint and continues. |
+| **On context switch** | User changes topic or selects another ROOT → foreground routes the **new** intent; independent background jobs continue in parallel. Context changes do not pause unrelated jobs. **No approval** required to switch context. |
+| **Duplicate request** | The same worker/source affinity reuses or points to the existing job/approval rather than starting a second copy. Different sources or worker types remain independent. |
+| **Pause / resume** | Explicit user job controls pause at worker-safe checkpoints and resume the selected `job_id`; switching topics does not change job status. |
 | **User job control** | Supervisor selects `job_control` from the active-job briefing; pause/resume/cancel/remove target a specific `job_id` for any worker. Cancel takes effect at the next worker-safe checkpoint. |
 | **Completion** | When background **finishes extract**, it **does not** auto-commit; it enqueues dock **review** (HITL)—that step *does* need your OK. |
 
 **Implementation patterns (pick one or combine):**
 
 1. **Parallel asyncio tasks** — Foreground `astream_events` per turn; background job = separate graph invoke with `job_id` in config metadata; checkpointer stores both under session `thread_id` + job subkeys.
-2. **Checkpoint park** — Background superstep ends; state saved; foreground graph turn proceeds on same `thread_id` without draining background (LangGraph durable execution).
+2. **Checkpoint park** — Used only for an explicit pause or a worker-specific safety decision; unrelated foreground turns proceed on the same `thread_id` without changing background job status.
 3. **Cancel foreground only** — Barge-in stops TTS and the **current** conversational stream; background extract continues unless you cancel the job explicitly.
 
 **Not the goal:** treating every checkpoint or graph pause as “approve to continue.” Context switches are **automatic** coordination, not HITL.

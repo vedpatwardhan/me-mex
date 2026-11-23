@@ -30,6 +30,27 @@ describe('formatApprovalReview', () => {
     expect(md).toContain('n_b');
   });
 
+  it('shows the source and consolidated concept evidence for an intra-doc review', () => {
+    const md = formatApprovalReview('intra_doc_staging', {
+      source_title: 'Paper title',
+      source_url: 'https://example.test/paper.pdf',
+      doc_description: 'Whole-document description.',
+      concepts: [
+        {
+          title: 'Method',
+          description: 'The source describes the method in detail.',
+          passage_indices: [0, 2],
+        },
+      ],
+    });
+
+    expect(md).toContain('Paper title');
+    expect(md).toContain('https://example.test/paper.pdf');
+    expect(md).toContain('Whole-document description.');
+    expect(md).toContain('The source describes the method in detail.');
+    expect(md).toContain('Source passages: 0, 2');
+  });
+
   it('falls back to JSON for unknown types', () => {
     const md = formatApprovalReview('custom_worker', { foo: 1 });
     expect(md).toContain('```json');
