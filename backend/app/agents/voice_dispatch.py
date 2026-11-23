@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from app.errors import NotFoundError
@@ -28,7 +29,195 @@ def needs_voice_dispatch(
     )
 
 
-def normalize_link_decision(decision: WorkerRoute, context: dict[str, Any]) -> WorkerRoute:
+def _valid_root_id(candidates: dict[str, dict[str, Any]], node_id: str | None) -> str | None:
+    if not node_id:
+        return None
+    node_key = str(node_id)
+    if candidates.get(node_key, {}).get("node_kind") == "ROOT":
+        return node_key
+    return None
+
+
+def _root_ids_in_target_list(
+    target_ids: list[str] | None,
+    candidates: dict[str, dict[str, Any]],
+) -> list[str]:
+    roots: list[str] = []
+    for raw_id in target_ids or []:
+        node_id = str(raw_id)
+        if candidates.get(node_id, {}).get("node_kind") == "ROOT":
+            roots.append(node_id)
+    return roots
+
+
+def _swap_recover_root_id(
+    decision: WorkerRoute,
+    candidates: dict[str, dict[str, Any]],
+) -> str | None:
+    roots_in_targets = _root_ids_in_target_list(decision.target_ids, candidates)
+    if len(roots_in_targets) == 1:
+        return roots_in_targets[0]
+    explicit = _valid_root_id(candidates, decision.root_id)
+    if explicit:
+        return None
+    if decision.root_id and len(roots_in_targets) == 1:
+        return roots_in_targets[0]
+    return None
+
+
+def _utterance_matched_root_ids(
+    utterance: str | None,
+    candidates: dict[str, dict[str, Any]],
+) -> list[str]:
+    if not utterance:
+        return []
+    text = utterance.lower()
+    tokens = [token for token in re.findall(r"[a-z0-9]{3,}", text)]
+    if not tokens:
+        return []
+    matched: list[str] = []
+    for node_id, node in candidates.items():
+        if node.get("node_kind") != "ROOT":
+            continue
+        title = (node.get("title") or "").lower()
+        for token in tokens:
+            if token in title:
+                matched.append(node_id)
+                break
+    return list(dict.fromkeys(matched))
+
+
+def _resolve_link_root_id(
+    decision: WorkerRoute,
+    *,
+    candidates: dict[str, dict[str, Any]],
+    fields: dict[str, Any],
+    selected_ids: list[str],
+    current_source: dict[str, Any],
+    focus_root: dict[str, Any],
+    utterance: str | None,
+) -> str | None:
+    root_id = _valid_root_id(candidates, fields.get("root_id"))
+    if root_id:
+        return root_id
+
+    root_id = _valid_root_id(candidates, decision.root_id)
+    if root_id:
+        return root_id
+
+    selected_roots = [
+        node_id
+        for node_id in selected_ids
+        if candidates.get(node_id, {}).get("node_kind") == "ROOT"
+    ]
+    if len(selected_roots) == 1:
+        return selected_roots[0]
+
+    current_root_id = _valid_root_id(candidates, current_source.get("root_id"))
+    if current_root_id:
+        return current_root_id
+
+    swap_root = _swap_recover_root_id(decision, candidates)
+    if swap_root:
+        return swap_root
+
+    utterance_roots = _utterance_matched_root_ids(utterance, candidates)
+    if len(utterance_roots) == 1:
+        return utterance_roots[0]
+
+    unrooted_current = bool(current_source and not current_source.get("root_id"))
+    if not unrooted_current:
+        focus_root_id = _valid_root_id(candidates, focus_root.get("id"))
+        if focus_root_id:
+            return focus_root_id
+
+        graph_roots = [
+            node_id for node_id, node in candidates.items() if node.get("node_kind") == "ROOT"
+        ]
+        if len(graph_roots) == 1:
+            return graph_roots[0]
+
+    return None
+
+
+def _link_clarification_message(
+    candidates: dict[str, dict[str, Any]],
+    current_source: dict[str, Any],
+    utterance_roots: list[str],
+) -> str:
+    if len(utterance_roots) > 1:
+        titles = [
+            str(candidates[node_id].get("title") or node_id) for node_id in utterance_roots[:5]
+        ]
+        joined = ", ".join(titles)
+        return (
+            f"More than one paper ROOT matches what you said ({joined}). "
+            "Which one should I connect?"
+        )
+
+    roots = [
+        str(node.get("title") or node_id)
+        for node_id, node in candidates.items()
+        if node.get("node_kind") == "ROOT"
+    ]
+    if roots:
+        available = ", ".join(roots[:5])
+        clarification = f"Which paper ROOT should I connect? Available ROOTs: {available}."
+    else:
+        clarification = "Which paper ROOT should I connect, and which graph node should it link to?"
+
+    if current_source and not current_source.get("root_id"):
+        in_flight = (current_source.get("title") or "").strip()
+        if not in_flight:
+            in_flight = "The source currently being summarized"
+        clarification += (
+            f" Note: {in_flight} does not have a ROOT in the graph yet; "
+            "you can still connect an existing ROOT from the list."
+        )
+    return clarification
+
+
+def _build_link_target_ids(
+    decision: WorkerRoute,
+    *,
+    candidates: dict[str, dict[str, Any]],
+    root_id: str,
+    selected_ids: list[str],
+) -> list[str]:
+    target_ids: list[str] = []
+    if decision.root_id:
+        misplaced = candidates.get(str(decision.root_id))
+        if (
+            misplaced
+            and misplaced.get("node_kind") not in {"ROOT", "CONCEPT_I"}
+            and str(decision.root_id) != root_id
+        ):
+            target_ids.append(str(decision.root_id))
+    for target_id in decision.target_ids or []:
+        node_id = str(target_id)
+        node = candidates.get(node_id)
+        if node and node_id != root_id and node.get("node_kind") not in {"CONCEPT_I", "ROOT"}:
+            target_ids.append(node_id)
+
+    if decision.target_id:
+        target_id = str(decision.target_id)
+        node = candidates.get(target_id)
+        if node and target_id != root_id and node.get("node_kind") != "CONCEPT_I":
+            target_ids.append(target_id)
+
+    for node_id in selected_ids:
+        node = candidates.get(node_id)
+        if node and node_id != root_id and node.get("node_kind") != "CONCEPT_I":
+            target_ids.append(node_id)
+    return list(dict.fromkeys(target_ids))
+
+
+def normalize_link_decision(
+    decision: WorkerRoute,
+    context: dict[str, Any],
+    *,
+    utterance: str | None = None,
+) -> WorkerRoute:
     """Validate Supervisor-selected link IDs and fill a missing source from structured focus."""
     if decision.worker != "link" or decision.intent != "link":
         return decision
@@ -44,80 +233,28 @@ def normalize_link_decision(decision: WorkerRoute, context: dict[str, Any]) -> W
     focus_root = memory.get("focus_root") or {}
     selected_ids = [str(node_id) for node_id in (context.get("selected_node_ids") or [])]
 
-    explicit_root = fields.get("root_id") or decision.root_id
-    root_id = str(explicit_root) if explicit_root else None
-    if not root_id or candidates.get(root_id, {}).get("node_kind") != "ROOT":
-        selected_roots = [
-            node_id
-            for node_id in selected_ids
-            if candidates.get(node_id, {}).get("node_kind") == "ROOT"
-        ]
-        if len(selected_roots) == 1:
-            root_id = selected_roots[0]
-        else:
-            current_root_id = str(current_source.get("root_id") or "")
-            if current_root_id and candidates.get(current_root_id, {}).get("node_kind") == "ROOT":
-                root_id = current_root_id
-            elif current_source and not current_root_id:
-                root_id = None
-            else:
-                focus_root_id = str(focus_root.get("id") or "")
-                if focus_root_id and candidates.get(focus_root_id, {}).get("node_kind") == "ROOT":
-                    root_id = focus_root_id
-                else:
-                    roots = [
-                        node_id
-                        for node_id, node in candidates.items()
-                        if node.get("node_kind") == "ROOT"
-                    ]
-                    root_id = roots[0] if len(roots) == 1 else None
+    utterance_roots = _utterance_matched_root_ids(utterance, candidates)
+    root_id = _resolve_link_root_id(
+        decision,
+        candidates=candidates,
+        fields=fields,
+        selected_ids=selected_ids,
+        current_source=current_source,
+        focus_root=focus_root,
+        utterance=utterance,
+    )
 
-    target_ids: list[str] = []
-    if decision.root_id:
-        misplaced_root = candidates.get(str(decision.root_id))
-        if (
-            misplaced_root
-            and misplaced_root.get("node_kind") not in {"ROOT", "CONCEPT_I"}
-            and str(decision.root_id) != root_id
-        ):
-            target_ids.append(str(decision.root_id))
-    for target_id in decision.target_ids or []:
-        node_id = str(target_id)
-        node = candidates.get(node_id)
-        # A ROOT in this list is commonly the model's reversed source field.
-        # A user-selected ROOT target is represented by the singular target_id.
-        if node and node_id != root_id and node.get("node_kind") not in {"CONCEPT_I", "ROOT"}:
-            target_ids.append(node_id)
-
-    if decision.target_id:
-        target_id = str(decision.target_id)
-        node = candidates.get(target_id)
-        if node and target_id != root_id and node.get("node_kind") != "CONCEPT_I":
-            target_ids.append(target_id)
-    for node_id in selected_ids:
-        node = candidates.get(node_id)
-        if node and node_id != root_id and node.get("node_kind") != "CONCEPT_I":
-            target_ids.append(node_id)
-    target_ids = list(dict.fromkeys(target_ids))
+    target_ids = _build_link_target_ids(
+        decision,
+        candidates=candidates,
+        root_id=root_id or "",
+        selected_ids=selected_ids,
+    )
 
     if root_id:
         return decision.model_copy(update={"root_id": root_id, "target_ids": target_ids})
 
-    if current_source and not current_source.get("root_id"):
-        clarification = (
-            "The paper currently being processed does not have a ROOT in the graph yet. "
-            "Approve its gist or deep-read first, or select an existing ROOT to connect."
-        )
-    else:
-        roots = [
-            str(node.get("title") or node_id)
-            for node_id, node in candidates.items()
-            if node.get("node_kind") == "ROOT"
-        ]
-        available = ", ".join(roots[:5])
-        clarification = "Which paper ROOT should I connect, and which graph node should it link to?"
-        if available:
-            clarification = f"Which paper ROOT should I connect? Available ROOTs: {available}."
+    clarification = _link_clarification_message(candidates, current_source, utterance_roots)
     return decision.model_copy(
         update={
             "worker": "conversation",
@@ -177,7 +314,7 @@ def resolve_voice_route(
         item.approval_type == "project_scope" for item in store.list_pending(project_id, thread_id)
     )
     decision = route_intent(effective, routing_context, project)
-    decision = normalize_link_decision(decision, routing_context)
+    decision = normalize_link_decision(decision, routing_context, utterance=effective)
     worker = prioritize_project_scope_until_complete(
         project.introduction,
         decision.worker,

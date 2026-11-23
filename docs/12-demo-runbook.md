@@ -253,6 +253,7 @@ Only run if Colab **chat** (`/v1/chat/completions`) is stable—these are slow.
 |------|----------|-----------------|-------------|
 | **K** | W3c Deep read | `source_url=` + *“Deep read this—show concepts before commit.”* | Staging list in dock → edit → approve commit under `ROOT` |
 | **L** | W4 Link | Select `ROOT` + hub/insight if any; *“Where should this connect?”* | Placement candidates → approve edges |
+| **L2** | W4 Link (parallel gist) | With gist B still running, name or select committed ROOT A; *“Connect [ROOT A title] to Genesis.”* | **PASS:** placement queues for A (not “in-flight paper has no ROOT” loop). **FAIL:** assistant refuses until B completes. If voice is ambiguous, assistant asks which ROOT (canvas selection counts). |
 | **M** | W5 Reorg | After several nodes: *“This section is crowded—suggest a split.”* | Preview diff → approve apply |
 
 Set `root_id=<id>` in custom fields for W3b instead of W3c if you already have a gist `ROOT`.

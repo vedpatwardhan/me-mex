@@ -181,7 +181,7 @@ def test_committed_scope_state_and_prompt_disambiguate_acknowledgement_from_revi
     assert "Acknowledging that scope is complete" in prompt
     assert "what comes next" in prompt
     assert "context.routing_memory.recent_turns" in prompt
-    assert "never the source ROOT" in prompt
+    assert "never put the source ROOT only in `target_ids`" in prompt
 
 
 def test_supervisor_failure_falls_back_to_conversation_only(project):

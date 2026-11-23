@@ -79,7 +79,7 @@ def _supervisor(state: AgentState) -> AgentState:
                 "dispatch": True,
             }
         )
-    decision = normalize_link_decision(decision, context)
+    decision = normalize_link_decision(decision, context, utterance=effective)
     if decision.dispatch and decision.worker in {"gist", "intradoc"}:
         from app.agents.session_plane import record_routing_source
         from app.agents.source_reference import resolve_source_reference

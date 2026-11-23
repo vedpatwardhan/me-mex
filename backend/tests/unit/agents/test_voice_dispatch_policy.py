@@ -115,7 +115,95 @@ def test_link_does_not_fall_back_to_an_older_root_for_unrooted_current_source():
 
     assert resolved.worker == "conversation"
     assert resolved.dispatch is False
+    assert resolved.source_error == "link_resolution"
+    assert "Available ROOTs" in (resolved.content or "")
+    assert "Older paper" in (resolved.content or "")
     assert "does not have a ROOT" in (resolved.content or "")
+
+
+@pytest.mark.voice_plane
+def test_link_explicit_dawn_while_other_gist_unrooted_current_source():
+    """E2E mirror: supervisor swap while gist for another paper is in flight."""
+    decision = WorkerRoute(
+        worker="link",
+        intent="link",
+        dispatch=True,
+        target_id="genesis_global",
+        target_ids=["root_dawn"],
+    )
+    context = {
+        "graph_candidates": [
+            {"id": "genesis_global", "title": "Genesis", "node_kind": "CONCEPT_M"},
+            {
+                "id": "root_dawn",
+                "title": "The DAWN of World-Action Interactive Models",
+                "node_kind": "ROOT",
+            },
+        ],
+        "routing_memory": {
+            "focus_root": {
+                "id": "root_dawn",
+                "title": "The DAWN of World-Action Interactive Models",
+                "node_kind": "ROOT",
+                "source_uri": "https://arxiv.org/pdf/2605.11550",
+            },
+            "current_source": {
+                "worker": "gist",
+                "source_url": "https://arxiv.org/pdf/2610.20951",
+                "title": "",
+                "root_id": "",
+            },
+        },
+    }
+
+    resolved = normalize_link_decision(decision, context)
+
+    assert resolved.worker == "link"
+    assert resolved.root_id == "root_dawn"
+    assert resolved.target_ids == ["genesis_global"]
+
+
+@pytest.mark.voice_plane
+def test_link_utterance_title_match_single_root():
+    decision = WorkerRoute(
+        worker="link",
+        intent="link",
+        dispatch=True,
+        target_id="genesis_global",
+    )
+    context = {
+        "graph_candidates": [
+            {"id": "genesis_global", "title": "Genesis", "node_kind": "CONCEPT_M"},
+            {
+                "id": "root_dawn",
+                "title": "The DAWN of World-Action Interactive Models",
+                "node_kind": "ROOT",
+            },
+            {
+                "id": "root_lev",
+                "title": "LEV: Thinking Fast and Deep",
+                "node_kind": "ROOT",
+            },
+        ],
+        "routing_memory": {
+            "current_source": {
+                "worker": "gist",
+                "source_url": "https://arxiv.org/pdf/2610.20951",
+                "title": "LEV",
+                "root_id": "",
+            },
+        },
+    }
+
+    resolved = normalize_link_decision(
+        decision,
+        context,
+        utterance="Connect the dawn root node to the genesis node.",
+    )
+
+    assert resolved.worker == "link"
+    assert resolved.root_id == "root_dawn"
+    assert resolved.target_ids == ["genesis_global"]
 
 
 @pytest.mark.voice_plane
