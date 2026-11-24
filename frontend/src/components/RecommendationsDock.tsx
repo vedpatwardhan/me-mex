@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import type { DockTurn, JobHistoryRow } from '../utils/dockStreamReducer';
 import {
@@ -97,9 +97,16 @@ export const RecommendationsDock: React.FC<Props> = ({
 }) => {
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [visibleTurnCount, setVisibleTurnCount] = useState(TURN_THREAD_VISIBLE_DEFAULT);
+  const [turnThreadAtTop, setTurnThreadAtTop] = useState(false);
   const turnThreadScrollRef = useRef<HTMLDivElement>(null);
   const turnScrollPreserveRef = useRef<number | null>(null);
   const prevTurnCountRef = useRef(0);
+
+  const syncTurnThreadScrollTop = useCallback(() => {
+    const el = turnThreadScrollRef.current;
+    if (!el) return;
+    setTurnThreadAtTop(el.scrollTop <= 2);
+  }, []);
 
   const allTurns = useMemo((): DockTurn[] => {
     if (turns.length) return turns;
@@ -141,7 +148,17 @@ export const RecommendationsDock: React.FC<Props> = ({
       return;
     }
     el.scrollTop = el.scrollHeight;
-  }, [allTurns.length, lastTurnUserText, lastTurnAssistantText, visibleTurnCount]);
+    syncTurnThreadScrollTop();
+  }, [allTurns.length, lastTurnUserText, lastTurnAssistantText, visibleTurnCount, syncTurnThreadScrollTop]);
+
+  useEffect(() => {
+    const el = turnThreadScrollRef.current;
+    if (!el) return;
+    const onScroll = () => syncTurnThreadScrollTop();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    syncTurnThreadScrollTop();
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [syncTurnThreadScrollTop, visibleTurns.length, hiddenTurnCount]);
 
   const loadOlderTurns = () => {
     const el = turnThreadScrollRef.current;
@@ -320,10 +337,10 @@ export const RecommendationsDock: React.FC<Props> = ({
             ref={turnThreadScrollRef}
             className="max-h-64 space-y-2 overflow-y-auto"
           >
-            {hiddenTurnCount > 0 ? (
+            {hiddenTurnCount > 0 && turnThreadAtTop ? (
               <button
                 type="button"
-                className="sticky top-0 z-10 w-full rounded-lg border border-slate-600/60 bg-slate-900/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-sky-500/40 hover:text-sky-200"
+                className="w-full rounded-lg border border-slate-600/60 bg-slate-900/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-sky-500/40 hover:text-sky-200"
                 onClick={loadOlderTurns}
               >
                 Load previous turns ({hiddenTurnCount} older)
