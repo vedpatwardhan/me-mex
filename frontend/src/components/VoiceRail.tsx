@@ -106,6 +106,8 @@ export const VoiceRail: React.FC<Props> = ({
   const [muted, setMuted] = useState(true);
   const [state, setState] = useState<VoiceSessionState>('Muted');
   const [customFields, setCustomFields] = useState(INITIAL_CUSTOM_FIELDS);
+  const customFieldsRef = useRef(customFields);
+  customFieldsRef.current = customFields;
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [sttDraft, setSttDraft] = useState<string | null>(null);
   const sessionRef = useRef<VoiceSession | null>(null);
@@ -139,6 +141,26 @@ export const VoiceRail: React.FC<Props> = ({
     };
   }, [customFields, muted, projectId, selectedNodeId, threadId]);
 
+  const commitOneShotCustomFields = useCallback(() => {
+    pendingTurnFieldsRef.current = mergeOneShotCustomFields(
+      pendingTurnFieldsRef.current,
+      customFieldsRef.current,
+    );
+    setCustomFields(INITIAL_CUSTOM_FIELDS);
+    resetFieldsAfterTurnRef.current = true;
+  }, []);
+
+  const contextWithCommittedFields = useCallback(
+    (micMuted: boolean): VoiceContext => ({
+      active_project_id: projectId || '',
+      muted: micMuted,
+      custom_fields: customFieldsForContext(pendingTurnFieldsRef.current, '', true),
+      selected_node_ids: selectedNodeId ? [selectedNodeId] : [],
+      thread_id: threadId,
+    }),
+    [projectId, selectedNodeId, threadId],
+  );
+
   const handleDockStreamEvent = useCallback(
     (ev: Record<string, unknown>) => {
       onDockStreamEvent?.(ev);
@@ -157,6 +179,23 @@ export const VoiceRail: React.FC<Props> = ({
         }
         if (event.type === 'turn_start') {
           submittedTurnStartedRef.current = true;
+          if (!resetFieldsAfterTurnRef.current) {
+            pendingTurnFieldsRef.current = mergeOneShotCustomFields(
+              pendingTurnFieldsRef.current,
+              customFieldsRef.current,
+            );
+            setCustomFields(INITIAL_CUSTOM_FIELDS);
+            resetFieldsAfterTurnRef.current = true;
+            const nextContext: VoiceContext = {
+              active_project_id: projectId || '',
+              muted: mutedRef.current,
+              custom_fields: customFieldsForContext(pendingTurnFieldsRef.current, '', true),
+              selected_node_ids: selectedNodeId ? [selectedNodeId] : [],
+              thread_id: threadId,
+            };
+            onContext?.(nextContext);
+            sessionRef.current?.publishContextFireAndForget(nextContext);
+          }
           setVoiceStateRef.current('Processing');
           continue;
         }
@@ -181,7 +220,7 @@ export const VoiceRail: React.FC<Props> = ({
         }
       }
     },
-    [onDockStreamEvent, onContext, muted, contextForWorker],
+    [onDockStreamEvent, onContext, muted, contextForWorker, projectId, selectedNodeId, threadId],
   );
 
   const ensureSession = () => {
@@ -274,14 +313,6 @@ export const VoiceRail: React.FC<Props> = ({
   const setMicMuted = (micMuted: boolean) => {
     const session = ensureSession();
     if (!session.isReady()) return;
-    if (micMuted) {
-      pendingTurnFieldsRef.current = mergeOneShotCustomFields(
-        pendingTurnFieldsRef.current,
-        customFields,
-      );
-      resetFieldsAfterTurnRef.current = true;
-      setCustomFields(INITIAL_CUSTOM_FIELDS);
-    }
     const ctx = contextForWorker(micMuted);
     onContext?.(ctx);
     setVoiceError(null);
@@ -364,7 +395,11 @@ export const VoiceRail: React.FC<Props> = ({
               onClick={() => {
                 const session = sessionRef.current;
                 if (!session?.isReady() || !sttDraft.trim()) return;
-                void session.sendAgentTurn(sttDraft.trim(), contextForWorker(true));
+                commitOneShotCustomFields();
+                const ctx = contextWithCommittedFields(true);
+                onContext?.(ctx);
+                void session.publishContext(ctx);
+                void session.sendAgentTurn(sttDraft.trim(), ctx);
                 setSttDraft(null);
                 setState('Processing');
                 setMuted(true);

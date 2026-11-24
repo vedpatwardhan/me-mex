@@ -419,7 +419,7 @@ def _schedule_stt_pipeline(
                     _schedule_voice_turn(room, session, text)
                 else:
                     await room.local_participant.publish_data(
-                        json.dumps({"type": "stt_draft", "text": text[:8000]}).encode(),
+                        json.dumps({"type": "stt_draft", "text": text}).encode(),
                         reliable=True,
                     )
             except httpx.HTTPError:

@@ -6,6 +6,7 @@ import {
   fetchJobHistory,
   fetchJobs,
   fetchNudges,
+  fetchTurnJournal,
   revertTurn,
   resumeApproval,
   streamAgentTurn,
@@ -78,6 +79,34 @@ export function useDockState(
     void refreshApprovals();
     void refreshJobHistory();
   }, [refreshApprovals, refreshJobHistory]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchTurnJournal(threadId).then((rows) => {
+      if (cancelled || !rows.length) return;
+      const turns = rows
+        .filter((row) => row.turn_id)
+        .map((row) => ({
+          turnId: row.turn_id,
+          userText: row.user_text || '',
+          assistantText: row.assistant_text || '',
+        }));
+      if (!turns.length) return;
+      setStreamState((s) => {
+        if (s.turns.length > 0) return s;
+        const last = turns[turns.length - 1];
+        return {
+          ...s,
+          turns,
+          latestUserText: last?.userText ?? '',
+          latestReply: last?.assistantText ?? '',
+        };
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
 
   const scheduleRefreshApprovals = useCallback(() => {
     if (refreshDebounce.current) clearTimeout(refreshDebounce.current);

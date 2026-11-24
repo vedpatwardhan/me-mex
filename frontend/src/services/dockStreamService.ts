@@ -150,6 +150,20 @@ export type JobHistoryRow = {
   updated_at?: number;
 };
 
+export type TurnJournalRow = {
+  turn_id: string;
+  user_text?: string;
+  assistant_text?: string;
+};
+
+export async function fetchTurnJournal(threadId: string): Promise<TurnJournalRow[]> {
+  const q = new URLSearchParams({ thread_id: threadId });
+  const res = await fetch(`${API_BASE}/api/agent/turns?${q}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.items || []) as TurnJournalRow[];
+}
+
 export async function fetchJobHistory(threadId: string): Promise<JobHistoryRow[]> {
   const q = new URLSearchParams({ thread_id: threadId });
   const res = await fetch(`${API_BASE}/api/agent/jobs/history?${q}`);
