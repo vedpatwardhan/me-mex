@@ -81,12 +81,46 @@ describe('dockStreamReducer', () => {
   });
 
   it('shows the completed background gist follow-up as the latest assistant turn', () => {
-    const state = applyStreamEvent(emptyDockStreamState(), {
+    let state = applyStreamEvent(emptyDockStreamState(), {
+      type: 'turn_start',
+      text: 'Summarize this',
+      turn_id: 'turn_1',
+    });
+    state = applyStreamEvent(state, {
+      type: 'turn_end',
+      turn_id: 'turn_1',
+      reply: "I'll prepare a gist in the dock.",
+    });
+    state = applyStreamEvent(state, {
       type: 'assistant_followup',
       job_id: 'job-gist',
       text: 'The paper proposes a new predictive model.',
     });
     expect(state.latestReply).toBe('The paper proposes a new predictive model.');
+    expect(state.turns[state.turns.length - 1]?.assistantText).toBe(
+      'The paper proposes a new predictive model.',
+    );
+  });
+
+  it('replaces the last assistant line on approval turn_end without turn_id', () => {
+    let state = applyStreamEvent(emptyDockStreamState(), {
+      type: 'turn_start',
+      text: 'My project is about RSI',
+      turn_id: 'turn_scope',
+    });
+    state = applyStreamEvent(state, {
+      type: 'turn_end',
+      turn_id: 'turn_scope',
+      reply: "I'll prepare the scope proposal and put it in the dock for review.",
+    });
+    state = applyStreamEvent(state, {
+      type: 'turn_end',
+      reply:
+        "Thanks for approving the project scope. I'll use it to guide our research.",
+      details: { scope_committed: true },
+    });
+    expect(state.turns).toHaveLength(1);
+    expect(state.turns[0].assistantText).toContain('Thanks for approving');
   });
 
   it('adds approval on turn_end', () => {

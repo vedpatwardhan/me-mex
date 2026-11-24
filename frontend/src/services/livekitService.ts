@@ -10,6 +10,7 @@ export type VoiceSessionState =
   | 'Listening'
   | 'Reviewing'
   | 'Thinking'
+  | 'Processing'
   | 'Speaking'
   | 'Awaiting approval';
 

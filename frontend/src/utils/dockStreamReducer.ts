@@ -34,6 +34,18 @@ export const emptyDockStreamState = (): DockStreamState => ({
   jobHistory: [],
 });
 
+/** Approval acks and assistant_followup replace the latest assistant bubble (no new turn_id). */
+function replaceLastAssistantTurn(turns: DockTurn[], reply: string): DockTurn[] {
+  if (!reply.trim()) return turns;
+  if (turns.length === 0) {
+    return [{ turnId: `ack_${Date.now()}`, userText: '', assistantText: reply }];
+  }
+  const next = [...turns];
+  const last = next.length - 1;
+  next[last] = { ...next[last], assistantText: reply };
+  return next;
+}
+
 export function flattenDockEvents(ev: Record<string, unknown>): Record<string, unknown>[] {
   if (ev.type === 'dock_event') {
     const inner = ev.event as Record<string, unknown> | undefined;
@@ -157,7 +169,11 @@ export function applyStreamEvent(
   // assistant transcript content for the latest conversational turn.
   if (type === 'proactive_reply') return state;
   if (type === 'assistant_followup' && typeof ev.text === 'string') {
-    return { ...state, latestReply: ev.text };
+    return {
+      ...state,
+      latestReply: ev.text,
+      turns: replaceLastAssistantTurn(state.turns, ev.text),
+    };
   }
   if (type === 'job_update') {
     const jobPatch = ev.job as Record<string, unknown> | undefined;
@@ -232,6 +248,11 @@ export function applyStreamEvent(
         });
       }
       next = { ...next, turns };
+    } else if (reply) {
+      next = {
+        ...next,
+        turns: replaceLastAssistantTurn(next.turns, reply),
+      };
     }
     if (reply) next = { ...next, latestReply: reply };
     let items = next.items;

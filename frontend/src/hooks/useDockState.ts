@@ -168,11 +168,20 @@ export function useDockState(
         });
         if (result?.scope_committed === true) onScopeCommitted?.();
         if (result?.graph_write === true) onGraphCommitted?.();
-        setStreamState((s) => ({
-          ...s,
-          latestReply: typeof result?.reply === 'string' ? result.reply : s.latestReply,
-          items: s.items.filter((i) => i.id !== approvalId),
-        }));
+        const reply = typeof result?.reply === 'string' ? result.reply : '';
+        setStreamState((s) => {
+          let next = reply
+            ? applyStreamEvent(s, {
+                type: 'turn_end',
+                reply,
+                details: result,
+              })
+            : s;
+          return {
+            ...next,
+            items: next.items.filter((i) => i.id !== approvalId),
+          };
+        });
         await refreshApprovals();
         setPendingApprovals((current) => {
           const next = new Set(current);

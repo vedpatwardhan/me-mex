@@ -28,6 +28,7 @@ function statusMeta(
   state: VoiceSessionState,
   live: boolean,
   connected: boolean,
+  sessionConnecting: boolean,
 ): { label: string; detail: string; dot: string; ring: string } {
   if (!connected) {
     return {
@@ -37,10 +38,18 @@ function statusMeta(
       ring: 'border-slate-600/60 bg-slate-800/40',
     };
   }
-  if (state === 'Thinking') {
+  if (state === 'Thinking' && sessionConnecting) {
     return {
       label: 'Connecting',
       detail: 'Joining LiveKit room…',
+      dot: 'bg-sky-400 animate-pulse',
+      ring: 'border-sky-500/40 bg-sky-500/10',
+    };
+  }
+  if (state === 'Processing') {
+    return {
+      label: 'Processing',
+      detail: 'Assistant is working on your turn…',
       dot: 'bg-sky-400 animate-pulse',
       ring: 'border-sky-500/40 bg-sky-500/10',
     };
@@ -101,6 +110,8 @@ export const VoiceRail: React.FC<Props> = ({
   const [sttDraft, setSttDraft] = useState<string | null>(null);
   const sessionRef = useRef<VoiceSession | null>(null);
   const pendingTurnFieldsRef = useRef<Record<string, string> | null>(null);
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
   const resetFieldsAfterTurnRef = useRef(false);
   const submittedTurnStartedRef = useRef(false);
   const [connecting, setConnecting] = useState(false);
@@ -140,26 +151,33 @@ export const VoiceRail: React.FC<Props> = ({
         }
         if (event.type === 'turn_aborted') {
           setVoiceStateRef.current((current) =>
-            current === 'Thinking' || current === 'Speaking' ? 'Reviewing' : 'Muted',
+            current === 'Processing' || current === 'Speaking' ? 'Reviewing' : 'Muted',
           );
           continue;
         }
         if (event.type === 'turn_start') {
           submittedTurnStartedRef.current = true;
-          setVoiceStateRef.current('Thinking');
+          setVoiceStateRef.current('Processing');
           continue;
         }
         if (event.type === 'turn_end') {
+          setVoiceStateRef.current((current) => {
+            if (current === 'Processing' || current === 'Speaking') {
+              return mutedRef.current ? 'Muted' : 'Listening';
+            }
+            return current;
+          });
           const flushCompleted =
             resetFieldsAfterTurnRef.current && submittedTurnStartedRef.current;
           submittedTurnStartedRef.current = false;
-          if (!flushCompleted) continue;
-          resetFieldsAfterTurnRef.current = false;
-          pendingTurnFieldsRef.current = null;
-          const nextContext = contextForWorker(muted);
-          onContext?.(nextContext);
-          sessionRef.current?.publishContextFireAndForget(nextContext);
-          return;
+          if (flushCompleted) {
+            resetFieldsAfterTurnRef.current = false;
+            pendingTurnFieldsRef.current = null;
+            const nextContext = contextForWorker(muted);
+            onContext?.(nextContext);
+            sessionRef.current?.publishContextFireAndForget(nextContext);
+          }
+          continue;
         }
       }
     },
@@ -185,21 +203,28 @@ export const VoiceRail: React.FC<Props> = ({
 
   useEffect(() => {
     const session = sessionRef.current;
-    if (!session?.isReady() || state === 'Thinking') return;
+    if (!session?.isReady() || state === 'Thinking' || state === 'Processing') return;
     session.publishContextFireAndForget(contextForWorker(muted));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- republish project/selection/mic
   }, [projectId, selectedNodeId, threadId, muted]);
 
   const roomReady = sessionRef.current?.isReady() ?? false;
-  const connected =
-    roomReady &&
-    (state === 'Listening' ||
-      state === 'Speaking' ||
-      state === 'Reviewing' ||
-      state === 'Awaiting approval' ||
-      (muted && state === 'Muted'));
+  const sessionLive =
+    state === 'Listening' ||
+    state === 'Speaking' ||
+    state === 'Processing' ||
+    state === 'Reviewing' ||
+    state === 'Awaiting approval' ||
+    state === 'Muted';
+  const connected = roomReady && (sessionLive || connecting);
   const live = connected && !muted && state === 'Listening';
-  const status = statusMeta(state, live, connected);
+  const status = statusMeta(state, live, connected, connecting);
+
+  useEffect(() => {
+    if (sessionRef.current?.isReady() && state === 'Thinking' && !connecting) {
+      setState('Muted');
+    }
+  }, [state, connecting]);
   const speechTimer = useSpeechSegmentTimer(live);
 
   const startSession = async () => {
@@ -210,9 +235,9 @@ export const VoiceRail: React.FC<Props> = ({
     onContext?.(ctx);
     setVoiceError(null);
     try {
-      setState('Thinking');
-      setMuted(false);
       if (!session.isReady()) {
+        setState('Thinking');
+        setMuted(false);
         await session.connect(`user-${projectId || 'me'}-${Date.now()}`);
       }
       if (!session.isReady()) {
@@ -341,7 +366,7 @@ export const VoiceRail: React.FC<Props> = ({
                 if (!session?.isReady() || !sttDraft.trim()) return;
                 void session.sendAgentTurn(sttDraft.trim(), contextForWorker(true));
                 setSttDraft(null);
-                setState('Thinking');
+                setState('Processing');
                 setMuted(true);
               }}
             >
@@ -371,7 +396,7 @@ export const VoiceRail: React.FC<Props> = ({
         onEnd={endSession}
       />
 
-      {state === 'Speaking' || state === 'Thinking' ? (
+      {state === 'Speaking' || state === 'Processing' ? (
         <button
           type="button"
           className="w-full rounded-lg border border-rose-600/50 px-3 py-2 text-xs font-medium text-rose-200"
@@ -414,7 +439,8 @@ export const VoiceRail: React.FC<Props> = ({
             const ctx = contextForWorker(muted);
             onContext?.(ctx);
             const s = ensureSession();
-            if (s.isReady() && state !== 'Thinking') s.publishContextFireAndForget(ctx);
+            if (s.isReady() && state !== 'Thinking' && state !== 'Processing')
+              s.publishContextFireAndForget(ctx);
           }}
           spellCheck={false}
         />
@@ -460,7 +486,7 @@ function MotionButtons({
     <div className="flex flex-col gap-2">
       <button
         type="button"
-        disabled={state === 'Thinking'}
+        disabled={connecting}
         onClick={onToggleMute}
         className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-60 ${
           live

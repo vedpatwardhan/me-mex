@@ -8,6 +8,7 @@ import {
   Play,
   Sparkles,
   Trash2,
+  Undo2,
   User,
   Bot,
   X,
@@ -261,30 +262,34 @@ export const RecommendationsDock: React.FC<Props> = ({
           <ul className="space-y-3 max-h-64 overflow-y-auto">
             {(turns.length ? turns : latestUserText ? [{ turnId: 'latest', userText: latestUserText, assistantText: latestReply }] : []).map(
               (turn) => (
-                <li key={turn.turnId} className="relative space-y-1.5 pb-2 border-b border-white/5 last:border-0">
+                <li key={turn.turnId} className="space-y-1.5 pb-2 border-b border-white/5 last:border-0">
                   <span className="text-[10px] text-slate-500 flex items-center gap-1">
                     <User className="h-3 w-3" /> You
                   </span>
-                  <p className="rounded-lg border border-slate-700/60 bg-slate-900/60 px-2.5 py-2 pr-16 text-sm text-slate-300 whitespace-pre-wrap">
-                    {turn.userText}
-                  </p>
-                  {onRevertTurn && turn.turnId !== 'latest' ? (
-                    <button
-                      type="button"
-                      className="absolute bottom-3 right-2 text-[10px] uppercase tracking-wide text-rose-300/90 hover:text-rose-200"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            'Revert from this turn? Later turns and their graph changes will be removed.',
-                          )
-                        ) {
-                          onRevertTurn(turn.turnId);
-                        }
-                      }}
-                    >
-                      Revert
-                    </button>
-                  ) : null}
+                  <div className="relative">
+                    <p className="rounded-lg border border-slate-700/60 bg-slate-900/60 px-2.5 py-2 pr-10 text-sm text-slate-300 whitespace-pre-wrap">
+                      {turn.userText}
+                    </p>
+                    {onRevertTurn && turn.turnId !== 'latest' && turn.turnId.startsWith('turn_') ? (
+                      <button
+                        type="button"
+                        title="Revert this turn (your message, assistant reply, and effects)"
+                        aria-label="Revert this turn"
+                        className="absolute bottom-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-md border border-slate-600/80 bg-slate-900/90 text-slate-300 transition hover:border-rose-500/50 hover:bg-rose-950/50 hover:text-rose-200"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              'Revert this turn? Your message, the assistant reply, and any later turns will be removed.',
+                            )
+                          ) {
+                            onRevertTurn(turn.turnId);
+                          }
+                        }}
+                      >
+                        <Undo2 className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
                   {turn.assistantText ? (
                     <>
                       <span className="text-[10px] text-slate-500 flex items-center gap-1">

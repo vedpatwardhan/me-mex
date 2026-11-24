@@ -150,7 +150,7 @@ export class VoiceSession {
         if (dockTypes.has(String(msg.type))) {
           this.onDockEvent?.(msg);
         }
-        if (msg.type === 'agent_reply' || msg.type === 'turn_end') {
+        if (msg.type === 'agent_reply') {
           this.emit('Speaking');
         }
         if (msg.type === 'awaiting_approval') {
@@ -231,7 +231,7 @@ export class VoiceSession {
       throw new Error('LiveKit room is not connected — mic cannot be published');
     }
     if (muted) {
-      this.liveContext = null;
+      this.liveContext = { ...ctx, muted: true };
       await this.setMicrophoneEnabled(false);
     } else {
       this.liveContext = { ...ctx, muted: false };
