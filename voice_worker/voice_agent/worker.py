@@ -397,12 +397,20 @@ def _schedule_stt_pipeline(
                     duration_s,
                     reason,
                 )
+                await room.local_participant.publish_data(
+                    json.dumps({"type": "stt_failed", "reason": "speech_disabled"}).encode(),
+                    reliable=True,
+                )
                 return
             _log.info(
                 "VAD utterance ready (%.2fs, %d bytes wav, flush=%s) → Colab STT",
                 duration_s,
                 len(wav),
                 reason,
+            )
+            await room.local_participant.publish_data(
+                json.dumps({"type": "stt_pending"}).encode(),
+                reliable=True,
             )
             try:
                 result = await transcribe_wav(wav)
@@ -414,6 +422,10 @@ def _schedule_stt_pipeline(
                     text[:120],
                 )
                 if not text:
+                    await room.local_participant.publish_data(
+                        json.dumps({"type": "stt_failed", "reason": "no_speech"}).encode(),
+                        reliable=True,
+                    )
                     return
                 if VOICE_AUTO_SEND_TURNS:
                     _schedule_voice_turn(room, session, text)
@@ -422,8 +434,13 @@ def _schedule_stt_pipeline(
                         json.dumps({"type": "stt_draft", "text": text}).encode(),
                         reliable=True,
                     )
+                    _log.info("published stt_draft (%d chars)", len(text))
             except httpx.HTTPError:
                 _log.exception("STT failed")
+                await room.local_participant.publish_data(
+                    json.dumps({"type": "stt_failed", "reason": "stt_error"}).encode(),
+                    reliable=True,
+                )
 
     asyncio.create_task(_run())
 

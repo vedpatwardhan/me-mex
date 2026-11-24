@@ -135,6 +135,8 @@ export class VoiceSession {
           'turn_end',
           'turn_start',
           'stt_draft',
+          'stt_pending',
+          'stt_failed',
           'turn_aborted',
           'turn_reverted',
           'recommendation',

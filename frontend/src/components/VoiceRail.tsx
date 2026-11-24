@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
+import { LoaderCircle, Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
 
 import { SpeechSegmentIndicator } from './SpeechSegmentIndicator';
 import { useSpeechSegmentTimer } from '../hooks/useSpeechSegmentTimer';
@@ -52,6 +52,14 @@ function statusMeta(
       detail: 'Assistant is working on your turn…',
       dot: 'bg-sky-400 animate-pulse',
       ring: 'border-sky-500/40 bg-sky-500/10',
+    };
+  }
+  if (state === 'Transcribing') {
+    return {
+      label: 'Transcribing',
+      detail: 'Turning your speech into text…',
+      dot: 'bg-cyan-400 animate-pulse',
+      ring: 'border-cyan-500/40 bg-cyan-500/10',
     };
   }
   if (state === 'Reviewing') {
@@ -165,8 +173,26 @@ export const VoiceRail: React.FC<Props> = ({
     (ev: Record<string, unknown>) => {
       onDockStreamEvent?.(ev);
       for (const event of flattenDockEvents(ev)) {
+        if (event.type === 'stt_pending') {
+          setVoiceStateRef.current('Transcribing');
+          continue;
+        }
+        if (event.type === 'stt_failed') {
+          const reason = String(event.reason || 'stt_error');
+          const message =
+            reason === 'no_speech'
+              ? 'No speech detected. Unmute and try again.'
+              : reason === 'speech_disabled'
+                ? 'Speech service is not configured on the worker.'
+                : 'Transcription failed. Check Colab / worker logs and try again.';
+          setSttDraft(null);
+          setVoiceError(message);
+          setVoiceStateRef.current('Muted');
+          continue;
+        }
         if (event.type === 'stt_draft' && typeof event.text === 'string') {
           setSttDraft(event.text);
+          setVoiceError(null);
           setVoiceStateRef.current('Reviewing');
           setMuted(true);
           continue;
@@ -252,6 +278,7 @@ export const VoiceRail: React.FC<Props> = ({
     state === 'Listening' ||
     state === 'Speaking' ||
     state === 'Processing' ||
+    state === 'Transcribing' ||
     state === 'Reviewing' ||
     state === 'Awaiting approval' ||
     state === 'Muted';
@@ -317,7 +344,8 @@ export const VoiceRail: React.FC<Props> = ({
     onContext?.(ctx);
     setVoiceError(null);
     setMuted(micMuted);
-    setState(micMuted ? 'Muted' : 'Listening');
+    const endingUtterance = micMuted && !muted && session.isReady();
+    setState(micMuted ? (endingUtterance ? 'Transcribing' : 'Muted') : 'Listening');
     onMuteToggle?.(micMuted);
     void session.applyMicMuted(micMuted, ctx).catch((err) => {
       const message = err instanceof Error ? err.message : 'Could not update mic';
@@ -377,6 +405,15 @@ export const VoiceRail: React.FC<Props> = ({
       </div>
 
       {connected && !muted ? <SpeechSegmentIndicator timer={speechTimer} visible /> : null}
+
+      {state === 'Transcribing' ? (
+        <section className="glass-panel flex items-center gap-2.5 rounded-xl px-3 py-3">
+          <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-cyan-400" aria-hidden />
+          <p className="text-xs leading-relaxed text-slate-300">
+            Transcribing your message…
+          </p>
+        </section>
+      ) : null}
 
       {state === 'Reviewing' && sttDraft !== null ? (
         <section className="glass-panel space-y-2 rounded-xl p-3">
