@@ -119,8 +119,11 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
             }
         )
     from app.agents.job_control_routing import normalize_job_control_decision
+    from app.agents.workflow_routing import normalize_post_scope_workflow_decision
 
-    return normalize_job_control_decision(decision, text)
+    decision = normalize_job_control_decision(decision, text)
+    scope_complete = bool((project.introduction or "").strip())
+    return normalize_post_scope_workflow_decision(decision, text, scope_complete=scope_complete)
 
 
 def conversation_worker(

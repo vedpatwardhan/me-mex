@@ -196,6 +196,22 @@ def resolve_job_records(
                 "resolved": "approval resolved",
             }.get(action, "approval resolved")
         state["jobs"] = jobs[-30:]
+        history: dict[str, dict[str, Any]] = dict(state.get("job_history") or {})
+        for job in jobs:
+            jid = str(job.get("job_id") or "")
+            job_approval_id = job.get("approval_id") or job.get("recommendation_id")
+            if jid not in ids and job_approval_id != approval_id:
+                continue
+            row = dict(history.get(jid) or {})
+            if not row and jid:
+                row = {"job_id": jid}
+            row["status"] = job["status"]
+            row["output_summary"] = str(job.get("progress") or row.get("output_summary") or "")[
+                :800
+            ]
+            if jid:
+                history[jid] = row
+        state["job_history"] = history
 
 
 def update_job_record_status(
@@ -402,8 +418,9 @@ def build_session_briefing(
         worker_snippet = str(ckpt.get("last_worker_result_snippet") or "")[:400]
 
     history_rows = list(reversed(list_job_history(thread_id)))[:15]
-    recent_jobs = [
-        {
+    recent_jobs: list[dict[str, str]] = []
+    for row in history_rows:
+        item = {
             key: str(row.get(key) or "")
             for key in (
                 "job_id",
@@ -416,8 +433,15 @@ def build_session_briefing(
             )
             if row.get(key) is not None
         }
-        for row in history_rows
-    ]
+        if (
+            complete
+            and item.get("worker") == "project_scope"
+            and item.get("status") == "awaiting_approval"
+            and pending_count == 0
+        ):
+            item["status"] = "done"
+            item["output_summary"] = item.get("output_summary") or "Project scope approved."
+        recent_jobs.append(item)
 
     briefing: SessionBriefing = {
         "project_scope_snippet": scope,

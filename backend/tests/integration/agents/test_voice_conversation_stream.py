@@ -291,6 +291,65 @@ def test_scope_completion_acknowledgement_stays_in_conversation(client, store, p
 
 
 @pytest.mark.voice_plane
+def test_post_scope_next_steps_ignores_supervisor_scope_review_reply(
+    client,
+    store,
+    project_scoped,
+    monkeypatch,
+):
+    """Supervisor often mis-replies 'review scope in dock'; Conversation must answer instead."""
+    base = get_chains()
+    conversation_called = []
+
+    def supervisor(_inputs):
+        return WorkerRoute(
+            worker="conversation",
+            intent="status",
+            dispatch=False,
+            reply="Explore the proposed scope in the dock before proceeding.",
+        )
+
+    def conversation(inp):
+        conversation_called.append(inp)
+        return (
+            "Scope is set. Next we build the graph from sources you share—papers, blogs, or articles. "
+            "Which link would you like to start with?"
+        )
+
+    set_chains_override(
+        replace(
+            base,
+            supervisor=RunnableLambda(supervisor),
+            conversation=RunnableLambda(conversation),
+            project_scope=RunnableLambda(
+                lambda _inputs: (_ for _ in ()).throw(AssertionError("scope"))
+            ),
+        )
+    )
+    response = client.post(
+        "/api/voice/conversation/stream",
+        json={
+            "text": "I'd like to proceed with the next steps, what's next.",
+            "thread_id": "voice-post-scope-next-fix",
+            "context_json": {
+                "voice_turn": True,
+                "active_project_id": project_scoped.id,
+                "project_id": project_scoped.id,
+                "custom_fields": {},
+            },
+        },
+    )
+    assert response.status_code == 200
+    end = next(chunk for chunk in iter_sse_data(response) if chunk.get("type") == "turn_end")
+    reply = str(end.get("reply") or "")
+    assert "proposed scope" not in reply.lower()
+    assert "explore" not in reply.lower() or "graph" in reply.lower()
+    assert "graph" in reply.lower() or "source" in reply.lower() or "link" in reply.lower()
+    assert conversation_called
+    assert conversation_called[0].get("project_scope")
+
+
+@pytest.mark.voice_plane
 def test_voice_job_control_cancels_selected_job_without_dispatching_new_work(
     client, project_scoped, tmpdir_checkpoint, monkeypatch
 ):

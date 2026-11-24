@@ -53,6 +53,7 @@ def _conversation_prompt_inputs(
         for key in (
             "project_scope_snippet",
             "scope_complete",
+            "voice_phase",
             "completed_worker_results",
             "active_jobs",
             "recent_jobs",
