@@ -141,6 +141,7 @@ def commit_turn_journal(
     *,
     user_text: str,
     assistant_text: str,
+    persisted_custom_fields: dict[str, Any] | None = None,
 ) -> None:
     with _checkpoint_lock:
         state = _checkpoint.load(thread_id) or {}
@@ -170,6 +171,8 @@ def commit_turn_journal(
                 {"role": "assistant", "text": entry["assistant_text"], "turn_id": turn_id}
             )
         state["transcript"] = transcript[-50:]
+        if persisted_custom_fields is not None:
+            state["persisted_custom_fields"] = persisted_custom_fields
         _checkpoint.save(thread_id, state)
     _pending_baselines.pop(turn_id, None)
     clear_abort(turn_id)

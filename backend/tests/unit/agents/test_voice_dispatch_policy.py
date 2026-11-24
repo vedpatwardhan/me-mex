@@ -196,7 +196,7 @@ def test_link_utterance_title_match_single_root():
     }
 
     resolved = normalize_link_decision(
-        decision,
+        decision.model_copy(update={"root_id": "root_dawn"}),
         context,
         utterance="Connect the dawn root node to the genesis node.",
     )

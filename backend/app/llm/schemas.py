@@ -37,6 +37,24 @@ ScopeRevisionMode = Literal["incremental", "replace"]
 JobAction = Literal["pause", "resume", "cancel", "delete"]
 
 
+class DispatchTask(BaseModel):
+    """One action to execute in a multi-action turn (Supervisor-populated)."""
+
+    worker: WorkerName
+    intent: WorkerIntent
+    dispatch: bool = True
+    reply: str | None = None
+    source_field: str | None = None
+    source_reference: str | None = None
+    source_error: str | None = None
+    title: str | None = None
+    content: str | None = None
+    target_id: str | None = None
+    job_action: JobAction | None = None
+    root_id: str | None = None
+    target_ids: list[str] | None = None
+
+
 class WorkerRoute(BaseModel):
     worker: WorkerName
     intent: WorkerIntent
@@ -51,6 +69,9 @@ class WorkerRoute(BaseModel):
     job_action: JobAction | None = None
     root_id: str | None = None
     target_ids: list[str] | None = None
+    dispatch_tasks: list[DispatchTask] = Field(default_factory=list)
+    fan_out_same_worker: bool = False
+    multi_action: bool = False
 
 
 class ProjectScopeResult(BaseModel):

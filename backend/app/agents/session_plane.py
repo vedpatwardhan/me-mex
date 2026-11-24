@@ -42,6 +42,39 @@ def append_transcript_turn(thread_id: str, *, role: str, text: str) -> None:
         state["transcript"] = transcript[-50:]
 
 
+def merge_persisted_custom_fields(
+    thread_id: str,
+    incoming: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge stored URL fields with incoming; persistence happens on turn commit."""
+    from app.agents.source_reference import _references_in
+
+    with _checkpoint_lock:
+        state = _checkpoint.load(thread_id) or {}
+    stored = dict(state.get("persisted_custom_fields") or {})
+    inc = dict(incoming or {})
+    merged = {**stored, **inc}
+    for name, value in inc.items():
+        if value is None or value == "":
+            merged.pop(name, None)
+    url_fields = {
+        name: value
+        for name, value in merged.items()
+        if name != "raw_text" and value is not None and _references_in(str(value))
+    }
+    return {**url_fields, **{k: v for k, v in inc.items() if k not in url_fields}}
+
+
+def persisted_url_fields_for_checkpoint(fields: dict[str, Any] | None) -> dict[str, Any]:
+    from app.agents.source_reference import _references_in
+
+    return {
+        name: value
+        for name, value in (fields or {}).items()
+        if name != "raw_text" and value is not None and _references_in(str(value))
+    }
+
+
 def build_routing_memory(thread_id: str) -> dict[str, Any]:
     """Return bounded recent dialogue and graph facts for Supervisor coreference."""
     with _checkpoint_lock:

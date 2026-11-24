@@ -95,35 +95,39 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
         decision.intent == "commit_gist" and not (decision.content or fields.get("gist"))
     )
     has_raw_source = bool(str(fields.get("raw_text") or "").strip())
-    if needs_source and not (decision.source_reference or decision.source_field or has_raw_source):
+    if (
+        needs_source
+        and not decision.dispatch_tasks
+        and not (decision.source_reference or decision.source_field or has_raw_source)
+    ):
         return decision.model_copy(
             update={
                 "source_error": "I couldn't identify which supplied source to use. Please select or resend its link."
             }
         )
 
-    source = resolve_source_reference(
-        text,
-        fields,
-        selected_reference=decision.source_reference,
-        selected_field=decision.source_field,
-    )
-    if source.error:
-        return decision.model_copy(update={"source_reference": None, "source_error": source.error})
-    if source.url:
-        return decision.model_copy(update={"source_reference": source.url})
-    if needs_source and not has_raw_source:
-        return decision.model_copy(
-            update={
-                "source_error": "The selected source field doesn't contain a readable link or arXiv ID."
-            }
+    if not decision.dispatch_tasks:
+        source = resolve_source_reference(
+            text,
+            fields,
+            selected_reference=decision.source_reference,
+            selected_field=decision.source_field,
         )
-    from app.agents.job_control_routing import normalize_job_control_decision
-    from app.agents.workflow_routing import normalize_post_scope_workflow_decision
-
-    decision = normalize_job_control_decision(decision, text)
-    scope_complete = bool((project.introduction or "").strip())
-    return normalize_post_scope_workflow_decision(decision, text, scope_complete=scope_complete)
+        if source.error:
+            return decision.model_copy(
+                update={"source_reference": None, "source_error": source.error}
+            )
+        if source.url:
+            return decision.model_copy(update={"source_reference": source.url})
+        if needs_source and not has_raw_source:
+            return decision.model_copy(
+                update={
+                    "source_error": (
+                        "The selected source field doesn't contain a readable link or arXiv ID."
+                    )
+                }
+            )
+    return decision
 
 
 def conversation_worker(

@@ -184,13 +184,37 @@ def test_multi_paper_mixed_workers_dispatches_three_jobs_despite_supervisor_pin(
         if job_runtime._jobs[job_id].get("thread_id") == thread_id:
             job_runtime._jobs.pop(job_id, None)
 
+    from app.llm.schemas import DispatchTask
+
     def supervisor(_inputs):
         return WorkerRoute(
-            worker="gist",
-            intent="source_summary",
-            dispatch=True,
-            source_field="paper1",
-            source_reference="https://arxiv.org/pdf/2605.11550",
+            worker="conversation",
+            intent="conversation",
+            dispatch=False,
+            multi_action=True,
+            dispatch_tasks=[
+                DispatchTask(
+                    worker="gist",
+                    intent="source_summary",
+                    dispatch=True,
+                    source_field="paper1",
+                    source_reference="https://arxiv.org/pdf/2605.11550",
+                ),
+                DispatchTask(
+                    worker="gist",
+                    intent="source_summary",
+                    dispatch=True,
+                    source_field="paper2",
+                    source_reference="https://arxiv.org/pdf/2610.20951",
+                ),
+                DispatchTask(
+                    worker="intradoc",
+                    intent="source_analysis",
+                    dispatch=True,
+                    source_field="paper3",
+                    source_reference="https://arxiv.org/pdf/2610.38568",
+                ),
+            ],
         )
 
     calls: list[str] = []
@@ -369,9 +393,9 @@ def test_post_scope_next_steps_ignores_supervisor_scope_review_reply(
     def supervisor(_inputs):
         return WorkerRoute(
             worker="conversation",
-            intent="status",
+            intent="conversation",
             dispatch=False,
-            reply="Explore the proposed scope in the dock before proceeding.",
+            reply=None,
         )
 
     def conversation(inp):
@@ -519,11 +543,10 @@ def test_voice_status_check_does_not_pause_misrouted_job_control(
             base,
             supervisor=RunnableLambda(
                 lambda _inputs: WorkerRoute(
-                    worker="job_control",
-                    intent="job_control",
-                    dispatch=True,
+                    worker="conversation",
+                    intent="status",
+                    dispatch=False,
                     target_id=job["job_id"],
-                    job_action="pause",
                 )
             ),
             conversation=RunnableLambda(conversation_must_not_pause),

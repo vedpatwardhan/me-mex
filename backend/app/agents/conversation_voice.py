@@ -9,12 +9,13 @@ from typing import Any
 
 from app.agents import job_runtime
 from app.agents.context_preprocessor import graph_candidates_for_supervisor
+from app.agents.dispatch_materializer import materialize_dispatches
 from app.agents.job_affinity import resolve_job_dispatch
-from app.agents.multi_source_dispatch import expand_source_dispatches
-from app.agents.multi_source_planner import plan_multi_source_tasks
 from app.agents.session_plane import (
     build_routing_memory,
     build_session_briefing,
+    merge_persisted_custom_fields,
+    persisted_url_fields_for_checkpoint,
     record_routing_source,
 )
 from app.agents.source_reference import resolve_source_reference
@@ -157,8 +158,13 @@ async def astream_conversation_voice(
         project_id=project_id,
         thread_id=thread_id,
     )
+    merged_fields = merge_persisted_custom_fields(
+        thread_id,
+        ctx_json.get("custom_fields") if isinstance(ctx_json.get("custom_fields"), dict) else {},
+    )
     routing_context = {
         **ctx_json,
+        "custom_fields": merged_fields,
         "graph_candidates": graph_candidates_for_supervisor(store, project_id),
         "routing_memory": build_routing_memory(thread_id),
         "session_state": {
@@ -184,40 +190,17 @@ async def astream_conversation_voice(
         context_json=routing_context,
     )
     worker_kind = decision.worker
-    if worker_kind == "job_control":
-        from app.agents.workers import job_control_worker
-
-        ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
-        control_context = {
-            **routing_context,
-            "supervisor_decision": decision.model_dump(),
-        }
-        result = job_control_worker(ctx, effective_text, control_context)
-        reply = str(result.get("reply") or "I couldn't apply that job action.")
-        for i in range(0, len(reply), 32):
-            yield {"type": "token", "content": reply[i : i + 32], "source": "conversation"}
-        commit_turn_journal(thread_id, turn_id, user_text=effective_text, assistant_text=reply)
-        yield {
-            "type": "turn_end",
-            "turn_id": turn_id,
-            "worker": "job_control",
-            "reply": reply,
-            "graph_write": False,
-            "dispatched": False,
-            "worker_kind": "job_control",
-            "details": result,
-            "jobs": [
-                job
-                for job in job_runtime.list_jobs(thread_id)
-                if job.get("status") in {"running", "paused", "awaiting_approval"}
-            ],
-        }
-        return
     if decision.source_error == "link_resolution":
         reply = str(decision.content or "Please clarify which ROOT and destination node to link.")
         for i in range(0, len(reply), 32):
             yield {"type": "token", "content": reply[i : i + 32], "source": "conversation"}
-        commit_turn_journal(thread_id, turn_id, user_text=effective_text, assistant_text=reply)
+        commit_turn_journal(
+            thread_id,
+            turn_id,
+            user_text=effective_text,
+            assistant_text=reply,
+            persisted_custom_fields=persisted_url_fields_for_checkpoint(merged_fields),
+        )
         yield {
             "type": "turn_end",
             "turn_id": turn_id,
@@ -241,21 +224,13 @@ async def astream_conversation_voice(
         scope_blocked=scope_blocked,
     )
     fields = routing_context.get("custom_fields") or {}
-    planned = plan_multi_source_tasks(
+    session_jobs = routing_context.get("session_state") or {}
+    expanded = materialize_dispatches(
         decision,
         effective_text=effective_text,
         custom_fields=fields,
+        session_jobs=session_jobs,
         dispatch_allowed=dispatch,
-    )
-    expanded = (
-        planned
-        if planned is not None
-        else expand_source_dispatches(
-            decision,
-            effective_text=effective_text,
-            custom_fields=fields,
-            dispatch_allowed=dispatch,
-        )
     )
     if expanded.clarification:
         reply = expanded.clarification
@@ -265,7 +240,13 @@ async def astream_conversation_voice(
             rollback_pending_turn(thread_id, turn_id)
             yield {"type": "turn_aborted", "turn_id": turn_id}
             return
-        commit_turn_journal(thread_id, turn_id, user_text=effective_text, assistant_text=reply)
+        commit_turn_journal(
+            thread_id,
+            turn_id,
+            user_text=effective_text,
+            assistant_text=reply,
+            persisted_custom_fields=persisted_url_fields_for_checkpoint(fields),
+        )
         yield {
             "type": "turn_end",
             "reply": reply,
@@ -279,12 +260,50 @@ async def astream_conversation_voice(
         return
 
     dispatch_decisions = expanded.decisions
-    multi_count = len(dispatch_decisions) if dispatch_decisions else 1
+    from app.agents.workers import job_control_worker
+
+    job_control_replies: list[str] = []
+    last_job_control: dict[str, Any] = {}
+    ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
+    for sub in dispatch_decisions:
+        if sub.worker != "job_control" and sub.intent != "job_control":
+            continue
+        result = job_control_worker(
+            ctx,
+            effective_text,
+            {
+                **routing_context,
+                "supervisor_decision": sub.model_dump(),
+            },
+        )
+        if result.get("reply"):
+            job_control_replies.append(str(result["reply"]))
+        if result.get("job_action"):
+            last_job_control = result
+
+    background_decisions = [
+        sub
+        for sub in dispatch_decisions
+        if sub.worker != "job_control"
+        and sub.intent != "job_control"
+        and not (sub.worker == "conversation" and sub.intent in {"status", "conversation"})
+        and needs_voice_dispatch(sub, voice_turn=voice, scope_blocked=scope_blocked)
+    ]
+    conversation_only = (
+        all(
+            sub.worker == "conversation"
+            and not needs_voice_dispatch(sub, voice_turn=voice, scope_blocked=scope_blocked)
+            for sub in dispatch_decisions
+        )
+        and not background_decisions
+    )
+
+    multi_count = len(background_decisions) if background_decisions else len(dispatch_decisions)
     plans: list[tuple[Any, Any, Any]] = []
     dispatch_pending = False
     already_running = False
 
-    for sub in dispatch_decisions:
+    for sub in background_decisions:
         sub_kind = sub.worker
         sub_dispatch = needs_voice_dispatch(sub, voice_turn=voice, scope_blocked=scope_blocked)
         if sub_dispatch and sub_kind in {"gist", "intradoc"}:
@@ -343,6 +362,12 @@ async def astream_conversation_voice(
             plans.append((sub, plan, fn))
 
     tokens: list[str] = []
+    if job_control_replies:
+        prefix = " ".join(job_control_replies)
+        for i in range(0, len(prefix), 32):
+            piece = prefix[i : i + 32]
+            tokens.append(piece)
+            yield {"type": "token", "content": piece, "source": "conversation"}
     if dispatch_pending:
         if multi_count > 1:
             reply_parts = (
@@ -350,16 +375,20 @@ async def astream_conversation_voice(
                 "Watch the dock queue for progress."
             )
         else:
+            primary_worker = background_decisions[0].worker if background_decisions else worker_kind
             reply_parts = _background_worker_acknowledgement(
-                worker_kind,
+                primary_worker,
                 already_running=already_running,
             )
+        if job_control_replies:
+            reply_parts = f"{' '.join(job_control_replies)} {reply_parts}"
         for i in range(0, len(reply_parts), 32):
             piece = reply_parts[i : i + 32]
-            tokens.append(piece)
-            yield {"type": "token", "content": piece, "source": "conversation"}
-    else:
-        if decision.reply:
+            if piece not in "".join(tokens):
+                tokens.append(piece)
+                yield {"type": "token", "content": piece, "source": "conversation"}
+    elif not job_control_replies:
+        if decision.reply and conversation_only:
             for i in range(0, len(decision.reply), 32):
                 piece = decision.reply[i : i + 32]
                 tokens.append(piece)
@@ -424,7 +453,13 @@ async def astream_conversation_voice(
                     thread_id,
                 )
 
-    commit_turn_journal(thread_id, turn_id, user_text=effective_text, assistant_text=reply)
+    commit_turn_journal(
+        thread_id,
+        turn_id,
+        user_text=effective_text,
+        assistant_text=reply,
+        persisted_custom_fields=persisted_url_fields_for_checkpoint(fields),
+    )
 
     jobs = [
         job
@@ -447,6 +482,10 @@ async def astream_conversation_voice(
     }
     if approval_id:
         details["approval_id"] = approval_id
+    if last_job_control.get("job_action"):
+        details["job_action"] = last_job_control["job_action"]
+        if last_job_control.get("job_status"):
+            details["job_status"] = last_job_control["job_status"]
 
     yield {
         "type": "turn_end",

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Any
 
 from app.errors import NotFoundError
@@ -65,28 +64,6 @@ def _swap_recover_root_id(
     return None
 
 
-def _utterance_matched_root_ids(
-    utterance: str | None,
-    candidates: dict[str, dict[str, Any]],
-) -> list[str]:
-    if not utterance:
-        return []
-    text = utterance.lower()
-    tokens = [token for token in re.findall(r"[a-z0-9]{3,}", text)]
-    if not tokens:
-        return []
-    matched: list[str] = []
-    for node_id, node in candidates.items():
-        if node.get("node_kind") != "ROOT":
-            continue
-        title = (node.get("title") or "").lower()
-        for token in tokens:
-            if token in title:
-                matched.append(node_id)
-                break
-    return list(dict.fromkeys(matched))
-
-
 def _resolve_link_root_id(
     decision: WorkerRoute,
     *,
@@ -120,10 +97,6 @@ def _resolve_link_root_id(
     swap_root = _swap_recover_root_id(decision, candidates)
     if swap_root:
         return swap_root
-
-    utterance_roots = _utterance_matched_root_ids(utterance, candidates)
-    if len(utterance_roots) == 1:
-        return utterance_roots[0]
 
     unrooted_current = bool(current_source and not current_source.get("root_id"))
     if not unrooted_current:
@@ -233,7 +206,6 @@ def normalize_link_decision(
     focus_root = memory.get("focus_root") or {}
     selected_ids = [str(node_id) for node_id in (context.get("selected_node_ids") or [])]
 
-    utterance_roots = _utterance_matched_root_ids(utterance, candidates)
     root_id = _resolve_link_root_id(
         decision,
         candidates=candidates,
@@ -254,7 +226,7 @@ def normalize_link_decision(
     if root_id:
         return decision.model_copy(update={"root_id": root_id, "target_ids": target_ids})
 
-    clarification = _link_clarification_message(candidates, current_source, utterance_roots)
+    clarification = _link_clarification_message(candidates, current_source, [])
     return decision.model_copy(
         update={
             "worker": "conversation",

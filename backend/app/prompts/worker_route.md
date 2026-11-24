@@ -22,6 +22,9 @@ Return one structured JSON decision with these fields:
 - `job_action`: `pause`, `resume`, `cancel`, or `delete` only for `intent=job_control`; otherwise null. For job control, set `target_id` to the matching `job_id` from `context.session_state.active_jobs`.
 - For `intent=link`, set `root_id` to the source ROOT id and `target_ids` to the explicitly requested target node id(s) from `context.graph_candidates`; leave them null for other intents. Never invent an id.
 - `source_error`: reserved for deterministic input validation; always return null.
+- `dispatch_tasks`: array of per-action tasks when the user requests **more than one** thing in a single turn (multiple sources, multiple dock jobs, mixed gist + intradoc + job_control, etc.). Each element uses the same fields as this route (`worker`, `intent`, `dispatch`, `source_field`, `source_reference`, `target_id`, `job_action`, `root_id`, `target_ids`, …). Resolve `target_id` to a real `job_id` from `context.session_state.active_jobs` or `recent_jobs` for job status or job_control tasks.
+- `fan_out_same_worker`: set true only when the user wants the **same** worker/intent on **every** URL custom field; leave top-level `source_field`/`source_reference` null.
+- `multi_action`: set true when the turn names multiple sources and/or multiple dock jobs.
 
 Routing rules:
 - Any request for a short summary, brief overview, main idea, or what a supplied source is about is `worker=gist`, `intent=source_summary`, `dispatch=true` even when the user does not say “gist”.
@@ -43,9 +46,11 @@ Routing rules:
 - Use `context.routing_memory.recent_turns` to resolve references such as “it”, “that paper”, or “the one we just approved”. Use `current_source` and `recent_graph_changes` for the paper most recently being processed. For “connect it with Genesis” when that source has a committed ROOT, return its ROOT in `root_id` and Genesis in `target_ids`. If the current source has no ROOT yet and the user did not name another ROOT, ask which ROOT to connect—do not assume they mean only the in-flight source.
 - Treat explicit `force_gist_commit` and `force_scope_commit` custom-field flags as authoritative commit requests when true.
 - Do not infer persistence from a source link, a summary request, or a user discussing possible scope wording.
-- Return **one** structured `WorkerRoute` per turn only. Never concatenate or append a second JSON object for another paper or worker.
-- When the user assigns **different workers per paper** through multiple custom-field URLs (for example gist on the first two and intradoc on the third), emit a **single** primary route with `dispatch=true` on the most obvious first task, or use `worker=conversation`, `dispatch=false`, `reply=null` if unsure. A downstream planner fans out per-paper jobs; do **not** collapse mixed gist+intradoc into one `source_field`.
-- For homogeneous multi-paper requests (gist or intradoc on all attached URLs), leave `source_field` and `source_reference` null when the utterance clearly covers every attached link so expansion can fan out.
+- Return **one** structured JSON object per turn. Put multiple actions in `dispatch_tasks`—never append a second JSON object.
+- Multiple custom-field URLs with different work per source: set `multi_action=true` and fill `dispatch_tasks` with one row per source (correct `source_field` + `worker`/`intent`).
+- Multiple dock operations in one turn (resume one job, delete another, status on a third): set `multi_action=true` and one `dispatch_tasks` row per operation (`job_control` + `job_action` + `target_id`, or `conversation` + `intent=status` + `target_id`).
+- Homogeneous “same worker on every attached URL”: either list one `dispatch_tasks` row per field, or set `fan_out_same_worker=true` with top-level `worker`/`intent` and null `source_field`.
+- If ambiguous which source or job: `dispatch_tasks=[]`, `worker=conversation`, `dispatch=false`, short `reply` asking which field or job_id.
 
 Project scope status is included in `context.project_scope_status` (`unset` or `committed`), and whether a draft approval exists is included in `context.scope_approval_pending`. `context.session_state.completed_worker_results` contains the only worker-produced evidence allowed in a conversation `reply`.
 The current project's candidate graph nodes are included in `context.graph_candidates` as `{{id, title, node_kind}}` records for link-target resolution.
