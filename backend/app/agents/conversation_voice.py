@@ -11,6 +11,7 @@ from app.agents import job_runtime
 from app.agents.context_preprocessor import graph_candidates_for_supervisor
 from app.agents.job_affinity import resolve_job_dispatch
 from app.agents.multi_source_dispatch import expand_source_dispatches
+from app.agents.multi_source_planner import plan_multi_source_tasks
 from app.agents.session_plane import (
     build_routing_memory,
     build_session_briefing,
@@ -240,11 +241,21 @@ async def astream_conversation_voice(
         scope_blocked=scope_blocked,
     )
     fields = routing_context.get("custom_fields") or {}
-    expanded = expand_source_dispatches(
+    planned = plan_multi_source_tasks(
         decision,
         effective_text=effective_text,
         custom_fields=fields,
         dispatch_allowed=dispatch,
+    )
+    expanded = (
+        planned
+        if planned is not None
+        else expand_source_dispatches(
+            decision,
+            effective_text=effective_text,
+            custom_fields=fields,
+            dispatch_allowed=dispatch,
+        )
     )
     if expanded.clarification:
         reply = expanded.clarification

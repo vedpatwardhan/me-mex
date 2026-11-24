@@ -172,6 +172,71 @@ def test_gist_for_another_source_leaves_running_intradoc_job_running(
 
 
 @pytest.mark.voice_plane
+def test_multi_paper_mixed_workers_dispatches_three_jobs_despite_supervisor_pin(
+    client, project_scoped, monkeypatch
+):
+    from app.agents import conversation_voice, job_runtime
+
+    base = get_chains()
+    thread_id = "voice-multi-paper-mixed"
+    job_runtime._by_thread.pop(thread_id, None)
+    for job_id in list(job_runtime._jobs):
+        if job_runtime._jobs[job_id].get("thread_id") == thread_id:
+            job_runtime._jobs.pop(job_id, None)
+
+    def supervisor(_inputs):
+        return WorkerRoute(
+            worker="gist",
+            intent="source_summary",
+            dispatch=True,
+            source_field="paper1",
+            source_reference="https://arxiv.org/pdf/2605.11550",
+        )
+
+    calls: list[str] = []
+
+    def worker_stub(worker: str):
+        def _run(_ctx, _text, _context):
+            calls.append(worker)
+            return {"reply": f"{worker} ready.", "graph_write": False}
+
+        return _run
+
+    monkeypatch.setattr(conversation_voice, "worker_handler", worker_stub)
+    set_chains_override(replace(base, supervisor=RunnableLambda(supervisor)))
+    text = (
+        "I have just attached a link to three different papers. "
+        "I need a high level summary of the first two papers and I need a "
+        "detailed understanding of the third paper."
+    )
+    response = client.post(
+        "/api/voice/conversation/stream",
+        json={
+            "text": text,
+            "thread_id": thread_id,
+            "context_json": {
+                "voice_turn": True,
+                "active_project_id": project_scoped.id,
+                "custom_fields": {
+                    "paper1": "https://arxiv.org/pdf/2605.11550",
+                    "paper2": "https://arxiv.org/pdf/2610.20951",
+                    "paper3": "https://arxiv.org/pdf/2610.38568",
+                },
+            },
+        },
+    )
+    chunks = list(iter_sse_data(response))
+    end = next(chunk for chunk in chunks if chunk.get("type") == "turn_end")
+    jobs = [chunk.get("job") for chunk in chunks if chunk.get("type") == "custom"]
+    assert response.status_code == 200
+    assert end["dispatched"] is True
+    assert len(end["job_ids"]) == 3
+    assert sorted(calls) == ["gist", "gist", "intradoc"]
+    assert len(jobs) == 3
+    assert "3 background jobs" in (end.get("reply") or "")
+
+
+@pytest.mark.voice_plane
 def test_malformed_supervisor_output_falls_back_to_spoken_conversation(client, project_scoped):
     from app.agents import job_runtime
 
