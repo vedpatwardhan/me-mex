@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import type { DockTurn, JobHistoryRow } from '../utils/dockStreamReducer';
 import {
@@ -75,6 +75,9 @@ const ITEM_STYLES: Record<
   },
 };
 
+const TURN_THREAD_VISIBLE_DEFAULT = 2;
+const TURN_THREAD_LOAD_STEP = 2;
+
 export const RecommendationsDock: React.FC<Props> = ({
   latestReply = '',
   latestUserText = '',
@@ -93,6 +96,60 @@ export const RecommendationsDock: React.FC<Props> = ({
   onDeleteJob,
 }) => {
   const [reviewId, setReviewId] = useState<string | null>(null);
+  const [visibleTurnCount, setVisibleTurnCount] = useState(TURN_THREAD_VISIBLE_DEFAULT);
+  const turnThreadScrollRef = useRef<HTMLDivElement>(null);
+  const turnScrollPreserveRef = useRef<number | null>(null);
+  const prevTurnCountRef = useRef(0);
+
+  const allTurns = useMemo((): DockTurn[] => {
+    if (turns.length) return turns;
+    if (latestUserText) {
+      return [{ turnId: 'latest', userText: latestUserText, assistantText: latestReply }];
+    }
+    return [];
+  }, [turns, latestUserText, latestReply]);
+
+  const visibleTurns = useMemo(() => {
+    if (allTurns.length <= visibleTurnCount) return allTurns;
+    return allTurns.slice(-visibleTurnCount);
+  }, [allTurns, visibleTurnCount]);
+
+  const hiddenTurnCount = Math.max(0, allTurns.length - visibleTurns.length);
+
+  const lastTurn = allTurns[allTurns.length - 1];
+  const lastTurnUserText = lastTurn?.userText ?? '';
+  const lastTurnAssistantText = lastTurn?.assistantText ?? '';
+
+  useEffect(() => {
+    if (allTurns.length > prevTurnCountRef.current) {
+      setVisibleTurnCount(TURN_THREAD_VISIBLE_DEFAULT);
+    } else if (allTurns.length < prevTurnCountRef.current) {
+      setVisibleTurnCount((c) =>
+        Math.min(Math.max(c, TURN_THREAD_VISIBLE_DEFAULT), allTurns.length || TURN_THREAD_VISIBLE_DEFAULT),
+      );
+    }
+    prevTurnCountRef.current = allTurns.length;
+  }, [allTurns.length]);
+
+  useLayoutEffect(() => {
+    const el = turnThreadScrollRef.current;
+    if (!el) return;
+    if (turnScrollPreserveRef.current !== null) {
+      const before = turnScrollPreserveRef.current;
+      turnScrollPreserveRef.current = null;
+      el.scrollTop += el.scrollHeight - before;
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
+  }, [allTurns.length, lastTurnUserText, lastTurnAssistantText, visibleTurnCount]);
+
+  const loadOlderTurns = () => {
+    const el = turnThreadScrollRef.current;
+    turnScrollPreserveRef.current = el?.scrollHeight ?? null;
+    setVisibleTurnCount((c) =>
+      Math.min(allTurns.length, c + TURN_THREAD_LOAD_STEP),
+    );
+  };
 
   return (
     <aside className="flex w-[22rem] shrink-0 flex-col border-l border-white/10 bg-[#0c1018]/95 overflow-hidden">
@@ -259,8 +316,21 @@ export const RecommendationsDock: React.FC<Props> = ({
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
             Turn thread ({turns.length || (latestUserText ? 1 : 0)})
           </h3>
-          <ul className="space-y-3 max-h-64 overflow-y-auto">
-            {(turns.length ? turns : latestUserText ? [{ turnId: 'latest', userText: latestUserText, assistantText: latestReply }] : []).map(
+          <div
+            ref={turnThreadScrollRef}
+            className="max-h-64 space-y-2 overflow-y-auto"
+          >
+            {hiddenTurnCount > 0 ? (
+              <button
+                type="button"
+                className="sticky top-0 z-10 w-full rounded-lg border border-slate-600/60 bg-slate-900/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-sky-500/40 hover:text-sky-200"
+                onClick={loadOlderTurns}
+              >
+                Load previous turns ({hiddenTurnCount} older)
+              </button>
+            ) : null}
+            <ul className="space-y-3">
+            {visibleTurns.map(
               (turn) => (
                 <li key={turn.turnId} className="space-y-1.5 pb-2 border-b border-white/5 last:border-0">
                   <span className="text-[10px] text-slate-500 flex items-center gap-1">
@@ -303,10 +373,11 @@ export const RecommendationsDock: React.FC<Props> = ({
                 </li>
               ),
             )}
-            {!turns.length && !latestUserText ? (
+            {!allTurns.length ? (
               <li className="text-xs text-slate-500">No turns yet.</li>
             ) : null}
-          </ul>
+            </ul>
+          </div>
         </section>
 
         <section className="space-y-2">
