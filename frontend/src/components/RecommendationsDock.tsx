@@ -335,7 +335,7 @@ export const RecommendationsDock: React.FC<Props> = ({
           </h3>
           <div
             ref={turnThreadScrollRef}
-            className="max-h-64 space-y-2 overflow-y-auto"
+            className="max-h-64 space-y-2 overflow-y-auto pr-2.5"
           >
             {hiddenTurnCount > 0 && turnThreadAtTop ? (
               <button
