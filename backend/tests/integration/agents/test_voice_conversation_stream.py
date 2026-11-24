@@ -362,6 +362,74 @@ def test_voice_job_control_cancels_selected_job_without_dispatching_new_work(
 
 
 @pytest.mark.voice_plane
+def test_voice_status_check_does_not_pause_misrouted_job_control(
+    client, project_scoped, tmpdir_checkpoint, monkeypatch
+):
+    from app.agents import job_runtime, session_plane
+    from app.services.checkpoints import JsonCheckpointStore
+
+    monkeypatch.setattr(session_plane, "_checkpoint", JsonCheckpointStore(str(tmpdir_checkpoint)))
+    base = get_chains()
+    thread_id = "voice-status-not-pause"
+    job = {
+        "job_id": "job-third-gist",
+        "worker": "gist",
+        "kind": "gist",
+        "status": "running",
+        "label": "Third paper gist",
+        "thread_id": thread_id,
+        "project_id": project_scoped.id,
+        "affinity_key": "gist:third",
+    }
+    job_runtime._jobs[job["job_id"]] = job
+    job_runtime._by_thread[thread_id] = [job["job_id"]]
+    job_runtime._cancel_events[job["job_id"]] = threading.Event()
+    job_runtime._resume_events[job["job_id"]] = threading.Event()
+    job_runtime._resume_events[job["job_id"]].set()
+
+    def conversation_must_not_pause(_inputs):
+        return "The gist job is still running."
+
+    set_chains_override(
+        replace(
+            base,
+            supervisor=RunnableLambda(
+                lambda _inputs: WorkerRoute(
+                    worker="job_control",
+                    intent="job_control",
+                    dispatch=True,
+                    target_id=job["job_id"],
+                    job_action="pause",
+                )
+            ),
+            conversation=RunnableLambda(conversation_must_not_pause),
+        )
+    )
+
+    response = client.post(
+        "/api/voice/conversation/stream",
+        json={
+            "text": (
+                "What is the status of the job for the third paper gist? Just a status check."
+            ),
+            "thread_id": thread_id,
+            "context_json": {
+                "voice_turn": True,
+                "active_project_id": project_scoped.id,
+                "project_id": project_scoped.id,
+                "custom_fields": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    end = next(chunk for chunk in iter_sse_data(response) if chunk.get("type") == "turn_end")
+    assert end.get("worker_kind") != "job_control"
+    assert job_runtime.get_job(job["job_id"])["status"] == "running"
+    assert "pause" not in (end.get("reply") or "").lower()
+
+
+@pytest.mark.voice_plane
 def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
     client, store, project_scoped, tmpdir_checkpoint, monkeypatch
 ):

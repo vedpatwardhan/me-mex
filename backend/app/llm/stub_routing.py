@@ -92,8 +92,38 @@ def keyword_route(text: str, context: dict, project: Project) -> WorkerRoute:
         return WorkerRoute(worker="reorg", intent="reorg", dispatch=True)
     if "what relates" in t or "retrieval" in t or "highlight" in t:
         return WorkerRoute(worker="retrieval", intent="retrieval", dispatch=True)
-    if any(word in t for word in ("status", "progress", "queue")):
+    if any(phrase in t for phrase in ("pause", "resume", "abort", "delete job", "remove job")):
+        jobs = (context.get("session_state") or {}).get("active_jobs") or []
+        job_id = str(jobs[0]["job_id"]) if len(jobs) == 1 else None
+        if "pause" in t or "hold" in t or "suspend" in t:
+            action = "pause"
+        elif "resume" in t or "unpause" in t:
+            action = "resume"
+        elif "delete" in t or "remove" in t:
+            action = "delete"
+        else:
+            action = "cancel"
+        return WorkerRoute(
+            worker="job_control",
+            intent="job_control",
+            dispatch=True,
+            target_id=job_id,
+            job_action=action,
+        )
+    if "cancel" in t and "status" not in t:
+        jobs = (context.get("session_state") or {}).get("active_jobs") or []
+        job_id = str(jobs[0]["job_id"]) if len(jobs) == 1 else None
+        return WorkerRoute(
+            worker="job_control",
+            intent="job_control",
+            dispatch=True,
+            target_id=job_id,
+            job_action="cancel",
+        )
+    if any(word in t for word in ("status", "progress", "status check", "still running")):
         return WorkerRoute(worker="conversation", intent="status", dispatch=False)
+    if "approve" in t or "dismiss" in t:
+        return WorkerRoute(worker="conversation", intent="conversation", dispatch=False)
     if "save scope" in t or "update_project_scope" in t:
         return WorkerRoute(
             worker="project_scope",

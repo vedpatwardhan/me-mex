@@ -118,7 +118,9 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
                 "source_error": "The selected source field doesn't contain a readable link or arXiv ID."
             }
         )
-    return decision
+    from app.agents.job_control_routing import normalize_job_control_decision
+
+    return normalize_job_control_decision(decision, text)
 
 
 def conversation_worker(
