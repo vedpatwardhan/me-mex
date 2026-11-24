@@ -2,16 +2,36 @@ import type { DockItem } from '../components/RecommendationsDock';
 import { formatApprovalReview } from './approvalPreview';
 import { dedupeApprovalJobs, sortQueueItems } from './dockQueueSort';
 
+export type DockTurn = {
+  turnId: string;
+  userText: string;
+  assistantText: string;
+};
+
+export type JobHistoryRow = {
+  job_id: string;
+  worker?: string;
+  status?: string;
+  label?: string;
+  source_url?: string;
+  output_summary?: string;
+  updated_at?: number;
+};
+
 export type DockStreamState = {
   latestReply: string;
   latestUserText: string;
   items: DockItem[];
+  turns: DockTurn[];
+  jobHistory: JobHistoryRow[];
 };
 
 export const emptyDockStreamState = (): DockStreamState => ({
   latestReply: '',
   latestUserText: '',
   items: [],
+  turns: [],
+  jobHistory: [],
 });
 
 export function flattenDockEvents(ev: Record<string, unknown>): Record<string, unknown>[] {
@@ -174,9 +194,45 @@ export function applyStreamEvent(
   if (type === 'worker_progress') {
     return state;
   }
+  if (type === 'turn_reverted') {
+    const removed = (ev.removed_turn_ids as string[]) || [];
+    const turnId = ev.turn_id as string | undefined;
+    const cutId = turnId || removed[0];
+    let turns = state.turns;
+    if (cutId) {
+      const idx = turns.findIndex((t) => t.turnId === cutId);
+      turns = idx >= 0 ? turns.slice(0, idx) : turns;
+    }
+    const last = turns[turns.length - 1];
+    return {
+      ...state,
+      turns,
+      latestUserText: last?.userText || '',
+      latestReply: last?.assistantText || '',
+    };
+  }
   if (type === 'turn_end') {
     let next = { ...state };
     const reply = ev.reply as string | undefined;
+    const turnId = String(ev.turn_id || '');
+    if (turnId) {
+      const turns = [...state.turns];
+      const idx = turns.findIndex((t) => t.turnId === turnId);
+      const userText = state.latestUserText;
+      if (idx >= 0) {
+        turns[idx] = {
+          ...turns[idx],
+          assistantText: reply || turns[idx].assistantText,
+        };
+      } else {
+        turns.push({
+          turnId,
+          userText,
+          assistantText: reply || '',
+        });
+      }
+      next = { ...next, turns };
+    }
     if (reply) next = { ...next, latestReply: reply };
     let items = next.items;
     for (const job of (ev.jobs as Record<string, unknown>[]) || []) {
@@ -203,7 +259,15 @@ export function applyStreamEvent(
     return { ...next, items };
   }
   if (type === 'turn_start' && typeof ev.text === 'string') {
-    return resetTurnState(state, ev.text);
+    const turnId = String(ev.turn_id || `local_${Date.now()}`);
+    const turns = [
+      ...state.turns.filter((t) => t.turnId !== turnId),
+      { turnId, userText: ev.text, assistantText: '' },
+    ].slice(-20);
+    return {
+      ...resetTurnState(state, ev.text),
+      turns,
+    };
   }
   if (type === 'dock_events' && Array.isArray(ev.events)) {
     return (ev.events as Record<string, unknown>[]).reduce<DockStreamState>(

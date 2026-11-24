@@ -15,9 +15,16 @@ from app.agents.graph import (
     run_agent_turn,
 )
 from app.agents.session_events import format_sse, subscribe_session_events
-from app.agents.session_plane import build_session_briefing
+from app.agents.session_plane import build_session_briefing, list_job_history
+from app.agents.turn_journal import list_turn_journal, register_abort, revert_turn
 from app.db import ToolContext, get_store
-from app.models import AgentResumeRequest, AgentTurnRequest, NodeKind
+from app.models import (
+    AgentResumeRequest,
+    AgentTurnRequest,
+    NodeKind,
+    TurnAbortRequest,
+    TurnRevertRequest,
+)
 from app.services.checkpoints import JsonCheckpointStore
 from app.tools import dock as dock_tools
 from app.tools import reorg as reorg_tools
@@ -292,6 +299,37 @@ def agent_resume(body: AgentResumeRequest):
         )
     except Exception as e:
         raise HTTPException(400, str(e)) from e
+
+
+@router.post("/voice/conversation/abort")
+def voice_conversation_abort(body: TurnAbortRequest):
+    register_abort(body.turn_id)
+    return {"status": "aborted", "turn_id": body.turn_id}
+
+
+@router.post("/agent/turn/revert")
+def agent_turn_revert(body: TurnRevertRequest):
+    store = get_store()
+    try:
+        return revert_turn(
+            thread_id=body.thread_id,
+            turn_id=body.turn_id,
+            store=store,
+            project_id=body.project_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/agent/jobs/history")
+def agent_jobs_history(thread_id: str = Query(..., min_length=1)):
+    items = list_job_history(thread_id)
+    return {"items": list(reversed(items))}
+
+
+@router.get("/agent/turns")
+def agent_turns(thread_id: str = Query(..., min_length=1)):
+    return {"items": list_turn_journal(thread_id)}
 
 
 @router.delete("/graph/nodes/{node_id}")

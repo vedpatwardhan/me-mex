@@ -54,11 +54,20 @@ def _use_voice_conversation_stream(context_json: dict[str, Any]) -> bool:
     return str(context_json.get("voice_turn", "")).lower() in ("1", "true", "yes")
 
 
+async def post_abort_turn(*, turn_id: str, thread_id: str) -> None:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        await client.post(
+            f"{BACKEND_URL}/api/voice/conversation/abort",
+            json={"turn_id": turn_id, "thread_id": thread_id},
+        )
+
+
 async def stream_turn(
     *,
     text: str,
     thread_id: str,
     context_json: dict[str, Any],
+    cancel_check: Callable[[], bool] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     path = (
         "/api/voice/conversation/stream"
@@ -78,6 +87,9 @@ async def stream_turn(
     ):
         response.raise_for_status()
         async for line in response.aiter_lines():
+            if cancel_check and cancel_check():
+                await response.aclose()
+                break
             if not line.startswith("data: "):
                 continue
             yield json.loads(line[6:])
@@ -110,12 +122,20 @@ async def run_turn_with_reply(
     thread_id: str,
     context_json: dict[str, Any],
     on_chunk: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
     """Consume SSE; return (reply_text, stream_events, turn_end)."""
     tokens: list[str] = []
     events: list[dict[str, Any]] = []
     turn_end: dict[str, Any] = {}
-    async for chunk in stream_turn(text=text, thread_id=thread_id, context_json=context_json):
+    async for chunk in stream_turn(
+        text=text,
+        thread_id=thread_id,
+        context_json=context_json,
+        cancel_check=cancel_check,
+    ):
+        if cancel_check and cancel_check():
+            break
         events.append(chunk)
         if on_chunk is not None:
             await on_chunk(chunk)

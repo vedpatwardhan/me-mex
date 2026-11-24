@@ -256,6 +256,10 @@ def _finish_job(job_id: str, output: dict[str, Any], *, project_id: str | None =
             job_snapshot.get("thread_id"),
             pid or job_snapshot.get("project_id"),
         )
+        if tid:
+            from app.agents.session_plane import upsert_job_history
+
+            upsert_job_history(tid, job_snapshot)
 
     if job_snapshot and pid and tid:
         from app.agents.session_plane import observer_ingest_job
@@ -317,6 +321,9 @@ def dispatch_background_worker(
     else:
         job_id = new_job_id()
         record = _new_job_record(job_id, worker_kind, thread_id, pid, text, affinity_key)
+        parent_turn = dispatch_ctx.get("turn_id")
+        if parent_turn:
+            record["parent_turn_id"] = parent_turn
         with _registry_lock:
             _jobs[job_id] = record
             _by_thread.setdefault(thread_id, []).append(job_id)
@@ -397,6 +404,9 @@ def dispatch_background_worker(
         thread_id,
         pid,
     )
+    from app.agents.session_plane import upsert_job_history
+
+    upsert_job_history(thread_id, dict(record))
     threading.Thread(target=_run, daemon=True).start()
     return dict(record)
 

@@ -352,7 +352,19 @@ def resume_approval(
         root_id = payload["root_id"]
         targets = [c[0] for c in payload.get("candidates", [])[:2]]
         append_hitl_label_trace(ctx, item, chosen_ids=targets)
-        link.create_root_insight_edges(ctx, root_id=root_id, target_ids=targets)
+        edge_result = link.create_root_insight_edges(ctx, root_id=root_id, target_ids=targets)
+        turn_id = (context_json or {}).get("turn_id")
+        if turn_id:
+            from app.agents.turn_journal import append_turn_effect
+
+            eids = edge_result.get("edge_ids") or []
+            append_turn_effect(
+                thread_id,
+                turn_id=str(turn_id),
+                kind="placement_edges",
+                forward={"root_id": root_id, "edge_ids": eids},
+                inverse={"edge_ids": eids},
+            )
         return _resolved({"status": "approved", "edges": targets})
     if item.approval_type == "intra_doc_staging":
         staging_key = payload.get("staging_key")
@@ -409,10 +421,33 @@ def resume_approval(
         source_uri = payload.get("source_uri")
         if created.get("root_id") and source_uri:
             gist.attach_source_uri(ctx, root_id=created["root_id"], uri=str(source_uri))
+        turn_id = (context_json or {}).get("turn_id")
+        if turn_id and created.get("root_id"):
+            from app.agents.turn_journal import append_turn_effect
+
+            append_turn_effect(
+                thread_id,
+                turn_id=str(turn_id),
+                kind="gist_root",
+                forward={"root_id": created["root_id"]},
+                inverse={"root_id": created["root_id"]},
+            )
         return _resolved({"status": "approved", "approval_id": approval_id, "result": created})
     if item.approval_type == "project_scope":
         intro = payload.get("proposed_introduction") or payload.get("introduction") or ""
+        prev_intro = (store.get_project(project_id).introduction or "") if store else ""
+        turn_id = (context_json or {}).get("turn_id")
         project.update_project_scope(ctx, introduction=str(intro))
+        if turn_id:
+            from app.agents.turn_journal import append_turn_effect
+
+            append_turn_effect(
+                thread_id,
+                turn_id=str(turn_id),
+                kind="project_scope",
+                forward={"introduction": str(intro)},
+                inverse={"previous_introduction": prev_intro},
+            )
         job_runtime.resolve_approval_job(thread_id, approval_id, action)
         return {
             "status": "approved",

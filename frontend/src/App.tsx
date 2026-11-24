@@ -55,10 +55,13 @@ export const App: React.FC = () => {
         <RecommendationsDock
           latestReply={dock.latestReply}
           latestUserText={dock.latestUserText}
+          turns={dock.turns}
+          jobHistory={dock.jobHistory}
           items={dock.items}
           pendingApprovals={dock.pendingApprovals}
           pendingJobActions={dock.pendingJobActions}
           projectScope={dock.projectScope || projectScope}
+          onRevertTurn={(id) => void dock.revertUserTurn(id)}
           onApprove={(id) => void dock.approve(id, contextJson)}
           onDismiss={(id) => void dock.dismiss(id, contextJson)}
           onPauseJob={(id) => void dock.pauseJob(id)}

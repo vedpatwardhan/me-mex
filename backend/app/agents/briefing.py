@@ -25,6 +25,7 @@ class SessionBriefing(TypedDict, total=False):
     scope_complete: bool
     voice_phase: str
     active_jobs: list[ActiveJobBrief]
+    recent_jobs: list[dict[str, str]]
     active_job_affinity: list[str]
     last_route: str
     pending_approval_count: int

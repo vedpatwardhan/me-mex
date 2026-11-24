@@ -159,3 +159,14 @@ class AgentResumeRequest(BaseModel):
     approval_id: str
     action: Literal["approve", "dismiss"]
     context_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class TurnAbortRequest(BaseModel):
+    thread_id: str
+    turn_id: str
+
+
+class TurnRevertRequest(BaseModel):
+    thread_id: str
+    turn_id: str
+    project_id: str

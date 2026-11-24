@@ -142,6 +142,10 @@ Use a **fresh project** name like `Demo — <your topic>` so the graph stays eas
 | B4 | Confirm when agent summarizes scope | Scope **proposal** stays in dock until you **Approve**; Mongo/Genesis update only after approve (chit-chat does not auto-save scope) | |
 | B5 | **Mute mic** while assistant finishes / TTS plays | Session **stays** connected (`mic off (session active)`); hear TTS without re-connecting | |
 
+- **Multi-source voice:** two arXiv URLs in custom fields + “gist both” should enqueue **two** gist jobs in one turn.
+- **STT review:** after mute, edit draft in the voice rail before Send (unless `VOICE_AUTO_SEND_TURNS=1`).
+- **Revert:** each user bubble in the dock turn thread can roll back that turn and later ones; job history lists all runs.
+
 **Logs:** `voice_worker.log` → `STT utterance`, `voice_turn reply_len=…` (no `voice_turn failed`); on **long replies** expect several `TTS playback start` lines per turn when `VOICE_TTS_PIPELINED=true` (first sentence may play before `turn_end`); `backend.log` → `POST /api/voice/conversation/stream` with streaming conversation tokens and optional `dispatch job_id=…` (including `project_scope` jobs on P1); proactive TTS mainly on `awaiting_approval` dock nudges (not “Finished {STT label}” on scope) — no trailing ASGI `ERROR`.
 
 **Workflow:** [06 P1](./06-workflows.md#p1--first-voice-project-scope-before-research)

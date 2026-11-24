@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import os
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -26,7 +27,12 @@ from voice_agent.audio_util import float32_to_pcm16, frame_to_mono_floats
 from voice_agent.speech_colab import speech_enabled, synthesize_wav, transcribe_wav
 from voice_agent.speech_text import speech_friendly
 from voice_agent.tts_pipeline import TtsPipeline, pipelined_tts_enabled
-from voice_agent.turn_bridge import post_resume, run_turn_with_reply, stream_session_events
+from voice_agent.turn_bridge import (
+    post_abort_turn,
+    post_resume,
+    run_turn_with_reply,
+    stream_session_events,
+)
 from voice_agent.vad_silero import PushToTalkBuffer, load_silero_vad, voice_vad_mode
 
 _log = logging.getLogger(__name__)
@@ -34,6 +40,7 @@ logging.basicConfig(level=logging.INFO)
 
 MIN_UTTERANCE_MS = int(os.getenv("VOICE_MIN_UTTERANCE_MS", "400"))
 MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "60000"))
+VOICE_AUTO_SEND_TURNS = os.getenv("VOICE_AUTO_SEND_TURNS", "").lower() in ("1", "true", "yes")
 
 
 @dataclass
@@ -49,6 +56,7 @@ class RoomSession:
     audio_consumer_started: bool = False
     peak_rms: float = 0.0
     ptt_buffer: PushToTalkBuffer | None = None
+    current_turn_id: str = ""
     stt_semaphore: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
     vad: Any = None
     proactive_spoken: set[str] = field(default_factory=set)
@@ -172,9 +180,12 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
         return
     if not _should_run_turn(session, text):
         return
+    turn_id = f"turn_{uuid.uuid4().hex[:12]}"
+    session.current_turn_id = turn_id
     context = dict(session.context_json)
     context.setdefault("muted", session.muted)
     context["voice_turn"] = True
+    context["turn_id"] = turn_id
     project_id = context.get("active_project_id") or context.get("project_id")
     if not project_id:
         _log.warning("No active_project_id in context_json; skipping turn")
@@ -182,7 +193,9 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
     session.cancel_tts.set()
     session.cancel_turn.clear()
     await room.local_participant.publish_data(
-        json.dumps({"type": "turn_start", "text": text.strip()[:8000]}).encode(),
+        json.dumps(
+            {"type": "turn_start", "text": text.strip()[:8000], "turn_id": turn_id}
+        ).encode(),
         reliable=True,
     )
     _ensure_session_events_listener(room, session)
@@ -215,11 +228,23 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
                 thread_id=session.thread_id,
                 context_json=context,
                 on_chunk=on_chunk,
+                cancel_check=session.cancel_turn.is_set,
             )
         except httpx.HTTPError:
             _log.exception("voice_turn failed thread_id=%s", session.thread_id)
             if tts_pipeline:
                 await tts_pipeline.cancel()
+            return
+        if session.cancel_turn.is_set():
+            try:
+                await post_abort_turn(turn_id=turn_id, thread_id=session.thread_id)
+            except httpx.HTTPError:
+                _log.exception("abort turn failed")
+            await room.local_participant.publish_data(
+                json.dumps({"type": "turn_aborted", "turn_id": turn_id}).encode(),
+                reliable=True,
+            )
+            session.current_turn_id = ""
             return
         if turn_end:
             await _publish_dock_event(room, turn_end)
@@ -388,8 +413,15 @@ def _schedule_stt_pipeline(
                     len(wav),
                     text[:120],
                 )
-                if text:
+                if not text:
+                    return
+                if VOICE_AUTO_SEND_TURNS:
                     _schedule_voice_turn(room, session, text)
+                else:
+                    await room.local_participant.publish_data(
+                        json.dumps({"type": "stt_draft", "text": text[:8000]}).encode(),
+                        reliable=True,
+                    )
             except httpx.HTTPError:
                 _log.exception("STT failed")
 
@@ -461,6 +493,16 @@ async def _handle_data(payload: bytes, room: rtc.Room, session: RoomSession) -> 
         return
     if mtype == "agent_turn":
         _schedule_voice_turn(room, session, msg.get("text", ""))
+        return
+    if mtype == "cancel_turn":
+        session.cancel_tts.set()
+        session.cancel_turn.set()
+        tid = str(msg.get("turn_id") or session.current_turn_id)
+        if tid:
+            try:
+                await post_abort_turn(turn_id=tid, thread_id=session.thread_id)
+            except httpx.HTTPError:
+                _log.exception("cancel_turn abort failed")
         return
     if mtype == "speech_wav":
         raw = base64.b64decode(msg.get("data") or "")

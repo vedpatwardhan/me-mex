@@ -10,13 +10,22 @@ from typing import Any
 from app.agents import job_runtime
 from app.agents.context_preprocessor import graph_candidates_for_supervisor
 from app.agents.job_affinity import resolve_job_dispatch
+from app.agents.multi_source_dispatch import expand_source_dispatches
 from app.agents.session_plane import (
-    append_transcript_turn,
     build_routing_memory,
     build_session_briefing,
     record_routing_source,
 )
 from app.agents.source_reference import resolve_source_reference
+from app.agents.turn_journal import (
+    append_turn_effect,
+    begin_turn_journal,
+    commit_turn_journal,
+    is_aborted,
+    new_turn_id,
+    rollback_pending_turn,
+    set_pending_user_text,
+)
 from app.agents.voice_dispatch import (
     is_voice_turn,
     needs_voice_dispatch,
@@ -46,6 +55,7 @@ def _conversation_prompt_inputs(
             "scope_complete",
             "completed_worker_results",
             "active_jobs",
+            "recent_jobs",
             "pending_approval_count",
             "scope_proposal_preview",
         )
@@ -128,6 +138,10 @@ async def astream_conversation_voice(
 ) -> AsyncIterator[dict[str, Any]]:
     ctx_json = dict(context_json or {})
     voice = is_voice_turn(ctx_json)
+    turn_id = str(ctx_json.get("turn_id") or new_turn_id())
+    begin_turn_journal(thread_id, turn_id)
+    set_pending_user_text(thread_id, turn_id, text)
+    yield {"type": "turn_meta", "turn_id": turn_id, "text": (text or "")[:8000]}
     _log.info(
         "conversation_stream thread_id=%s project_id=%s voice_turn=%s text_len=%d",
         thread_id,
@@ -156,6 +170,7 @@ async def astream_conversation_voice(
             ],
             "pending_approval_count": briefing.get("pending_approval_count") or 0,
             "completed_worker_results": briefing.get("completed_worker_results") or [],
+            "recent_jobs": briefing.get("recent_jobs") or [],
         },
     }
 
@@ -177,12 +192,12 @@ async def astream_conversation_voice(
         }
         result = job_control_worker(ctx, effective_text, control_context)
         reply = str(result.get("reply") or "I couldn't apply that job action.")
-        append_transcript_turn(thread_id, role="user", text=effective_text)
-        append_transcript_turn(thread_id, role="assistant", text=reply)
         for i in range(0, len(reply), 32):
             yield {"type": "token", "content": reply[i : i + 32], "source": "conversation"}
+        commit_turn_journal(thread_id, turn_id, user_text=effective_text, assistant_text=reply)
         yield {
             "type": "turn_end",
+            "turn_id": turn_id,
             "worker": "job_control",
             "reply": reply,
             "graph_write": False,
@@ -198,12 +213,12 @@ async def astream_conversation_voice(
         return
     if decision.source_error == "link_resolution":
         reply = str(decision.content or "Please clarify which ROOT and destination node to link.")
-        append_transcript_turn(thread_id, role="user", text=effective_text)
-        append_transcript_turn(thread_id, role="assistant", text=reply)
         for i in range(0, len(reply), 32):
             yield {"type": "token", "content": reply[i : i + 32], "source": "conversation"}
+        commit_turn_journal(thread_id, turn_id, user_text=effective_text, assistant_text=reply)
         yield {
             "type": "turn_end",
+            "turn_id": turn_id,
             "reply": reply,
             "graph_write": False,
             "dispatched": False,
@@ -218,68 +233,115 @@ async def astream_conversation_voice(
             thread_id=thread_id,
             include_worker_result=True,
         )
-    append_transcript_turn(thread_id, role="user", text=effective_text)
     dispatch = needs_voice_dispatch(
         decision,
         voice_turn=voice,
         scope_blocked=scope_blocked,
     )
-    if dispatch and worker_kind in {"gist", "intradoc"}:
-        fields = routing_context.get("custom_fields") or {}
-        selected_roots = [
-            node_id
-            for node_id in routing_context.get("selected_node_ids") or []
-            if any(
-                node.get("id") == node_id and node.get("node_kind") == "ROOT"
-                for node in routing_context.get("graph_candidates") or []
-            )
-        ]
-        source = resolve_source_reference(
-            effective_text,
-            fields,
-            selected_reference=decision.source_reference,
-            selected_field=decision.source_field,
-        )
-        existing_source_root = next(
-            (
-                node.id
-                for node in store.list_nodes(project_id)
-                if source.url and node.node_kind.value == "ROOT" and node.source_uri == source.url
-            ),
-            None,
-        )
-        record_routing_source(
-            thread_id,
-            worker=worker_kind,
-            source_url=source.url,
-            title=decision.title or fields.get("title"),
-            root_id=(
-                fields.get("root_id")
-                or (selected_roots[0] if len(selected_roots) == 1 else None)
-                or existing_source_root
-            ),
-        )
-    plan = resolve_job_dispatch(
-        thread_id=thread_id,
-        project_id=project_id,
-        worker_kind=worker_kind,
+    fields = routing_context.get("custom_fields") or {}
+    expanded = expand_source_dispatches(
+        decision,
         effective_text=effective_text,
-        context_json={**routing_context, "supervisor_decision": decision.model_dump()},
-        jobs=job_runtime.list_jobs(thread_id),
-        pending_approvals=store.list_pending(project_id, thread_id),
-        introduction=project.introduction or "",
+        custom_fields=fields,
         dispatch_allowed=dispatch,
     )
-    worker_fn = worker_handler(worker_kind) if dispatch and plan.action != "skip" else None
-    already_running = dispatch and plan.reason == "already_running"
-    dispatch_pending = bool(worker_fn) or already_running
+    if expanded.clarification:
+        reply = expanded.clarification
+        for i in range(0, len(reply), 32):
+            yield {"type": "token", "content": reply[i : i + 32], "source": "conversation"}
+        if is_aborted(turn_id):
+            rollback_pending_turn(thread_id, turn_id)
+            yield {"type": "turn_aborted", "turn_id": turn_id}
+            return
+        commit_turn_journal(thread_id, turn_id, user_text=effective_text, assistant_text=reply)
+        yield {
+            "type": "turn_end",
+            "reply": reply,
+            "turn_id": turn_id,
+            "graph_write": False,
+            "dispatched": False,
+            "worker_kind": "conversation",
+            "details": {"route": "multi_source_clarification"},
+            "jobs": job_runtime.list_jobs(thread_id),
+        }
+        return
+
+    dispatch_decisions = expanded.decisions
+    multi_count = len(dispatch_decisions) if dispatch_decisions else 1
+    plans: list[tuple[Any, Any, Any]] = []
+    dispatch_pending = False
+    already_running = False
+
+    for sub in dispatch_decisions:
+        sub_kind = sub.worker
+        sub_dispatch = needs_voice_dispatch(sub, voice_turn=voice, scope_blocked=scope_blocked)
+        if sub_dispatch and sub_kind in {"gist", "intradoc"}:
+            selected_roots = [
+                node_id
+                for node_id in routing_context.get("selected_node_ids") or []
+                if any(
+                    node.get("id") == node_id and node.get("node_kind") == "ROOT"
+                    for node in routing_context.get("graph_candidates") or []
+                )
+            ]
+            source = resolve_source_reference(
+                effective_text,
+                fields,
+                selected_reference=sub.source_reference,
+                selected_field=sub.source_field,
+            )
+            existing_source_root = next(
+                (
+                    node.id
+                    for node in store.list_nodes(project_id)
+                    if source.url
+                    and node.node_kind.value == "ROOT"
+                    and node.source_uri == source.url
+                ),
+                None,
+            )
+            record_routing_source(
+                thread_id,
+                worker=sub_kind,
+                source_url=source.url,
+                title=sub.title or fields.get("title"),
+                root_id=(
+                    fields.get("root_id")
+                    or (selected_roots[0] if len(selected_roots) == 1 else None)
+                    or existing_source_root
+                ),
+            )
+        plan = resolve_job_dispatch(
+            thread_id=thread_id,
+            project_id=project_id,
+            worker_kind=sub_kind,
+            effective_text=effective_text,
+            context_json={**routing_context, "supervisor_decision": sub.model_dump()},
+            jobs=job_runtime.list_jobs(thread_id),
+            pending_approvals=store.list_pending(project_id, thread_id),
+            introduction=project.introduction or "",
+            dispatch_allowed=sub_dispatch,
+        )
+        fn = worker_handler(sub_kind) if sub_dispatch and plan.action != "skip" else None
+        if sub_dispatch and plan.reason == "already_running":
+            already_running = True
+            dispatch_pending = True
+        elif fn:
+            dispatch_pending = True
+            plans.append((sub, plan, fn))
 
     tokens: list[str] = []
     if dispatch_pending:
-        reply_parts = _background_worker_acknowledgement(
-            worker_kind,
-            already_running=already_running,
-        )
+        if multi_count > 1:
+            reply_parts = (
+                f"I'll start {multi_count} background jobs for the sources you shared. "
+                "Watch the dock queue for progress."
+            )
+        else:
+            reply_parts = _background_worker_acknowledgement(
+                worker_kind,
+                already_running=already_running,
+            )
         for i in range(0, len(reply_parts), 32):
             piece = reply_parts[i : i + 32]
             tokens.append(piece)
@@ -298,49 +360,59 @@ async def astream_conversation_voice(
                 user_fields=ctx_json.get("custom_fields") or {},
             )
             async for piece in _astream_voice_conversation_reply(inp):
+                if is_aborted(turn_id):
+                    break
                 tokens.append(piece)
                 yield {"type": "token", "content": piece, "source": "conversation"}
 
     reply = "".join(tokens)
 
-    append_transcript_turn(thread_id, role="assistant", text=reply)
+    if is_aborted(turn_id):
+        rollback_pending_turn(thread_id, turn_id)
+        yield {"type": "turn_aborted", "turn_id": turn_id}
+        return
 
-    job_id: str | None = None
+    job_ids: list[str] = []
     dispatched_worker: str | None = None
-    if dispatch_pending and worker_fn:
+    if dispatch_pending and plans:
         ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
-        ctx_json_dispatch = {
-            **routing_context,
-            "voice_dispatch": True,
-            "supervisor_decision": decision.model_dump(),
-        }
-        job = job_runtime.dispatch_background_worker(
-            thread_id=thread_id,
-            worker_kind=worker_kind,
-            ctx=ctx,
-            text=effective_text,
-            context=ctx_json_dispatch,
-            worker_fn=worker_fn,
-            project_id=project_id,
-            plan=plan,
-        )
-        if not job:
-            dispatch = False
-        else:
-            job_id = job.get("job_id")
-            dispatched_worker = worker_kind
-        _log.info(
-            "voice_dispatch job_id=%s worker=%s thread_id=%s project_id=%s",
-            job_id,
-            worker_kind,
-            thread_id,
-            project_id,
-        )
-        yield {
-            "type": "custom",
-            "job": job,
-            "source": "dispatch",
-        }
+        for sub, plan, fn in plans:
+            ctx_json_dispatch = {
+                **routing_context,
+                "voice_dispatch": True,
+                "supervisor_decision": sub.model_dump(),
+                "turn_id": turn_id,
+            }
+            job = job_runtime.dispatch_background_worker(
+                thread_id=thread_id,
+                worker_kind=sub.worker,
+                ctx=ctx,
+                text=effective_text,
+                context=ctx_json_dispatch,
+                worker_fn=fn,
+                project_id=project_id,
+                plan=plan,
+            )
+            if job:
+                jid = str(job.get("job_id") or "")
+                job_ids.append(jid)
+                dispatched_worker = sub.worker
+                append_turn_effect(
+                    thread_id,
+                    turn_id=turn_id,
+                    kind="job_dispatch",
+                    forward={"job_id": jid, "worker": sub.worker},
+                    inverse={},
+                )
+                yield {"type": "custom", "job": job, "source": "dispatch"}
+                _log.info(
+                    "voice_dispatch job_id=%s worker=%s thread_id=%s",
+                    jid,
+                    sub.worker,
+                    thread_id,
+                )
+
+    commit_turn_journal(thread_id, turn_id, user_text=effective_text, assistant_text=reply)
 
     jobs = [
         job
@@ -359,6 +431,7 @@ async def astream_conversation_voice(
         "worker": "conversation_voice",
         "route": worker_kind,
         "max_tokens_policy": settings.VOICE_FOREGROUND_MAX_TOKENS,
+        "turn_id": turn_id,
     }
     if approval_id:
         details["approval_id"] = approval_id
@@ -366,10 +439,12 @@ async def astream_conversation_voice(
     yield {
         "type": "turn_end",
         "reply": reply,
+        "turn_id": turn_id,
         "graph_write": False,
-        "dispatched": bool(job_id),
+        "dispatched": bool(job_ids),
         "worker_kind": dispatched_worker,
-        "job_id": job_id,
+        "job_id": job_ids[0] if job_ids else None,
+        "job_ids": job_ids,
         "source": "conversation",
         "details": details,
         "jobs": jobs,

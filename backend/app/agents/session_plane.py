@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from contextlib import contextmanager
 from typing import Any
 
@@ -400,11 +401,30 @@ def build_session_briefing(
     if show_worker_snippet:
         worker_snippet = str(ckpt.get("last_worker_result_snippet") or "")[:400]
 
+    history_rows = list(reversed(list_job_history(thread_id)))[:15]
+    recent_jobs = [
+        {
+            key: str(row.get(key) or "")
+            for key in (
+                "job_id",
+                "worker",
+                "status",
+                "label",
+                "source_url",
+                "source_title",
+                "output_summary",
+            )
+            if row.get(key) is not None
+        }
+        for row in history_rows
+    ]
+
     briefing: SessionBriefing = {
         "project_scope_snippet": scope,
         "scope_complete": complete,
         "voice_phase": "research" if complete else "p1_scope_onboarding",
         "active_jobs": active_jobs,
+        "recent_jobs": recent_jobs,
         "active_job_affinity": active_job_affinity[-3:],
         "last_route": str(ckpt.get("last_route") or ""),
         "pending_approval_count": pending_count,
@@ -415,3 +435,60 @@ def build_session_briefing(
         "proactive_script": str(ckpt.get("proactive_script") or ""),
     }
     return briefing
+
+
+def upsert_job_history(thread_id: str, job: dict[str, Any]) -> None:
+    """Append-only job run ledger for history UI and status answers."""
+    jid = job.get("job_id")
+    if not jid:
+        return
+    output = job.get("output") or {}
+    summary = str(
+        output.get("source_summary")
+        or output.get("summary")
+        or output.get("reply")
+        or job.get("progress")
+        or ""
+    ).strip()[:800]
+    row = {
+        "job_id": str(jid),
+        "parent_turn_id": str(job.get("parent_turn_id") or ""),
+        "worker": str(job.get("worker") or job.get("kind") or ""),
+        "status": str(job.get("status") or "running"),
+        "label": str(job.get("label") or "")[:160],
+        "source_url": str(output.get("source_url") or "")[:500],
+        "source_title": str(output.get("source_title") or "")[:200],
+        "output_summary": summary,
+        "approval_id": str(job.get("approval_id") or job.get("recommendation_id") or ""),
+        "updated_at": time.time(),
+        "reverted_at": job.get("reverted_at"),
+    }
+    with _update_checkpoint(thread_id) as state:
+        history: dict[str, dict[str, Any]] = dict(state.get("job_history") or {})
+        prev = history.get(str(jid)) or {}
+        if prev.get("created_at"):
+            row["created_at"] = prev["created_at"]
+        else:
+            row["created_at"] = time.time()
+        history[str(jid)] = {**prev, **row}
+        state["job_history"] = history
+
+
+def mark_job_history_reverted(thread_id: str, job_id: str) -> None:
+    with _update_checkpoint(thread_id) as state:
+        history: dict[str, dict[str, Any]] = dict(state.get("job_history") or {})
+        row = history.get(job_id)
+        if not row:
+            return
+        row["reverted_at"] = time.time()
+        row["status"] = "superseded_by_revert"
+        history[job_id] = row
+        state["job_history"] = history
+
+
+def list_job_history(thread_id: str) -> list[dict[str, Any]]:
+    ckpt = _checkpoint_for(thread_id)
+    history = ckpt.get("job_history") or {}
+    items = list(history.values())
+    items.sort(key=lambda r: float(r.get("updated_at") or r.get("created_at") or 0))
+    return items

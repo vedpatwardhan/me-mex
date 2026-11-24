@@ -81,7 +81,10 @@ export async function fetchJobs(projectId: string, threadId: string): Promise<Do
   const res = await fetch(`${API_BASE}/api/agent/jobs?${q}`);
   if (!res.ok) return [];
   const data = await res.json();
-  return (data.items || []).map(
+  const openStatuses = new Set(['running', 'paused', 'awaiting_approval']);
+  return (data.items || [])
+    .filter((job: { status?: string }) => openStatuses.has(String(job.status || 'running')))
+    .map(
     (job: {
       job_id: string;
       worker?: string;
@@ -133,6 +136,40 @@ export async function resumeApproval(
   });
   if (!res.ok) {
     throw new Error(`resume failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export type JobHistoryRow = {
+  job_id: string;
+  worker?: string;
+  status?: string;
+  label?: string;
+  source_url?: string;
+  output_summary?: string;
+  updated_at?: number;
+};
+
+export async function fetchJobHistory(threadId: string): Promise<JobHistoryRow[]> {
+  const q = new URLSearchParams({ thread_id: threadId });
+  const res = await fetch(`${API_BASE}/api/agent/jobs/history?${q}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.items || []) as JobHistoryRow[];
+}
+
+export async function revertTurn(
+  projectId: string,
+  threadId: string,
+  turnId: string,
+): Promise<Record<string, unknown>> {
+  const res = await fetch(`${API_BASE}/api/agent/turn/revert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, thread_id: threadId, turn_id: turnId }),
+  });
+  if (!res.ok) {
+    throw new Error(`revert failed: ${res.status}`);
   }
   return res.json();
 }

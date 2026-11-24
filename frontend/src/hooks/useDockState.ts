@@ -3,8 +3,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DockItem } from '../components/RecommendationsDock';
 import {
   fetchApprovals,
+  fetchJobHistory,
   fetchJobs,
   fetchNudges,
+  revertTurn,
   resumeApproval,
   streamAgentTurn,
   controlJob as controlJobRequest,
@@ -33,7 +35,7 @@ export function useDockState(
   const [pendingApprovals, setPendingApprovals] = useState<Set<string>>(() => new Set());
   const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(() => new Set());
 
-  const { latestReply, latestUserText, items } = streamState;
+  const { latestReply, latestUserText, items, turns, jobHistory } = streamState;
 
   const refreshDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -67,9 +69,15 @@ export function useDockState(
     }
   }, [refreshApprovals]);
 
+  const refreshJobHistory = useCallback(async () => {
+    const rows = await fetchJobHistory(threadId);
+    setStreamState((s) => ({ ...s, jobHistory: rows }));
+  }, [threadId]);
+
   useEffect(() => {
     void refreshApprovals();
-  }, [refreshApprovals]);
+    void refreshJobHistory();
+  }, [refreshApprovals, refreshJobHistory]);
 
   const scheduleRefreshApprovals = useCallback(() => {
     if (refreshDebounce.current) clearTimeout(refreshDebounce.current);
@@ -86,7 +94,11 @@ export function useDockState(
         if (isScopeCommittedEvent(event)) onScopeCommitted?.();
         if (isGraphWriteEvent(event)) onGraphCommitted?.();
         const job = event.job as Record<string, unknown> | undefined;
-        if (type === 'turn_end') void reconcilePendingApprovals();
+        if (type === 'turn_end' || type === 'turn_reverted') {
+          void reconcilePendingApprovals();
+          void refreshJobHistory();
+        }
+        if (type === 'turn_reverted') onGraphCommitted?.();
         const shouldRefresh =
           type === 'turn_end' ||
           type === 'recommendation' ||
@@ -96,7 +108,13 @@ export function useDockState(
         if (shouldRefresh) scheduleRefreshApprovals();
       }
     },
-    [scheduleRefreshApprovals, onScopeCommitted, onGraphCommitted, reconcilePendingApprovals],
+    [
+      scheduleRefreshApprovals,
+      onScopeCommitted,
+      onGraphCommitted,
+      reconcilePendingApprovals,
+      refreshJobHistory,
+    ],
   );
 
   const beginTurn = useCallback((userText: string) => {
@@ -143,7 +161,10 @@ export function useDockState(
           thread_id: threadId,
           approval_id: approvalId,
           action: 'approve',
-          context_json: contextJson,
+          context_json: {
+            ...contextJson,
+            turn_id: `turn_${Date.now().toString(36)}`,
+          },
         });
         if (result?.scope_committed === true) onScopeCommitted?.();
         if (result?.graph_write === true) onGraphCommitted?.();
@@ -221,10 +242,28 @@ export function useDockState(
   const cancelJob = useCallback((jobId: string) => runJobAction(jobId, 'cancel'), [runJobAction]);
   const deleteJob = useCallback((jobId: string) => runJobAction(jobId, 'delete'), [runJobAction]);
 
+  const revertUserTurn = useCallback(
+    async (turnId: string) => {
+      const result = await revertTurn(projectId, threadId, turnId);
+      if (result.ok) {
+        applyStreamEventToState({
+          type: 'turn_reverted',
+          turn_id: turnId,
+          removed_turn_ids: result.removed_turn_ids || [],
+        });
+        await refreshApprovals();
+        onGraphCommitted?.();
+      }
+    },
+    [projectId, threadId, applyStreamEventToState, refreshApprovals, onGraphCommitted],
+  );
+
   return {
     latestReply,
     latestUserText,
     items,
+    turns,
+    jobHistory,
     pendingApprovals,
     pendingJobActions,
     projectScope,
@@ -237,6 +276,8 @@ export function useDockState(
     cancelJob,
     deleteJob,
     refreshApprovals,
+    refreshJobHistory,
+    revertUserTurn,
     applyStreamEvent: applyStreamEventToState,
     beginTurn,
     setVoiceSession,

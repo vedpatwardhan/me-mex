@@ -134,6 +134,9 @@ export class VoiceSession {
           'dock_events',
           'turn_end',
           'turn_start',
+          'stt_draft',
+          'turn_aborted',
+          'turn_reverted',
           'recommendation',
           'job_update',
           'job_delete',
@@ -250,6 +253,24 @@ export class VoiceSession {
   async publishContext(ctx: VoiceContext): Promise<void> {
     if (!this.room || !this.isReady()) return;
     this.publishContextFireAndForget(ctx);
+  }
+
+  async sendAgentTurn(text: string, ctx: VoiceContext): Promise<void> {
+    if (!this.room || !this.isReady()) return;
+    await this.room.localParticipant.publishData(
+      new TextEncoder().encode(
+        JSON.stringify({ type: 'agent_turn', text, context_json: ctx }),
+      ),
+      { reliable: true },
+    );
+  }
+
+  async sendCancelTurn(turnId: string): Promise<void> {
+    if (!this.room || !this.isReady()) return;
+    await this.room.localParticipant.publishData(
+      new TextEncoder().encode(JSON.stringify({ type: 'cancel_turn', turn_id: turnId })),
+      { reliable: true },
+    );
   }
 
   async sendApproval(approvalId: string, action: 'approve' | 'cancel', ctx: VoiceContext) {
