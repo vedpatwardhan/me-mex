@@ -60,10 +60,10 @@ class Settings:
     LIVEKIT_API_SECRET: str = os.getenv("LIVEKIT_API_SECRET", "secret")
     LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512")
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "180.0"))
-    # stub | live — chat completions from worker agents
-    CHAT_LLM_MODE: str = os.getenv("CHAT_LLM_MODE", "stub").lower()
-    # mock | live — gateway reranker POST /decision/score
-    DECISION_SCORER_MODE: str = os.getenv("DECISION_SCORER_MODE", "mock").lower()
+    # stub | live — chat completions from worker agents (pytest: backend/.env.test)
+    CHAT_LLM_MODE: str = os.getenv("CHAT_LLM_MODE", "live").lower()
+    # mock | live — gateway reranker POST /decision/score (pytest: backend/.env.test)
+    DECISION_SCORER_MODE: str = os.getenv("DECISION_SCORER_MODE", "live").lower()
 
     # Token / context budgets (passage packing + agent calls)
     LLM_MODEL_MAX_LEN: int = int(os.getenv("LLM_MODEL_MAX_LEN", "12288"))

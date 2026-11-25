@@ -19,6 +19,7 @@ from app.agents.session_plane import (
     record_routing_source,
 )
 from app.agents.source_reference import resolve_source_reference
+from app.agents.supervisor_plan_contract import should_append_supervisor_reply
 from app.agents.turn_journal import (
     append_turn_effect,
     begin_turn_journal,
@@ -37,6 +38,7 @@ from app.agents.worker_registry import worker_handler
 from app.config import settings
 from app.db import ToolContext, get_store
 from app.llm import get_chains
+from app.llm.chains import is_chains_overridden
 from app.prompts import load_prompt
 from app.services.llm_gateway import llm_gateway
 
@@ -111,7 +113,7 @@ async def _astream_voice_conversation_reply(
     inp: dict[str, Any],
 ) -> AsyncIterator[str]:
     """Stream conversation tokens (plane 1 TTS source)."""
-    if settings.CHAT_LLM_MODE != "live":
+    if settings.CHAT_LLM_MODE != "live" or is_chains_overridden():
         chains = get_chains()
         reply = chains.conversation.invoke(inp)
         if not isinstance(reply, str):
@@ -362,12 +364,18 @@ async def astream_conversation_voice(
             plans.append((sub, plan, fn))
 
     tokens: list[str] = []
-    if job_control_replies:
-        prefix = " ".join(job_control_replies)
-        for i in range(0, len(prefix), 32):
-            piece = prefix[i : i + 32]
+    had_executable = dispatch_pending or bool(job_control_replies)
+
+    def _stream_text(msg: str):
+        for i in range(0, len(msg), 32):
+            piece = msg[i : i + 32]
             tokens.append(piece)
+            yield piece
+
+    if job_control_replies:
+        for piece in _stream_text(" ".join(job_control_replies)):
             yield {"type": "token", "content": piece, "source": "conversation"}
+
     if dispatch_pending:
         if multi_count > 1:
             reply_parts = (
@@ -380,18 +388,11 @@ async def astream_conversation_voice(
                 primary_worker,
                 already_running=already_running,
             )
-        if job_control_replies:
-            reply_parts = f"{' '.join(job_control_replies)} {reply_parts}"
-        for i in range(0, len(reply_parts), 32):
-            piece = reply_parts[i : i + 32]
-            if piece not in "".join(tokens):
-                tokens.append(piece)
-                yield {"type": "token", "content": piece, "source": "conversation"}
-    elif not job_control_replies:
+        for piece in _stream_text(reply_parts):
+            yield {"type": "token", "content": piece, "source": "conversation"}
+    elif not had_executable:
         if decision.reply and conversation_only:
-            for i in range(0, len(decision.reply), 32):
-                piece = decision.reply[i : i + 32]
-                tokens.append(piece)
+            for piece in _stream_text(decision.reply):
                 yield {"type": "token", "content": piece, "source": "conversation"}
         else:
             inp = _conversation_prompt_inputs(
@@ -405,6 +406,10 @@ async def astream_conversation_voice(
                     break
                 tokens.append(piece)
                 yield {"type": "token", "content": piece, "source": "conversation"}
+
+    if had_executable and should_append_supervisor_reply(decision, had_executable_tasks=True):
+        for piece in _stream_text(f" {decision.reply}"):
+            yield {"type": "token", "content": piece, "source": "conversation"}
 
     reply = "".join(tokens)
 

@@ -33,6 +33,32 @@ STUB_CONCEPTS = [
     {"concept_id": "c1", "title": "Main claim", "description": "Extracted concept."},
 ]
 
+
+def _intradoc_from_recorded(text: str) -> dict[str, Any] | None:
+    if not _recorded_intradoc:
+        return None
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=passage_chunk_size_chars(),
+        chunk_overlap=0,
+    )
+    chunks = splitter.split_text(text.strip()) if text.strip() else [""]
+    concepts = [
+        {
+            "concept_id": f"c{i + 1}_{uuid.uuid4().hex[:6]}",
+            "title": r["title"],
+            "description": r.get("description", ""),
+            "passage_indices": r.get("passage_indices") or list(range(len(chunks))),
+        }
+        for i, r in enumerate(_recorded_intradoc)
+    ]
+    return {
+        "doc_description": "Recorded document summary.",
+        "doc_type": "paper",
+        "concepts": concepts,
+        "passages": [{"passage_index": i, "text": chunk} for i, chunk in enumerate(chunks)],
+    }
+
+
 _recorded_intradoc: list[dict[str, str]] | None = None
 
 
@@ -73,7 +99,18 @@ def _live_supervisor() -> Runnable:
             ("human", "{payload}"),
         ]
     )
-    return prompt | structured_llm(WorkerRoute, caller="Supervisor.classify", max_tokens=512)
+
+    def _run(inp: dict) -> WorkerRoute:
+        max_tokens = int(inp.get("supervisor_max_tokens") or 512)
+        chain = prompt | structured_llm(
+            WorkerRoute,
+            caller="Supervisor.classify",
+            max_tokens=max_tokens,
+            max_retries=3,
+        )
+        return chain.invoke(inp)
+
+    return RunnableLambda(_run)
 
 
 def _live_conversation() -> Runnable:
@@ -155,6 +192,9 @@ def _live_intradoc() -> Runnable:
 
     def _intradoc(inputs: dict[str, Any]) -> dict[str, Any]:
         text = inputs.get("text") or ""
+        recorded = _intradoc_from_recorded(text)
+        if recorded is not None:
+            return recorded
         doc_title = inputs.get("doc_title") or "Document"
         user_intent = inputs.get("user_intent") or ""
         checkpoint = inputs.get("checkpoint")
@@ -311,27 +351,14 @@ def _stub_retrieval() -> Runnable:
 def _stub_intradoc() -> Runnable:
     def _run(inp: dict) -> dict[str, Any]:
         text = (inp.get("text") or "").strip()
+        recorded = _intradoc_from_recorded(text)
+        if recorded is not None:
+            return recorded
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=passage_chunk_size_chars(),
             chunk_overlap=0,
         )
         chunks = splitter.split_text(text) if text else [""]
-        if _recorded_intradoc:
-            concepts = [
-                {
-                    "concept_id": f"c{i + 1}_{uuid.uuid4().hex[:6]}",
-                    "title": r["title"],
-                    "description": r.get("description", ""),
-                    "passage_indices": r.get("passage_indices") or list(range(len(chunks))),
-                }
-                for i, r in enumerate(_recorded_intradoc)
-            ]
-            return {
-                "doc_description": "Recorded document summary.",
-                "doc_type": "paper",
-                "concepts": concepts,
-                "passages": [{"passage_index": i, "text": chunk} for i, chunk in enumerate(chunks)],
-            }
         raw: list[PassageExtractResult] = []
         for i, chunk in enumerate(chunks):
             snippet = re.sub(r"\s+", " ", chunk.strip())[:80]
@@ -383,6 +410,10 @@ _override: AgentChains | None = None
 def set_chains_override(chains: AgentChains | None) -> None:
     global _override
     _override = chains
+
+
+def is_chains_overridden() -> bool:
+    return _override is not None
 
 
 def get_chains() -> AgentChains:

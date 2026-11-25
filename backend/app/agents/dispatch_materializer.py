@@ -128,6 +128,13 @@ def _multi_source_gate_violation(decision: WorkerRoute, fields: dict[str, Any]) 
         return False
     if decision.dispatch_tasks or decision.fan_out_same_worker:
         return False
+    if (
+        decision.worker == "conversation"
+        and not decision.dispatch
+        and decision.reply
+        and not decision.dispatch_tasks
+    ):
+        return True
     if not decision.multi_action:
         return False
     if not decision.dispatch:

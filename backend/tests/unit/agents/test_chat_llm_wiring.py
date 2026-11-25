@@ -27,7 +27,14 @@ def test_intradoc_prompt_json_examples_compatible_with_chat_template():
 
 def test_route_uses_langchain_supervisor():
     p = Project(_id="p", name="t", introduction="scope")
-    assert route_intent("what relates to X?", {}, p).worker == "retrieval"
+    assert (
+        route_intent(
+            "What relates to grasping in the knowledge graph? Highlight the subgraph.",
+            {},
+            p,
+        ).worker
+        == "retrieval"
+    )
 
 
 def test_intradoc_chain_invoke():

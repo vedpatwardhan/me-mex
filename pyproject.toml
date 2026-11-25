@@ -49,14 +49,14 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = "-n 2 --dist=loadgroup -v --tb=short -m \"not vllm and not livekit and not slow and not live_llm\""
+addopts = "-n auto --dist=loadgroup -v --tb=short -m \"not vllm and not livekit and not slow\""
 markers = [
-    "vllm: requires live Colab vLLM + LoRA",
+    "vllm: requires live Colab vLLM + gateway decision/score",
     "mongodb: requires MongoDB",
-    "slow: long-running tests",
-    "voice_plane: voice conversation and dispatch HTTP/SSE tests (included in default CI)",
-    "live_llm: opt-in tests that query the configured live chat model",
-    "livekit: LiveKit token/worker smokes (excluded from default CI)",
+    "slow: long-running intra-doc extract",
+    "voice_plane: voice conversation and dispatch HTTP/SSE tests",
+    "live_llm: supervisor/conversation checks against live chat (skip if CHAT_LLM_MODE != live)",
+    "livekit: LiveKit token/worker smokes (excluded from default pytest addopts)",
 ]
 
 [tool.ruff]

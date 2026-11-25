@@ -1,15 +1,12 @@
 import time
-from dataclasses import replace
 from uuid import uuid4
 
 import pytest
-from app.llm import get_chains, set_chains_override
-from app.llm.schemas import WorkerRoute
-from langchain_core.runnables import RunnableLambda
 from tests.sse_util import iter_sse_data
 
+pytestmark = pytest.mark.voice_plane
 
-@pytest.mark.voice_plane
+
 def test_empty_scope_dispatches_project_scope_job(client, empty_project, mock_vllm_chat):
     ctx = {
         "voice_turn": True,
@@ -30,35 +27,13 @@ def test_empty_scope_dispatches_project_scope_job(client, empty_project, mock_vl
     assert end.get("dispatched") is True
     assert end.get("worker_kind") == "project_scope"
     assert all(c.get("source") != "project_scope" for c in chunks if c.get("type") == "token")
-    time.sleep(0.5)
+    time.sleep(2.0)
 
 
 @pytest.mark.voice_plane
 def test_substantive_scope_turn_creates_approval_without_define_scope_command(
     client, empty_project
 ):
-    candidate = (
-        "The project studies recursive self-improvement in AI, including autonomous "
-        "changes to algorithms, infrastructure, and research workflows."
-    )
-    base = get_chains()
-    set_chains_override(
-        replace(
-            base,
-            supervisor=RunnableLambda(
-                lambda _inputs: WorkerRoute(
-                    worker="project_scope",
-                    intent="scope_conversation",
-                    dispatch=False,
-                    content=candidate,
-                )
-            ),
-            conversation=RunnableLambda(
-                lambda _inputs: "I’ll prepare a scope proposal for review."
-            ),
-            project_scope=RunnableLambda(lambda _inputs: candidate),
-        )
-    )
     thread_id = f"voice-scope-first-turn-{uuid4().hex}"
     response = client.post(
         "/api/voice/conversation/stream",
@@ -82,7 +57,7 @@ def test_substantive_scope_turn_creates_approval_without_define_scope_command(
     assert end["worker_kind"] == "project_scope"
     assert end["dispatched"] is True
 
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + 90.0
     approvals = []
     while time.monotonic() < deadline:
         approvals = client.get(
@@ -94,4 +69,6 @@ def test_substantive_scope_turn_creates_approval_without_define_scope_command(
         time.sleep(0.05)
     assert approvals
     assert approvals[0]["approval_type"] == "project_scope"
-    assert approvals[0]["payload"]["proposed_introduction"] == candidate
+    proposed = approvals[0]["payload"]["proposed_introduction"] or ""
+    assert len(proposed.strip()) >= 80
+    assert "recursive" in proposed.lower() or "self-improvement" in proposed.lower()

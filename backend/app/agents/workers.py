@@ -8,8 +8,15 @@ from typing import Any
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from app.agents.authoritative_routes import authoritative_worker_route
 from app.agents.context_preprocessor import apply_custom_fields_to_text
+from app.agents.dispatch_materializer import ordered_field_references
 from app.agents.source_reference import resolve_source_reference
+from app.agents.supervisor_plan_contract import (
+    routing_binding_hints,
+    structural_multi_url_dispatch_fallback,
+    supervisor_max_tokens,
+)
 from app.config import settings
 from app.db import Store, ToolContext
 from app.errors import NotFoundError
@@ -43,21 +50,34 @@ def _scorer_node(store: Store, node_id: str) -> ScorerNode:
 
 def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
     fields = context.get("custom_fields") or {}
-    if fields.get("resume_job_id"):
-        return WorkerRoute(worker="conversation", intent="status", dispatch=False)
-    if fields.get("force_project_scope") and not (project.introduction or "").strip():
-        return WorkerRoute(
-            worker="project_scope",
-            intent="scope_conversation",
-            dispatch=True,
-        )
+    if pre := authoritative_worker_route(text, fields, project, context=context):
+        return pre
     intro = (project.introduction or "").strip()
     routing_context = {
         **context,
         "project_scope_status": "committed" if intro else "unset",
         "scope_approval_pending": bool(context.get("scope_approval_pending")),
     }
-    payload = json.dumps({"text": text, "context": routing_context}, ensure_ascii=False)
+    hints = routing_binding_hints(routing_context)
+    url_field_count = len(hints.get("url_field_rows") or [])
+    if fields.get("root_id"):
+        routing_context["pinned_root_id"] = str(fields["root_id"])
+    else:
+        focus = ((context.get("routing_memory") or {}).get("focus_root") or {}).get("id")
+        if focus:
+            routing_context["pinned_root_id"] = str(focus)
+    payload = json.dumps(
+        {
+            "text": text,
+            "context": routing_context,
+            "routing_binding_hints": hints,
+            "planning_contract": {
+                "url_field_count": url_field_count,
+                "multi_url_requires_dispatch_tasks": url_field_count >= 2,
+            },
+        },
+        ensure_ascii=False,
+    )
     try:
         result = get_chains().supervisor.invoke(
             {
@@ -66,6 +86,7 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
                 "project_scope": intro if intro else "(empty)",
                 "introduction": intro,
                 "payload": payload,
+                "supervisor_max_tokens": supervisor_max_tokens(routing_context),
             }
         )
     except Exception:  # noqa: BLE001 - routing failure must not swallow the conversation turn
@@ -106,7 +127,24 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
             }
         )
 
+    if fields.get("force_gist_commit"):
+        source = resolve_source_reference(text, fields)
+        decision = WorkerRoute(
+            worker="gist",
+            intent="commit_gist",
+            dispatch=True,
+            title=fields.get("title") or decision.title,
+            content=fields.get("gist") or decision.content,
+            source_field=source.field_name or decision.source_field,
+            source_reference=source.url or decision.source_reference,
+        )
+
+    decision = structural_multi_url_dispatch_fallback(decision, routing_context)
+
     if not decision.dispatch_tasks:
+        url_rows = ordered_field_references(fields)
+        if len(url_rows) >= 2 and decision.worker == "conversation":
+            return decision.model_copy(update={"source_error": None})
         source = resolve_source_reference(
             text,
             fields,

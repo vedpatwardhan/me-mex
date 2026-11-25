@@ -1,4 +1,4 @@
-"""Keyword-based routing stub for CHAT_LLM_MODE=stub tests/development only."""
+"""Keyword-based routing when CHAT_LLM_MODE=stub (offline only — not used when .env.test is live)."""
 
 from __future__ import annotations
 

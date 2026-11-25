@@ -5,8 +5,9 @@ from app.llm import AgentChains, get_chains, set_chains_override
 from langchain_core.runnables import RunnableLambda
 from tests.sse_util import iter_sse_data
 
+pytestmark = pytest.mark.voice_plane
 
-@pytest.mark.voice_plane
+
 def test_voice_conversation_stream_passes_custom_fields_to_llm(client, project):
     captured: list[dict] = []
     base = get_chains()
@@ -15,9 +16,15 @@ def test_voice_conversation_stream_passes_custom_fields_to_llm(client, project):
         captured.append(dict(inp))
         return "Your name is Ved."
 
+    from app.llm.schemas import WorkerRoute
+
     set_chains_override(
         AgentChains(
-            supervisor=base.supervisor,
+            supervisor=RunnableLambda(
+                lambda _inp: WorkerRoute(
+                    worker="conversation", intent="conversation", dispatch=False
+                )
+            ),
             conversation=RunnableLambda(_capture),
             gist_draft=base.gist_draft,
             project_scope=base.project_scope,

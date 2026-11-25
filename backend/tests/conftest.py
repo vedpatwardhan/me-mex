@@ -11,15 +11,11 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 os.environ.setdefault("TESTING", "1")
-_run_live_llm_tests = os.environ.get("ME_MEX_RUN_LIVE_LLM_TESTS") == "1"
 _xdist_worker = os.environ.get("PYTEST_XDIST_WORKER")
 if _xdist_worker:
     os.environ["DB_NAME"] = f"test-me-mex-{_xdist_worker}"
 else:
     os.environ.setdefault("DB_NAME", "test-me-mex")
-if not _run_live_llm_tests:
-    os.environ.setdefault("CHAT_LLM_MODE", "stub")
-    os.environ.setdefault("DECISION_SCORER_MODE", "mock")
 import app.db.store as store_module
 from app.db.store import Store
 from app.llm.chains import (

@@ -81,9 +81,11 @@ def test_p1_approve_scope_commits(client, store, project):
     assert r2.status_code == 200
     assert r2.json()["scope_committed"] is True
     assert r2.json()["reply"] != "approved"
-    assert "Thanks for approving" in r2.json()["reply"]
-    intro = store.get_project(project.id).introduction or ""
-    assert "sim-to-real" in intro or "Warehouse" in intro
+    reply = r2.json()["reply"].lower()
+    assert "scope" in reply
+    assert any(word in reply for word in ("thank", "set", "committed", "approved"))
+    intro = (store.get_project(project.id).introduction or "").lower()
+    assert "sim" in intro or "warehouse" in intro
 
 
 def test_p1_scope_proposal_summarizes_and_revises_conversation(

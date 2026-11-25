@@ -13,7 +13,7 @@ The monolithic v1 stack (orchestrator ingest, `/api/chat`) is preserved only on 
 | Workflow-driven writes + explicit approval | URL → auto ingest + link + reorg |
 | Deterministic tools + LangGraph workers | v1 `ExecutiveOrchestrator` |
 | Headless REST + interactive voice/dock MVP (LiveKit, canvas, HITL) | Formal Phase 2 exit: manual demo sign-off and full voice-workflow parity |
-| Agents call `get_chains().invoke` / `get_decision_scorer()` (mock in CI) | Production Colab stack is optional for local/default tests; live gateway smoke uses `pytest -m vllm` |
+| Agents call live `get_chains()` / `get_decision_scorer()` per `backend/.env.test` | Colab gateway required for default pytest; `-m vllm` adds decision/score integration |
 
 Canon: **[`docs/`](./docs/)** — [docs/README.md](./docs/README.md), [docs/09-phasing.md](./docs/09-phasing.md), [docs/11-testing.md](./docs/11-testing.md).
 
@@ -63,19 +63,19 @@ curl -X POST http://localhost:8000/api/agent/turn \
 
 ## Testing
 
-Requires **MongoDB** on `localhost:27017` (tests use `test-me-mex` via `backend/.env.test`). Set **`COLAB_INFERENCE_BASE_URL`** in `backend/.env.test` (committed placeholder) or `backend/.env` before live gateway smoke.
+Requires **MongoDB** on `localhost:27017` and a reachable **`COLAB_INFERENCE_BASE_URL`** in committed **`backend/.env.test`** (`CHAT_LLM_MODE=live`, `DECISION_SCORER_MODE=live`). Pytest sets `TESTING=1` and loads that file—no conftest override to stub/mock.
 
 From repo root (`me-mex/`):
 
 ```bash
-# Default CI gate — unit + integration + e2e + agent unit (no Colab, no LiveKit)
+# Default gate — honors backend/.env.test (live chat + live decision scorer where used)
 uv run pytest
 
-# Live Colab gateway — reranker POST /v1/decision/score (reads .env.test when TESTING=1)
-DECISION_SCORER_MODE=live uv run pytest backend/tests/integration/decision -m vllm -n 0
+# Extra gateway suites (still uses .env.test)
+uv run pytest backend/tests/integration/decision -m vllm -n 0
 
 # Optional: chat/score eval script (see backend/data/decision_training/README.md)
-DECISION_SCORER_MODE=live uv run python backend/scripts/eval_decision_model.py --live
+uv run python backend/scripts/eval_decision_model.py --live
 
 # Frontend (dock / voice helpers)
 cd frontend && npm install && npm test

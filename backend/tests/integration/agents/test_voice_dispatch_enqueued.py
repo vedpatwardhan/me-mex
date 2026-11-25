@@ -1,11 +1,28 @@
 import time
+from dataclasses import replace
 
 import pytest
+from app.llm import get_chains, set_chains_override
+from app.llm.schemas import WorkerRoute
+from langchain_core.runnables import RunnableLambda
 from tests.sse_util import iter_sse_data
 
 
 @pytest.mark.voice_plane
 def test_voice_dispatch_retrieval(client, project, voice_context_json, mock_vllm_chat):
+    base = get_chains()
+    set_chains_override(
+        replace(
+            base,
+            supervisor=RunnableLambda(
+                lambda _inp: WorkerRoute(
+                    worker="retrieval",
+                    intent="retrieval",
+                    dispatch=True,
+                )
+            ),
+        )
+    )
     r = client.post(
         "/api/voice/conversation/stream",
         json={

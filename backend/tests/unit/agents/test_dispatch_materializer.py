@@ -90,6 +90,28 @@ def test_dispatch_tasks_mixed_workers():
     assert workers == {"gist", "intradoc"}
 
 
+def test_conversation_clarify_with_multiple_urls_materializer_gate():
+    fields = {
+        "paper1": "https://arxiv.org/pdf/2601.00001",
+        "paper2": "https://arxiv.org/pdf/2601.00002",
+    }
+    decision = WorkerRoute(
+        worker="conversation",
+        intent="conversation",
+        dispatch=False,
+        reply="Which paper first?",
+    )
+    r = materialize_dispatches(
+        decision,
+        effective_text="summarize both",
+        custom_fields=fields,
+        session_jobs={},
+        dispatch_allowed=True,
+    )
+    assert r.decisions == []
+    assert r.clarification
+
+
 def test_multi_action_gate_single_pinned_field_clarifies():
     fields = {
         "paper1": "https://arxiv.org/pdf/2601.00001",

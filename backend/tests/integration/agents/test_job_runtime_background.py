@@ -21,11 +21,12 @@ def test_background_worker_lifecycle(store, project):
         project_id=project.id,
     )
     assert job["status"] == "running"
-    for _ in range(50):
+    deadline = time.monotonic() + 45.0
+    while time.monotonic() < deadline:
         jobs = job_runtime.list_jobs("bg-t")
         if jobs and jobs[-1].get("status") in ("done", "awaiting_approval", "error"):
             break
-        time.sleep(0.05)
+        time.sleep(0.1)
     jobs = job_runtime.list_jobs("bg-t")
     assert jobs
     assert jobs[0]["status"] in ("done", "awaiting_approval")

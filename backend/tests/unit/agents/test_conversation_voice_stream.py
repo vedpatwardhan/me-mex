@@ -4,31 +4,25 @@ from app.agents.conversation_voice import (
     _background_worker_acknowledgement,
     _conversation_prompt_inputs,
 )
-from app.llm.chains import AgentChains, get_chains, set_chains_override
+from app.config import settings
 from app.prompts import load_prompt
-from langchain_core.runnables import RunnableLambda
 
 
 @pytest.mark.asyncio
-async def test_astream_stub_yields_tokens_before_full_reply(monkeypatch):
-    base = get_chains()
-    set_chains_override(
-        AgentChains(
-            supervisor=base.supervisor,
-            conversation=RunnableLambda(lambda _: "Hello world from stub."),
-            gist_draft=base.gist_draft,
-            project_scope=base.project_scope,
-            retrieval_summary=base.retrieval_summary,
-            intradoc=base.intradoc,
-        )
-    )
-    monkeypatch.setattr("app.agents.conversation_voice.settings.CHAT_LLM_MODE", "stub")
-    inp = {"text": "user", "project_scope": ""}
+async def test_astream_live_yields_tokens_before_full_reply():
+    if settings.CHAT_LLM_MODE != "live":
+        pytest.skip("CHAT_LLM_MODE is not live (set in backend/.env.test)")
+    inp = {
+        "text": "Say hello in one short sentence.",
+        "project_scope": "Research project.",
+    }
     parts: list[str] = []
-    async for p in _astream_voice_conversation_reply(inp):
-        parts.append(p)
+    async for piece in _astream_voice_conversation_reply(inp):
+        parts.append(piece)
+    reply = "".join(parts).strip()
     assert parts
-    assert "".join(parts) == "Hello world from stub."
+    assert reply
+    assert len(reply.split()) <= 25
 
 
 def test_background_gist_dispatch_uses_fixed_acknowledgement():

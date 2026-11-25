@@ -8,10 +8,10 @@ v1 pytest suites live on git tag **`v1`** only. On `main`, `backend/tests/{unit,
 
 ## 1. Test layers
 
-| Layer | Scope | External deps | Runs in CI default? |
-|-------|--------|---------------|---------------------|
-| **Unit** | Single function/module: tools, guards, parsers, dock queue, checkpoint I/O, pure graph helpers | None (in-memory Mongo mock or `mongomock` / testcontainers opt-in) | **Yes — required** |
-| **Integration** | Agent subgraph + real Mongo test DB + mocked LLM **or** fixture responses; DecisionScorer **live gateway reranker** on marked suite | MongoDB test instance; optional `vllm` marker | **Yes** (mocked LLM); **nightly / manual** (`pytest -m vllm`) for Colab |
+| Layer | Scope | External deps | Default `uv run pytest`? |
+|-------|--------|---------------|---------------------------|
+| **Unit** | Single function/module: tools, guards, parsers, dock queue, checkpoint I/O, pure graph helpers | None (in-memory Mongo mock or `mongomock` / testcontainers opt-in) | **Yes** |
+| **Integration** | Agent subgraph + real Mongo test DB + **live** `get_chains()` per `backend/.env.test` | MongoDB + Colab gateway URL in `.env.test` | **Yes** |
 | **End-to-end (API)** | REST `thread_id` full turns: supervisor → worker → tools → Mongo; no browser | Mongo + headless LangGraph | **Yes** |
 | **End-to-end (product)** | Voice/UI: LiveKit, dock streams, canvas actions (W12), project switch | Local stack + optional Playwright | **Phase 2+**; CI smoke subset |
 
@@ -169,26 +169,24 @@ Every workflow row **must** have at least one **e2e** test (REST Phase 1; + voic
 | `vllm` | Needs live Colab gateway (vLLM chat + `decision/score` reranker) |
 | `mongodb` | Needs real Mongo (testcontainers or local `me_mex_test`) |
 | `livekit` | Phase 2 worker + room |
-| `live_llm` | Opt-in prompt behavior check against the configured live chat model |
+| `live_llm` | Extra supervisor/conversation assertions (skip if `CHAT_LLM_MODE` != live in `.env.test`) |
 | `slow` | Long intra-doc extract |
 
-Default CI: `pytest -m "not vllm and not livekit and not slow and not live_llm"`.
+**Test env:** `conftest.py` sets `TESTING=1` → `config.py` loads **`backend/.env.test`**. That file is the only source of truth for `CHAT_LLM_MODE`, `DECISION_SCORER_MODE`, and `COLAB_INFERENCE_BASE_URL`. Do not override those in conftest.
 
-Opt-in live Conversation check: set `CHAT_LLM_MODE=live` (or configure `backend/.env.test`), set `ME_MEX_RUN_LIVE_LLM_TESTS=1`, then run `uv run pytest -m live_llm`. The live test is excluded from the default suite; ordinary tests keep stub/mock backends.
+Default gate: `uv run pytest` with **pytest-xdist** `-n auto --dist=loadgroup` and `-m "not vllm and not livekit and not slow"`. Each xdist worker gets its own Mongo database (`test-me-mex-gw0`, …). Override worker count: `uv run pytest -n 4`.
 
 ---
 
-## 6. CI pipeline (required)
+## 6. Test pipeline (required)
 
 | Stage | Command / action | Gate |
 |-------|------------------|------|
-| **Lint / typecheck** | ruff + mypy (or project standard) on `backend/`, `voice_worker/` | Required in CI |
-| **Unit** | `pytest tests/unit` | Required in CI |
-| **Integration** | `pytest tests/integration -m "not vllm"` | Required in CI |
-| **E2E workflows** | `pytest tests/e2e/workflows tests/e2e/anti_patterns` | Required in CI |
-| **Frontend** | `npm test` (dock + canvas utils) | Required in CI (Phase 2+) |
-| **Decision eval** | `pytest tests/integration/decision -m vllm` or scripted eval | **Phase 1 exit** |
-| **Nightly** | full `-m vllm` + optional Playwright | Non-blocking until stable |
+| **Lint / typecheck** | ruff + mypy (or project standard) on `backend/`, `voice_worker/` | Required |
+| **Backend** | `uv run pytest` from repo root (Mongo + Colab per `.env.test`) | Required |
+| **Frontend** | `npm test` (dock + canvas utils) | Required (Phase 2+) |
+| **Decision eval** | `uv run pytest backend/tests/integration/decision -m vllm -n 0` | **Phase 1 exit** |
+| **LiveKit / Playwright** | `-m livekit` or browser smokes | Phase 2+ |
 
 Do **not** treat a phase as complete if any workflow in [§4](#4-workflow-test-matrix-06) lacks a passing test for that phase.
 
