@@ -13,8 +13,10 @@ from app.agents.context_preprocessor import apply_custom_fields_to_text
 from app.agents.dispatch_materializer import ordered_field_references
 from app.agents.source_reference import resolve_source_reference
 from app.agents.supervisor_plan_contract import (
+    repair_job_control_targets,
     routing_binding_hints,
     structural_multi_url_dispatch_fallback,
+    supervisor_completion_floor,
     supervisor_max_tokens,
 )
 from app.config import settings
@@ -86,7 +88,10 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
                 "project_scope": intro if intro else "(empty)",
                 "introduction": intro,
                 "payload": payload,
-                "supervisor_max_tokens": supervisor_max_tokens(routing_context),
+                "supervisor_max_tokens": max(
+                    supervisor_max_tokens(routing_context),
+                    supervisor_completion_floor(),
+                ),
             }
         )
     except Exception:  # noqa: BLE001 - routing failure must not swallow the conversation turn
@@ -111,6 +116,9 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
         and len(scope_candidate) >= 100
     ):
         decision = decision.model_copy(update={"dispatch": True})
+
+    decision = structural_multi_url_dispatch_fallback(decision, routing_context)
+    decision = repair_job_control_targets(decision, routing_context)
 
     needs_source = decision.intent in {"source_summary", "source_analysis"} or (
         decision.intent == "commit_gist" and not (decision.content or fields.get("gist"))
@@ -138,8 +146,6 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
             source_field=source.field_name or decision.source_field,
             source_reference=source.url or decision.source_reference,
         )
-
-    decision = structural_multi_url_dispatch_fallback(decision, routing_context)
 
     if not decision.dispatch_tasks:
         url_rows = ordered_field_references(fields)

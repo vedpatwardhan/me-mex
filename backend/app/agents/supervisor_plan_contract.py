@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.dispatch_materializer import ordered_field_references
+from app.config import settings
 from app.llm.schemas import DispatchTask, WorkerRoute
 
 _SOURCE_WORKERS = frozenset({"gist", "intradoc", "link", "reorg", "retrieval"})
@@ -74,13 +75,40 @@ def plan_incomplete(decision: WorkerRoute, context: dict[str, Any] | None) -> bo
     )
 
 
+def supervisor_completion_floor() -> int:
+    """Minimum completion budget for WorkerRoute JSON (higher on small models)."""
+    name = (settings.LLM_MODEL_NAME or "").lower()
+    if "3-3b" in name or "3b" in name:
+        return 2048
+    return 768
+
+
+def repair_job_control_targets(
+    decision: WorkerRoute, context: dict[str, Any] | None
+) -> WorkerRoute:
+    """Fill target_id when exactly one active dock job and job_control omits it."""
+    if decision.worker != "job_control" and decision.intent != "job_control":
+        return decision
+    if decision.target_id or not decision.job_action:
+        return decision
+    session = (context or {}).get("session_state") or {}
+    active = session.get("active_jobs") or []
+    if len(active) != 1:
+        return decision
+    job_id = active[0].get("job_id")
+    if not job_id:
+        return decision
+    return decision.model_copy(update={"target_id": str(job_id)})
+
+
 def supervisor_max_tokens(context: dict[str, Any] | None) -> int:
     url_count = _url_count(context)
     job_count = _active_job_count(context)
     scale = max(url_count, job_count, len((context or {}).get("custom_fields") or {}))
     if scale < 2:
         return 512
-    return min(2048, max(768, 160 * scale))
+    scaled = min(2048, max(768, 160 * scale))
+    return max(scaled, supervisor_completion_floor())
 
 
 def structural_multi_url_dispatch_fallback(

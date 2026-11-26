@@ -482,7 +482,9 @@ def _scope_approval_reply(introduction: str) -> str:
             }
         )
         text = str(reply or "").strip()
-        return text or fallback
+        if text and "scope" in text.lower():
+            return text
+        return fallback
     except Exception:  # noqa: BLE001 - scope is committed before optional acknowledgement generation
         return fallback
 

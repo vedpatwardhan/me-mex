@@ -9,6 +9,29 @@ from app.llm.schemas import WorkerRoute
 from app.models import Project
 
 
+def _empty_project_scope_route(text: str, project: Project) -> WorkerRoute | None:
+    """P1 scope onboarding when introduction is empty (no Supervisor JSON required)."""
+    if (project.introduction or "").strip():
+        return None
+    normalized = " ".join(text.lower().split())
+    if not normalized:
+        return None
+    triggers = (
+        "my project scope",
+        "project scope is",
+        "save scope",
+        "define my scope",
+        "define the project scope",
+    )
+    if not any(phrase in normalized for phrase in triggers):
+        return None
+    return WorkerRoute(
+        worker="project_scope",
+        intent="scope_conversation",
+        dispatch=True,
+    )
+
+
 def _link_route_from_graph_context(text: str, context: dict[str, Any]) -> WorkerRoute | None:
     memory = context.get("routing_memory") or {}
     focus = (memory.get("focus_root") or {}).get("id") or context.get("pinned_root_id")
@@ -66,6 +89,8 @@ def authoritative_worker_route(
             intent="scope_conversation",
             dispatch=True,
         )
+    if scope := _empty_project_scope_route(text, project):
+        return scope
     if fields.get("resume_job_id"):
         return WorkerRoute(worker="conversation", intent="status", dispatch=False)
     if fields.get("promote_todo_id"):
