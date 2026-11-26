@@ -1,17 +1,66 @@
 #!/usr/bin/env bash
 # Start Me-Mex Colab inference processes in tmux windows; append stdout/stderr to logs/.
-# Usage: ./start_inference_tmux.sh [instruct|reasoning]
+#
+# Usage:
+#   ./start_inference_tmux.sh [instruct|reasoning] [8b|3b]
+#   ./start_inference_tmux.sh {3b|8b}-{instruct|reasoning}
+#
+# Defaults: reasoning, 8b (L4-style). For T4 at full RUNBOOK context, try:
+#   ./start_inference_tmux.sh reasoning 3b
+#
 # Attach: tmux attach -t me-mex-inference
 set -euo pipefail
+
+usage() {
+  sed -n '2,12p' "$0" | tail -n +2
+}
 
 COLAB_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="${COLAB_DIR}/logs"
 SESSION="${TMUX_SESSION:-me-mex-inference}"
-VLLM_VARIANT="${1:-reasoning}"
+VLLM_VARIANT="reasoning"
+VLLM_SIZE="8b"
+
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    instruct | reasoning)
+      VLLM_VARIANT="$arg"
+      ;;
+    3b | 8b)
+      VLLM_SIZE="$arg"
+      ;;
+    3b-instruct | instruct-3b)
+      VLLM_VARIANT="instruct"
+      VLLM_SIZE="3b"
+      ;;
+    3b-reasoning | reasoning-3b)
+      VLLM_VARIANT="reasoning"
+      VLLM_SIZE="3b"
+      ;;
+    8b-instruct | instruct-8b)
+      VLLM_VARIANT="instruct"
+      VLLM_SIZE="8b"
+      ;;
+    8b-reasoning | reasoning-8b)
+      VLLM_VARIANT="reasoning"
+      VLLM_SIZE="8b"
+      ;;
+    *)
+      echo "Unknown argument: $arg" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
 
 mkdir -p "$LOG_DIR"
 touch "${LOG_DIR}/vllm.log" "${LOG_DIR}/speech.log" "${LOG_DIR}/gateway.log" "${LOG_DIR}/cloudflared.log"
 echo "Logs: ${LOG_DIR}/"
+echo "vLLM profile: ${VLLM_SIZE} ${VLLM_VARIANT}"
 
 if ! command -v tmux &>/dev/null; then
   echo "Installing tmux..."
@@ -19,21 +68,35 @@ if ! command -v tmux &>/dev/null; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux
 fi
 
+if [[ "$VLLM_SIZE" == "3b" ]]; then
+  if [[ "$VLLM_VARIANT" == "instruct" ]]; then
+    VLLM_MODEL="mistralai/Ministral-3-3B-Instruct-2512"
+  else
+    VLLM_MODEL="mistralai/Ministral-3-3B-Reasoning-2512"
+  fi
+else
+  if [[ "$VLLM_VARIANT" == "instruct" ]]; then
+    VLLM_MODEL="mistralai/Ministral-3-8B-Instruct-2512"
+  else
+    VLLM_MODEL="mistralai/Ministral-3-8B-Reasoning-2512"
+  fi
+fi
+
 if [[ "$VLLM_VARIANT" == "instruct" ]]; then
-  VLLM_MODEL="mistralai/Ministral-3-8B-Instruct-2512"
   VLLM_LEN=8192
   VLLM_SEQS=4
   VLLM_BATCHED=""
   VLLM_EXTRA=""
   VLLM_UTIL=0.90
 else
-  VLLM_MODEL="mistralai/Ministral-3-8B-Reasoning-2512"
   VLLM_LEN=12288
   VLLM_SEQS=8
   VLLM_BATCHED="--max-num-batched-tokens 8192"
   VLLM_EXTRA="--reasoning-parser mistral"
   VLLM_UTIL=0.95
 fi
+
+echo "Model: ${VLLM_MODEL} (max-model-len=${VLLM_LEN}, max-num-seqs=${VLLM_SEQS})"
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "Killing existing session: $SESSION"
@@ -80,3 +143,4 @@ tmux send-keys -t "${SESSION}:logs" "tail -F ${LOG_DIR}/vllm.log ${LOG_DIR}/gate
 echo "Session $SESSION started. Attach: tmux attach -t $SESSION"
 echo "Windows: vllm → speech → gateway (waits ~90s) → tunnel (waits ~120s) → logs (tail -F)"
 echo "Copy tunnel URL from cloudflared.log or the tunnel window."
+echo "Mac/backend: set LLM_MODEL_NAME=${VLLM_MODEL} and COLAB_INFERENCE_BASE_URL to the tunnel host."
