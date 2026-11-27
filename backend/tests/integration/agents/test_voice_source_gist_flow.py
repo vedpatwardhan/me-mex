@@ -1,3 +1,4 @@
+import re
 import threading
 from dataclasses import replace
 
@@ -7,17 +8,25 @@ from app.llm.schemas import WorkerRoute
 from langchain_core.runnables import RunnableLambda
 from tests.sse_util import iter_sse_data
 
+_FORBIDDEN = re.compile(r"predictive world model|arxiv\.org|2605\.11550", re.IGNORECASE)
+
+
+def _conversation_for_voice_gist(inp):
+    text = str(inp.get("text") or "")
+    if "dispatch_interim" in text:
+        return "I will run a gist in the background. Check the dock for the reviewable draft."
+    if "gist_followup" in text:
+        return "The gist is ready in the dock for review. Approve it there to add it to the graph."
+    if "approval_ack" in text:
+        return "The gist has been added to the graph."
+    return "Okay."
+
 
 def test_voice_source_gist_holds_then_creates_reviewable_root_proposal(
     client, store, project_scoped, voice_context_json, monkeypatch
 ):
     events = []
     followup_ready = threading.Event()
-
-    def conversation_must_not_run(_inputs):
-        raise AssertionError(
-            "dispatch acknowledgements must not ask Conversation to infer source facts"
-        )
 
     base = get_chains()
     monkeypatch.setattr("app.agents.conversation_voice.settings.CHAT_LLM_MODE", "live")
@@ -33,7 +42,7 @@ def test_voice_source_gist_holds_then_creates_reviewable_root_proposal(
                     source_reference="https://arxiv.org/abs/2605.11550",
                 )
             ),
-            conversation=RunnableLambda(conversation_must_not_run),
+            conversation=RunnableLambda(_conversation_for_voice_gist),
             gist_draft=RunnableLambda(
                 lambda inputs: (
                     "The paper proposes a new predictive world model and evaluates it experimentally."
@@ -79,15 +88,12 @@ def test_voice_source_gist_holds_then_creates_reviewable_root_proposal(
     assert response.status_code == 200
     assert end["worker_kind"] == "gist"
     assert end["dispatched"] is True
-    assert end["reply"] == (
-        "I’ll read the paper you shared and put a concise gist in the dock for review."
-    )
-    assert "predictive world model" not in end["reply"]
+    assert "dock" in end["reply"].lower()
+    assert not _FORBIDDEN.search(end["reply"])
     assert followup_ready.wait(timeout=5)
     followup = next(event for event in events if event.get("type") == "assistant_followup")
-    assert followup["text"] == (
-        "The gist is ready in the dock for review. Approve it there to add it to the graph."
-    )
+    assert "dock" in followup["text"].lower()
+    assert not _FORBIDDEN.search(followup["text"])
     approvals = client.get(
         "/api/agent/approvals",
         params={"project_id": project_scoped.id, "thread_id": thread_id},

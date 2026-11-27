@@ -47,7 +47,29 @@ def test_supervisor_selected_reference_must_be_user_supplied():
 
 
 def test_supervisor_route_resolves_summary_and_deep_analysis_intents(project):
-    gist_context = {"custom_fields": {"paper": "https://arxiv.org/pdf/2605.11550"}}
+    base = get_chains()
+    paper = "https://arxiv.org/pdf/2605.11550"
+
+    def supervisor(inputs):
+        text = str(inputs.get("text") or "").lower()
+        if "summary" in text:
+            return WorkerRoute(
+                worker="gist",
+                intent="source_summary",
+                dispatch=True,
+                source_field="paper",
+                source_reference=paper,
+            )
+        return WorkerRoute(
+            worker="intradoc",
+            intent="source_analysis",
+            dispatch=True,
+            source_field="paper",
+            source_reference=paper,
+        )
+
+    set_chains_override(replace(base, supervisor=RunnableLambda(supervisor)))
+    gist_context = {"custom_fields": {"paper": paper}}
     summary = workers.route_intent("Give me a brief summary", gist_context, project)
     detailed = workers.route_intent("Give me a detailed analysis", gist_context, project)
     assert (summary.worker, summary.intent, summary.dispatch) == ("gist", "source_summary", True)

@@ -194,6 +194,19 @@ def test_multi_paper_mixed_workers_dispatches_three_jobs_despite_supervisor_pin(
         return _run
 
     monkeypatch.setattr(conversation_voice, "worker_handler", worker_stub)
+    base = get_chains()
+    set_chains_override(
+        replace(
+            base,
+            conversation=RunnableLambda(
+                lambda inp: (
+                    "I will start three background jobs; watch the dock queue for progress."
+                    if "multi_dispatch_interim" in str(inp.get("text") or "")
+                    else "Okay."
+                )
+            ),
+        )
+    )
     text = (
         "I have just attached a link to three different papers. "
         "I need a high level summary of the first two papers and I need a "
@@ -223,7 +236,9 @@ def test_multi_paper_mixed_workers_dispatches_three_jobs_despite_supervisor_pin(
     assert len(end["job_ids"]) == 3
     assert sorted(calls) == ["gist", "gist", "intradoc"]
     assert len(jobs) == 3
-    assert "background job" in (end.get("reply") or "").lower()
+    reply = (end.get("reply") or "").lower()
+    assert "dock" in reply
+    assert "background" in reply
 
 
 @pytest.mark.voice_plane
@@ -431,8 +446,10 @@ def test_voice_job_control_cancels_selected_job_without_dispatching_new_work(
     job_runtime._resume_events[job["job_id"]] = threading.Event()
     job_runtime._resume_events[job["job_id"]].set()
 
-    def conversation_must_not_run(_inputs):
-        raise AssertionError("job control must not be handled as ordinary chat")
+    def conversation_job_control(inp):
+        if "job_control_result" not in str(inp.get("text") or ""):
+            raise AssertionError("expected job_control_result utterance intent")
+        return "I have cancelled the gist job."
 
     set_chains_override(
         replace(
@@ -446,7 +463,7 @@ def test_voice_job_control_cancels_selected_job_without_dispatching_new_work(
                     job_action="cancel",
                 )
             ),
-            conversation=RunnableLambda(conversation_must_not_run),
+            conversation=RunnableLambda(conversation_job_control),
         )
     )
 

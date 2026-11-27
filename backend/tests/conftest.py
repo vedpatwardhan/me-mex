@@ -1,22 +1,26 @@
+import importlib.util
 import json
+import logging
 import os
 import sys
 from pathlib import Path
-
-import pytest
-from fastapi.testclient import TestClient
 
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-os.environ.setdefault("TESTING", "1")
-_xdist_worker = os.environ.get("PYTEST_XDIST_WORKER")
-if _xdist_worker:
-    os.environ["DB_NAME"] = f"test-me-mex-{_xdist_worker}"
-else:
-    os.environ.setdefault("DB_NAME", "test-me-mex")
+_parallel_path = Path(__file__).resolve().parent / "_parallel_env.py"
+_parallel_spec = importlib.util.spec_from_file_location("memex_parallel_env", _parallel_path)
+assert _parallel_spec and _parallel_spec.loader
+_parallel_mod = importlib.util.module_from_spec(_parallel_spec)
+_parallel_spec.loader.exec_module(_parallel_mod)
+configure_pytest_worker_runtime = _parallel_mod.configure_pytest_worker_runtime
+xdist_worker_label = _parallel_mod.xdist_worker_label
+
+configure_pytest_worker_runtime()
+
 import app.db.store as store_module
+import pytest
 from app.db.store import Store
 from app.llm.chains import (
     AgentChains,
@@ -25,10 +29,44 @@ from app.llm.chains import (
     set_recorded_intradoc,
 )
 from app.services.decision_scorer import set_decision_scorer_override
+from fastapi.testclient import TestClient
 from langchain_core.runnables import RunnableLambda
 from main import app
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def bind_worker_session_checkpoint(monkeypatch):
+    """LangGraph session JSON uses a store scoped to this xdist worker (not shared dev data)."""
+    from app.agents import session_plane
+    from app.config import settings
+    from app.services.checkpoints import JsonCheckpointStore
+
+    store = JsonCheckpointStore(settings.CHECKPOINTS_DIR)
+    monkeypatch.setattr(session_plane, "_checkpoint", store)
+    yield
+
+
+def pytest_configure(config):
+    os.environ["ME_MEX_PYTEST_WORKER"] = xdist_worker_label()
+
+
+def pytest_xdist_auto_num_workers(config):
+    """Cap workers when live Colab is enabled to reduce tunnel overload and 524 flakes."""
+    try:
+        from app.config import settings
+
+        if settings.CHAT_LLM_MODE == "live":
+            import os
+
+            cpus = os.cpu_count() or 4
+            return max(1, min(2, cpus // 2 or 1))
+    except Exception:
+        logging.getLogger(__name__).debug(
+            "pytest_xdist_auto_num_workers live cap skipped", exc_info=True
+        )
+    return None
 
 
 @pytest.fixture(autouse=True)
@@ -173,10 +211,10 @@ def robotics_seed_graph(store, project_scoped):
 
 @pytest.fixture
 def tmpdir_checkpoint(tmp_path, monkeypatch):
-    from app.services import checkpoints as cp_mod
-
-    monkeypatch.setattr(cp_mod.settings, "CHECKPOINTS_DIR", str(tmp_path / "cp"))
-    return tmp_path / "cp"
+    cp_dir = tmp_path / "cp"
+    cp_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CHECKPOINTS_DIR", str(cp_dir))
+    return cp_dir
 
 
 @pytest.fixture

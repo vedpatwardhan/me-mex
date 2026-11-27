@@ -1,8 +1,16 @@
 from app.agents import session_plane
+from app.agents.conversation_utterance import UtteranceIntent
 from app.services.checkpoints import JsonCheckpointStore
 
 
 def test_completed_gist_publishes_brief_approval_status(project, tmpdir_checkpoint, monkeypatch):
+    monkeypatch.setattr(
+        session_plane,
+        "invoke_conversation_utterance",
+        lambda inp, intent=UtteranceIntent.GIST_FOLLOWUP: (
+            "The gist is ready in the dock for review. Approve it there to add it to the graph."
+        ),
+    )
     monkeypatch.setattr(
         session_plane,
         "_checkpoint",

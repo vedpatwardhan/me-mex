@@ -6,7 +6,7 @@ from app.agents.workers import route_intent
 from app.config import settings
 from app.models import Project
 
-pytestmark = pytest.mark.live_llm
+pytestmark = [pytest.mark.live_llm, pytest.mark.xdist_group(name="live_llm")]
 
 
 def _skip_unless_live():

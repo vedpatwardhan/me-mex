@@ -57,6 +57,7 @@ backend/data/**
 !backend/data/decision_training/
 backend/data/decision_training/**
 !backend/data/decision_training/README.md
+backend/data/pytest_runtime/
 backend/logs/**
 !backend/logs/decision_traces/
 backend/logs/decision_traces/**

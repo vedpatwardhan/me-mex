@@ -32,6 +32,29 @@ def _empty_project_scope_route(text: str, project: Project) -> WorkerRoute | Non
     )
 
 
+def _retrieval_route(text: str, fields: dict[str, Any]) -> WorkerRoute | None:
+    """W11: explicit graph seed in custom fields + relation question → RetrievalWorker."""
+    if not str(fields.get("query_node_id") or "").strip():
+        return None
+    normalized = " ".join(text.lower().split())
+    if not normalized:
+        return None
+    triggers = (
+        "what relates",
+        "relates to",
+        "related to",
+        "related nodes",
+        "highlight",
+        "subgraph",
+        "connections in",
+        "what connects",
+        "explore the graph",
+    )
+    if any(phrase in normalized for phrase in triggers):
+        return WorkerRoute(worker="retrieval", intent="retrieval", dispatch=True)
+    return None
+
+
 def _link_route_from_graph_context(text: str, context: dict[str, Any]) -> WorkerRoute | None:
     memory = context.get("routing_memory") or {}
     focus = (memory.get("focus_root") or {}).get("id") or context.get("pinned_root_id")
@@ -93,6 +116,8 @@ def authoritative_worker_route(
         return scope
     if fields.get("resume_job_id"):
         return WorkerRoute(worker="conversation", intent="status", dispatch=False)
+    if retrieval := _retrieval_route(text, fields):
+        return retrieval
     if fields.get("promote_todo_id"):
         return WorkerRoute(
             worker="scratch",

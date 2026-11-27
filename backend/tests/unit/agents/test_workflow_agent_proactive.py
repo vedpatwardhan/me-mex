@@ -7,6 +7,7 @@ def test_scope_done_no_proactive_without_approval():
         worker_output={"reply": "ok", "graph_write": False},
     )
     assert out["proactive_script"] == ""
+    assert out.get("proactive_meta") is None
 
 
 def test_scope_awaiting_approval_nudge():
@@ -14,4 +15,6 @@ def test_scope_awaiting_approval_nudge():
         job={"status": "awaiting_approval", "worker": "project_scope", "label": "scope"},
         worker_output={"reply": "draft", "approval_id": "a1"},
     )
-    assert "scope" in out["proactive_script"].lower()
+    assert out["proactive_script"] == ""
+    assert out["proactive_meta"]["kind"] == "review"
+    assert out["proactive_meta"]["worker"] == "project_scope"

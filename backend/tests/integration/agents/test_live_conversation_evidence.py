@@ -1,4 +1,7 @@
 import pytest
+
+pytestmark = [pytest.mark.live_llm, pytest.mark.xdist_group(name="live_llm")]
+
 from app.agents.conversation_voice import (
     _astream_voice_conversation_reply,
     _conversation_prompt_inputs,

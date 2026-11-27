@@ -118,7 +118,7 @@ Marker **`voice_plane`** (default CI; HTTP/SSE only, no LiveKit room).
 |----------|-------------|
 | Conversation no tools on voice | `test_voice_conversation_stream.py` |
 | Async dispatch off hot path | `test_voice_dispatch_enqueued.py` |
-| Dispatched source jobs use a fixed acknowledgement; normal Conversation receives only completed source results and no source-URL fields | `test_voice_source_gist_flow.py`, `test_conversation_voice_stream.py`, `test_session_briefing.py` |
+| Dispatched source jobs use Conversation interim acks (no source URLs in prompt; no speculative paper claims in reply); normal Conversation receives only completed source results and no source-URL fields | `test_voice_source_gist_flow.py`, `test_conversation_voice_stream.py`, `test_session_briefing.py` |
 | Chit-chat skips worker | `test_voice_chit_chat_no_graph.py` |
 | Briefing API | `test_session_briefing_api.py` |
 | Worker reply not hot-path TTS | `test_streaming_voice_filter.py` |
@@ -174,7 +174,9 @@ Every workflow row **must** have at least one **e2e** test (REST Phase 1; + voic
 
 **Test env:** `conftest.py` sets `TESTING=1` → `config.py` loads **`backend/.env.test`**. That file is the only source of truth for `CHAT_LLM_MODE`, `DECISION_SCORER_MODE`, and `COLAB_INFERENCE_BASE_URL`. Do not override those in conftest.
 
-Default gate: `uv run pytest` with **pytest-xdist** `-n auto --dist=loadgroup` and `-m "not vllm and not livekit and not slow"`. Each xdist worker gets its own Mongo database (`test-me-mex-gw0`, …). Override worker count: `uv run pytest -n 4`.
+Default gate: `uv run pytest` with **pytest-xdist** `-n auto --dist=loadgroup` and `-m "not vllm and not livekit and not slow"`. Each xdist worker gets its own Mongo database (`test-me-mex-gw0`, …), checkpoint directory (`backend/data/pytest_runtime/gw0/checkpoints`, …), and trace directories under the same `pytest_runtime` tree. Override worker count: `uv run pytest -n 4`.
+
+**Agents / CI:** Always use the default parallel gate above. Do **not** pass `-n0` to debug unless reproducing a single test; serial mode hides cross-worker checkpoint/log races. Documented exceptions only: `tests/integration/decision -m vllm` and `-m livekit` (see §6).
 
 ---
 

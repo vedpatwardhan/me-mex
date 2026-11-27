@@ -2,7 +2,10 @@ from app.agents.session_plane import build_session_briefing, upsert_job_history
 
 
 def test_recent_jobs_includes_cancelled_history(store, project, tmpdir_checkpoint, monkeypatch):
-    monkeypatch.setenv("ME_MEX_CHECKPOINT_DIR", str(tmpdir_checkpoint))
+    from app.agents import session_plane
+    from app.services.checkpoints import JsonCheckpointStore
+
+    monkeypatch.setattr(session_plane, "_checkpoint", JsonCheckpointStore(str(tmpdir_checkpoint)))
     thread_id = "t-hist"
     upsert_job_history(
         thread_id,

@@ -1,0 +1,12 @@
+---
+description: Me-Mex pytest must run in parallel by default (xdist)
+alwaysApply: true
+---
+
+# Pytest parallelism (Me-Mex)
+
+- Run backend tests with default **parallel** settings: from repo root or `backend/`, use `uv run pytest` (pytest.ini: `-n auto --dist=loadgroup`).
+- **Do not** use `-n0` for routine verification or debugging unless the user explicitly asks for a single-worker repro.
+- Exceptions (serial by design): `-m vllm` decision eval, `-m livekit`, and other entries in `docs/11-testing.md` §6.
+- Each xdist worker has isolated `DB_NAME`, `CHECKPOINTS_DIR`, `ME_MEX_TRACE_DIR`, and `DECISION_TRACE_DIR` via `backend/tests/_parallel_env.py` (set before app import in `conftest.py`).
+- Prefer boundary assertions in voice tests; avoid exact hardcoded utterance strings when Conversation LLM generates replies.

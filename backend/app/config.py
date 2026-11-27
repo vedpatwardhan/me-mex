@@ -92,18 +92,21 @@ class Settings:
     HTTPX_MAX_CONNECTIONS: int = int(os.getenv("HTTPX_MAX_CONNECTIONS", "20"))
     HTTPX_MAX_KEEPALIVE: int = int(os.getenv("HTTPX_MAX_KEEPALIVE", "10"))
 
-    CHECKPOINTS_DIR: str = os.getenv(
-        "CHECKPOINTS_DIR",
-        str(BACKEND_DIR / "data" / "checkpoints"),
-    )
-    DECISION_TRAINING_DIR: str = os.getenv(
-        "DECISION_TRAINING_DIR",
-        str(BACKEND_DIR / "data" / "decision_training"),
-    )
-    DECISION_TRACE_DIR: str = os.getenv(
-        "DECISION_TRACE_DIR",
-        str(BACKEND_DIR / "logs" / "decision_traces"),
-    )
+    @property
+    def CHECKPOINTS_DIR(self) -> str:
+        return os.getenv("CHECKPOINTS_DIR", str(BACKEND_DIR / "data" / "checkpoints"))
+
+    @property
+    def DECISION_TRAINING_DIR(self) -> str:
+        return os.getenv(
+            "DECISION_TRAINING_DIR",
+            str(BACKEND_DIR / "data" / "decision_training"),
+        )
+
+    @property
+    def DECISION_TRACE_DIR(self) -> str:
+        return os.getenv("DECISION_TRACE_DIR", str(BACKEND_DIR / "logs" / "decision_traces"))
+
     DECISION_TRACE_ENABLED: bool = _env_bool(
         "DECISION_TRACE_ENABLED",
         "true" if os.getenv("TESTING") != "1" else "false",

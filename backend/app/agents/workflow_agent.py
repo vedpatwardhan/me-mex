@@ -39,17 +39,23 @@ def run_workflow_agent(
             }
         )
 
+    proactive_meta: dict[str, Any] | None = None
     if status == "awaiting_approval" and approval_id:
-        if worker == "project_scope":
-            proactive = "There's a scope update to review in the dock."
-        else:
-            proactive = f"Your {worker} task is ready for review in the dock."
+        proactive_meta = {
+            "kind": "review",
+            "worker": worker,
+            "label": label,
+            "approval_id": str(approval_id),
+        }
     elif status == "done" and worker != "project_scope":
-        proactive = f"Finished {label or worker}." if label else f"{worker} is done."
-    else:
-        proactive = ""
+        proactive_meta = {
+            "kind": "complete",
+            "worker": worker,
+            "label": label,
+        }
 
     return {
         "recommendation_cards": cards,
-        "proactive_script": proactive[:512],
+        "proactive_meta": proactive_meta,
+        "proactive_script": "",
     }

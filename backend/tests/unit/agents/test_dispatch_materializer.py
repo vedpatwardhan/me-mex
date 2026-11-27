@@ -109,7 +109,8 @@ def test_conversation_clarify_with_multiple_urls_materializer_gate():
         dispatch_allowed=True,
     )
     assert r.decisions == []
-    assert r.clarification
+    assert r.clarification is not None
+    assert r.clarification.code == "multi_source_plan_required"
 
 
 def test_multi_action_gate_single_pinned_field_clarifies():
@@ -133,7 +134,8 @@ def test_multi_action_gate_single_pinned_field_clarifies():
         dispatch_allowed=True,
     )
     assert r.decisions == []
-    assert r.clarification
+    assert r.clarification is not None
+    assert r.clarification.code == "multi_source_plan_required"
 
 
 def test_job_control_requires_known_job_id():
@@ -160,7 +162,8 @@ def test_job_control_requires_known_job_id():
         dispatch_allowed=True,
     )
     assert r.decisions == []
-    assert r.clarification
+    assert r.clarification is not None
+    assert r.clarification.code == "job_id_unknown"
 
 
 def test_job_control_tasks_materialize():

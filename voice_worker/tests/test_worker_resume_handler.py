@@ -2,7 +2,12 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
-from voice_agent.worker import RoomSession, _approval_reply, _handle_data
+from voice_agent.worker import (
+    EMERGENCY_APPROVAL_FALLBACK,
+    RoomSession,
+    _approval_reply,
+    _handle_data,
+)
 
 
 @pytest.mark.asyncio
@@ -11,7 +16,12 @@ async def test_approve_data_calls_post_resume(monkeypatch):
 
     async def fake_post_resume(**kwargs):
         calls.append(kwargs)
-        return {"status": "approved", "approval_type": "gist_root", "graph_write": True}
+        return {
+            "status": "approved",
+            "approval_type": "gist_root",
+            "graph_write": True,
+            "reply": "The gist has been added to the graph.",
+        }
 
     monkeypatch.setattr("voice_agent.worker.post_resume", fake_post_resume)
     monkeypatch.setattr("voice_agent.worker.speech_enabled", lambda: False)
@@ -35,16 +45,12 @@ async def test_approve_data_calls_post_resume(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("approval_type", "expected"),
-    [
-        ("gist_root", "The gist has been added to the graph."),
-        ("intra_doc_staging", "The intra-document analysis has been added to the graph."),
-        ("placement", "I’ve connected the source to the selected graph nodes."),
-        ("reorg", "The approved graph reorganization has been applied."),
-    ],
+    "approval_type",
+    ["gist_root", "intra_doc_staging", "placement", "reorg"],
 )
-def test_approval_fallback_is_natural_for_each_write_type(approval_type, expected):
-    assert _approval_reply({"status": "approved", "approval_type": approval_type}) == expected
+def test_approval_without_backend_reply_uses_emergency_fallback(approval_type):
+    reply = _approval_reply({"status": "approved", "approval_type": approval_type})
+    assert reply == EMERGENCY_APPROVAL_FALLBACK
 
 
 def test_approval_reply_prefers_conversational_backend_reply():

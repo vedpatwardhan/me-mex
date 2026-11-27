@@ -10,7 +10,7 @@ def test_tracing_scorer_logs_and_appends(monkeypatch, tmp_path: Path, caplog):
     import logging
 
     caplog.set_level(logging.INFO, logger="memex.v2.decision")
-    monkeypatch.setattr("app.config.settings.DECISION_TRACE_DIR", str(tmp_path))
+    monkeypatch.setenv("DECISION_TRACE_DIR", str(tmp_path))
     monkeypatch.setattr("app.config.settings.DECISION_TRACE_ENABLED", True)
 
     inner = MockDecisionScorer()

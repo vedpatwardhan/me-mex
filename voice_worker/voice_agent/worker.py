@@ -154,25 +154,14 @@ def _should_run_turn(session: RoomSession, text: str) -> bool:
     return bool(text.strip())
 
 
+EMERGENCY_APPROVAL_FALLBACK = "Something went wrong generating a reply. Check the dock for status."
+
+
 def _approval_reply(result: dict[str, Any]) -> str:
     reply = str(result.get("reply") or "").strip()
     if reply and reply.casefold().strip(".! ") not in {"approved", "dismissed", "done"}:
         return reply
-    if result.get("status") == "dismissed":
-        return "I dismissed that proposal. It was not added to the graph."
-    fallback = {
-        "project_scope": "Thanks for approving the project scope. I’ll use it to guide our research.",
-        "gist_root": "The gist has been added to the graph.",
-        "intra_doc_staging": "The intra-document analysis has been added to the graph.",
-        "placement": "I’ve connected the source to the selected graph nodes.",
-        "reorg": "The approved graph reorganization has been applied.",
-    }
-    approval_type = str(result.get("approval_type") or "")
-    if approval_type in fallback:
-        return fallback[approval_type]
-    if result.get("graph_write") is True:
-        return "The approved change has been applied to the graph."
-    return "That proposal has been approved."
+    return EMERGENCY_APPROVAL_FALLBACK
 
 
 async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> None:

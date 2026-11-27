@@ -5,7 +5,7 @@ from app.services.decision_trace_writer import append_decision_trace_row
 
 
 def test_append_decision_trace_row_disabled(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr("app.config.settings.DECISION_TRACE_DIR", str(tmp_path))
+    monkeypatch.setenv("DECISION_TRACE_DIR", str(tmp_path))
     monkeypatch.setattr("app.config.settings.DECISION_TRACE_ENABLED", False)
 
     path = append_decision_trace_row("demo", {"scenario": "test"})
@@ -13,7 +13,7 @@ def test_append_decision_trace_row_disabled(monkeypatch, tmp_path: Path):
 
 
 def test_append_decision_trace_row_writes_jsonl(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr("app.config.settings.DECISION_TRACE_DIR", str(tmp_path))
+    monkeypatch.setenv("DECISION_TRACE_DIR", str(tmp_path))
     monkeypatch.setattr("app.config.settings.DECISION_TRACE_ENABLED", True)
 
     path = append_decision_trace_row(

@@ -537,9 +537,9 @@ Honest gap table — engineering backlog after this spec:
 | Conversation tools on voice | **None** | `conversation_worker` may call LLM only; routing still sync worker |
 | WorkflowObserver always feeds briefing | Yes | Observer runs only after `_worker_node` |
 | WorkflowAgent dock cards | Yes (small LLM) | Not present — workers call `enqueue_pending_approval` directly |
-| Voice spoken reply always Conversation-first | Yes | Worker may own `reply` and block TTS |
+| Voice spoken reply always Conversation-first | Yes | Partial — dispatch/clarification/proactive via Conversation LLM on voice stream; worker dock `reply` not spoken on hot path |
 | Background jobs for heavy intents | All routed kinds async | Partial — intradoc + `INTRADOC_BG` flag only |
-| Streamed tokens to TTS from Conversation | Yes | Workers often `.invoke()` sync |
-| Proactive job-complete TTS | Always (§12.12) | Not present |
-| `session_briefing` on Conversation | Yes | Not present |
+| Streamed tokens to TTS from Conversation | Yes | Voice stream streams Conversation; REST harness may still sync workers |
+| Proactive job-complete TTS | Always (§12.12) | Partial — Observer generates proactive/gist follow-up via Conversation |
+| `session_briefing` on Conversation | Yes | Partial — embedded in voice stream prompts |
 | `context_json.voice_turn` | Specified | Not honored in router |

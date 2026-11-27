@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import operator
 import os
@@ -20,7 +19,6 @@ from app.agents.context_preprocessor import (
 )
 from app.agents.jobs import job_from_worker_turn
 from app.agents.voice_dispatch import normalize_link_decision
-from app.config import settings
 from app.db import ToolContext, get_store
 from app.services.checkpoints import JsonCheckpointStore
 
@@ -461,32 +459,28 @@ def resume_approval(
 
 
 def _scope_approval_reply(introduction: str) -> str:
-    fallback = (
-        "Thanks for approving the project scope. I’ll use it to guide our research and help us "
-        "decide what to explore next. What would you like to start with?"
+    from app.agents.conversation_utterance import (
+        EMERGENCY_FALLBACK,
+        SCOPE_APPROVAL_EMERGENCY,
+        UtteranceIntent,
+        build_conversation_turn,
+        invoke_conversation_utterance,
     )
-    if settings.CHAT_LLM_MODE != "live":
-        return fallback
-    try:
-        from app.llm import get_chains
 
-        reply = get_chains().conversation.invoke(
-            {
-                "text": (
-                    "The user has just approved the project's scope. Thank them naturally, "
-                    "briefly acknowledge what the project will focus on using the scope context, "
-                    "and transition toward a concrete next step. Do not reply with only an approval "
-                    "status or repeat the approval title. Keep it to two short sentences."
-                ),
-                "project_scope": introduction,
-            }
-        )
-        text = str(reply or "").strip()
-        if text and "scope" in text.lower():
+    inp = build_conversation_turn(
+        intent=UtteranceIntent.APPROVAL_ACK,
+        user_message="The user approved the project scope.",
+        briefing={},
+        project_scope=introduction,
+        utterance_facts={"approval_type": "project_scope", "action": "approve"},
+    )
+    try:
+        text = invoke_conversation_utterance(inp, intent=UtteranceIntent.APPROVAL_ACK)
+        if text and text != EMERGENCY_FALLBACK and "scope" in text.lower():
             return text
-        return fallback
     except Exception:  # noqa: BLE001 - scope is committed before optional acknowledgement generation
-        return fallback
+        _log.exception("Scope approval acknowledgement generation failed")
+    return SCOPE_APPROVAL_EMERGENCY
 
 
 def _approval_reply(
@@ -496,38 +490,32 @@ def _approval_reply(
     *,
     action: str = "approve",
 ) -> str:
-    fallbacks = {
-        "gist_root": "The gist has been added to the graph.",
-        "intra_doc_staging": "The intra-document analysis has been added to the graph.",
-        "placement": "I’ve connected the source to the selected graph nodes.",
-        "reorg": "The approved graph reorganization has been applied.",
-    }
-    if action != "approve":
-        return f"I’ve dismissed {title or 'that proposal'}; it wasn’t added to the graph."
-    fallback = fallbacks.get(approval_type, "That approved change has been applied to the graph.")
-    if settings.CHAT_LLM_MODE != "live":
-        return fallback
-    try:
-        from app.llm import get_chains
+    from app.agents.conversation_utterance import (
+        EMERGENCY_FALLBACK,
+        UtteranceIntent,
+        build_conversation_turn,
+        invoke_conversation_utterance,
+    )
 
-        instruction = (
-            "A user just approved a graph change. Acknowledge naturally in one short sentence, "
-            "state the concrete effect based only on this approval type and result, and never "
-            "reply with only a status word. Do not invent details.\n"
-            + json.dumps(
-                {"approval_type": approval_type, "title": title, "result": result},
-                ensure_ascii=False,
-                default=str,
-            )
-        )
-        reply = str(
-            get_chains().conversation.invoke({"text": instruction, "project_scope": ""}) or ""
-        ).strip()
+    inp = build_conversation_turn(
+        intent=UtteranceIntent.APPROVAL_ACK,
+        user_message=f"The user {action}d a pending change.",
+        briefing={},
+        project_scope="",
+        utterance_facts={
+            "approval_type": approval_type,
+            "title": title,
+            "action": action,
+            "result": {k: v for k, v in result.items() if k in {"status", "graph_write"}},
+        },
+    )
+    try:
+        reply = invoke_conversation_utterance(inp, intent=UtteranceIntent.APPROVAL_ACK)
         if reply and reply.casefold().strip(".! ") not in {"approved", "done", "success"}:
             return reply
     except Exception:  # noqa: BLE001 - graph write has completed; retain a natural fallback
         _log.exception("Approval acknowledgement generation failed for %s", approval_type)
-    return fallback
+    return EMERGENCY_FALLBACK
 
 
 async def astream_agent_turn(

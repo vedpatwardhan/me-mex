@@ -180,7 +180,7 @@ class LLMGateway:
                 if resp.status_code != 200:
                     err_bytes = resp.read()
                     err_detail = f"vLLM Server returned HTTP {resp.status_code}: {err_bytes.decode('utf-8', errors='ignore')}"
-                    print(f"[LLMGateway ERROR] {err_detail}")
+                    _log.error("%s", err_detail)
                     raise ConnectionError(err_detail)
 
                 for line in resp.iter_lines():
@@ -322,9 +322,12 @@ class LLMGateway:
             except (ValueError, ConnectionError, httpx.HTTPError, json.JSONDecodeError) as e:
                 last_error = e
                 if attempt < max_retries:
-                    print(
-                        f"[LLMGateway] Structured generation for {response_model.__name__} failed ({e}). "
-                        f"Retrying (attempt {attempt + 1}/{max_retries})..."
+                    _log.warning(
+                        "Structured generation for %s failed (%s). Retrying (%d/%d)...",
+                        response_model.__name__,
+                        e,
+                        attempt + 1,
+                        max_retries,
                     )
                     attempt_messages = attempt_messages + [
                         {
@@ -336,9 +339,11 @@ class LLMGateway:
                         }
                     ]
                     continue
-                print(
-                    f"[LLMGateway ERROR] Structured completion for {response_model.__name__} failed after "
-                    f"{max_retries} attempts: {last_error}"
+                _log.error(
+                    "Structured completion for %s failed after %d attempts: %s",
+                    response_model.__name__,
+                    max_retries,
+                    last_error,
                 )
                 elapsed = time.perf_counter() - start_time
                 llm_tracer.log_call(

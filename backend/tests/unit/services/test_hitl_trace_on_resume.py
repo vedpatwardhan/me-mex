@@ -6,7 +6,7 @@ from app.tools import gist
 
 
 def test_placement_approve_appends_hitl_trace(store, project, monkeypatch, tmp_path: Path):
-    monkeypatch.setattr("app.config.settings.DECISION_TRACE_DIR", str(tmp_path))
+    monkeypatch.setenv("DECISION_TRACE_DIR", str(tmp_path))
     monkeypatch.setattr("app.config.settings.DECISION_TRACE_ENABLED", True)
 
     from app.db import ToolContext

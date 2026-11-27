@@ -1,8 +1,9 @@
 import pytest
-from app.agents.conversation_voice import (
-    _astream_voice_conversation_reply,
-    _background_worker_acknowledgement,
-    _conversation_prompt_inputs,
+from app.agents.conversation_utterance import (
+    UtteranceIntent,
+    astream_voice_conversation_reply,
+    build_conversation_turn,
+    conversation_prompt_inputs,
 )
 from app.config import settings
 from app.prompts import load_prompt
@@ -17,7 +18,7 @@ async def test_astream_live_yields_tokens_before_full_reply():
         "project_scope": "Research project.",
     }
     parts: list[str] = []
-    async for piece in _astream_voice_conversation_reply(inp):
+    async for piece in astream_voice_conversation_reply(inp):
         parts.append(piece)
     reply = "".join(parts).strip()
     assert parts
@@ -25,14 +26,23 @@ async def test_astream_live_yields_tokens_before_full_reply():
     assert len(reply.split()) <= 25
 
 
-def test_background_gist_dispatch_uses_fixed_acknowledgement():
-    assert _background_worker_acknowledgement("gist") == (
-        "I’ll read the paper you shared and put a concise gist in the dock for review."
+def test_dispatch_interim_prompt_excludes_source_urls():
+    inputs = build_conversation_turn(
+        intent=UtteranceIntent.DISPATCH_INTERIM,
+        user_message="Summarize this paper.",
+        briefing={"active_jobs": [], "scope_complete": True},
+        project_scope="Research project scope",
+        user_fields={"paper": "https://arxiv.org/pdf/2605.11550", "name": "Ved"},
+        utterance_facts={"worker_kind": "gist", "already_running": False},
     )
+    assert "2605.11550" not in inputs["text"]
+    assert "dispatch_interim" in inputs["text"]
+    assert '"name": "Ved"' not in inputs["text"]
+    assert "gist" in inputs["text"]
 
 
 def test_conversation_prompt_uses_completed_results_as_only_source_evidence():
-    inputs = _conversation_prompt_inputs(
+    inputs = conversation_prompt_inputs(
         text="What does the paper say about its method?",
         briefing={
             "pending_approval_count": 1,
@@ -62,3 +72,4 @@ def test_conversation_prompt_uses_completed_results_as_only_source_evidence():
     assert "Never infer a title, method, finding, or conclusion" in prompt
     assert "When `session_briefing.scope_complete` is false" in prompt
     assert "define the project scope" in prompt
+    assert "dispatch_interim" in prompt

@@ -3,22 +3,55 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.source_reference import _references_in, resolve_source_reference
 from app.llm.schemas import DispatchTask, WorkerRoute
 
-_MULTI_SOURCE_CLARIFICATION = (
-    "I need a clear plan per source or job. Use dispatch_tasks in the supervisor "
-    "or say which link or dock job each action applies to."
-)
+CLARIFICATION_CODES = {
+    "multi_source_plan_required": (
+        "Multiple sources or jobs need an explicit per-item plan "
+        "(dispatch_tasks or one action per source)."
+    ),
+    "job_action_missing": (
+        "Each job control action needs job_action: pause, resume, cancel, or delete."
+    ),
+    "job_id_unknown": "That job_id is not in the dock queue for this thread.",
+    "source_field_unreadable": (
+        "The selected source field does not contain a readable link or arXiv ID."
+    ),
+    "job_not_in_queue": "That job could not be found in the dock queue for this thread.",
+    "dispatch_tasks_empty": "No actions were listed in dispatch_tasks.",
+    "supervisor_source_error": "Supervisor reported a source resolution problem.",
+    "task_validation_error": "A dispatch task failed validation.",
+    "link_resolution": "Link placement needs a clear ROOT and destination node.",
+}
+
+
+@dataclass(frozen=True)
+class ClarificationDetail:
+    code: str
+    detail: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class MultiDispatchResult:
     decisions: list[WorkerRoute]
-    clarification: str | None = None
+    clarification: ClarificationDetail | None = None
+
+    @property
+    def clarification_code(self) -> str | None:
+        return self.clarification.code if self.clarification else None
+
+
+def clarification_message(code: str, *, extra: str = "") -> str:
+    base = CLARIFICATION_CODES.get(code, CLARIFICATION_CODES["task_validation_error"])
+    if extra and code == "supervisor_source_error":
+        return extra
+    if extra and code == "task_validation_error":
+        return extra
+    return base
 
 
 def _field_sort_key(name: str) -> tuple[int, str]:
@@ -71,13 +104,16 @@ def _validate_task(
     effective_text: str,
     custom_fields: dict[str, Any],
     session_jobs: dict[str, Any] | None,
-) -> str | None:
+) -> ClarificationDetail | None:
     if route.worker == "job_control" or route.intent == "job_control":
         if route.job_action not in {"pause", "resume", "cancel", "delete"}:
-            return "Each job control action needs a job_action (pause, resume, cancel, delete)."
+            return ClarificationDetail(code="job_action_missing")
         job_id = str(route.target_id or "")
         if not job_id or job_id not in _known_job_ids(session_jobs):
-            return "That job_id is not in the dock queue for this thread."
+            return ClarificationDetail(
+                code="job_id_unknown",
+                detail={"job_id": job_id or None},
+            )
         return None
 
     if route.intent in {"source_summary", "source_analysis"}:
@@ -88,15 +124,24 @@ def _validate_task(
             selected_field=route.source_field,
         )
         if source.error:
-            return source.error
+            return ClarificationDetail(
+                code="supervisor_source_error",
+                detail={"message": source.error},
+            )
         if not source.url and not str((custom_fields or {}).get("raw_text") or "").strip():
-            return "The selected source field doesn't contain a readable link or arXiv ID."
+            return ClarificationDetail(
+                code="source_field_unreadable",
+                detail={"source_field": route.source_field},
+            )
         return None
 
     if route.intent == "status" and route.target_id:
         job_id = str(route.target_id)
         if job_id not in _known_job_ids(session_jobs):
-            return "I couldn't find that job in the dock queue for this thread."
+            return ClarificationDetail(
+                code="job_not_in_queue",
+                detail={"job_id": job_id},
+            )
     return None
 
 
@@ -176,7 +221,7 @@ def materialize_dispatches(
         if not routes:
             return MultiDispatchResult(
                 decisions=[],
-                clarification="No actions were listed in dispatch_tasks.",
+                clarification=ClarificationDetail(code="dispatch_tasks_empty"),
             )
         return MultiDispatchResult(decisions=routes)
 
@@ -197,12 +242,18 @@ def materialize_dispatches(
         return MultiDispatchResult(decisions=clones)
 
     if _multi_source_gate_violation(decision, fields):
-        return MultiDispatchResult(decisions=[], clarification=_MULTI_SOURCE_CLARIFICATION)
+        return MultiDispatchResult(
+            decisions=[],
+            clarification=ClarificationDetail(code="multi_source_plan_required"),
+        )
 
     if decision.source_error:
         return MultiDispatchResult(
             decisions=[],
-            clarification=str(decision.source_error),
+            clarification=ClarificationDetail(
+                code="supervisor_source_error",
+                detail={"message": str(decision.source_error)},
+            ),
         )
 
     single = _apply_source_resolution(

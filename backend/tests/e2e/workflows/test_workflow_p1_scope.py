@@ -1,6 +1,7 @@
 from dataclasses import replace
 from uuid import uuid4
 
+import pytest
 from app.llm import get_chains, set_chains_override
 from app.services.checkpoints import JsonCheckpointStore
 from langchain_core.runnables import RunnableLambda
@@ -57,6 +58,7 @@ def test_p1_save_scope_proposes_without_force(client, store, project):
     assert not (store.get_project(project.id).introduction or "").strip()
 
 
+@pytest.mark.xdist_group(name="live_llm")
 def test_p1_approve_scope_commits(client, store, project):
     r = client.post(
         "/api/agent/turn",

@@ -8,6 +8,9 @@ def test_workflow_agent_proactive_on_approval():
         job={"job_id": "j1", "worker": "intradoc", "status": "awaiting_approval", "label": "read"},
         worker_output={"approval_id": "appr_x", "reply": "staging ready"},
     )
-    assert "dock" in out["proactive_script"].lower()
-    assert "staging ready" not in out["proactive_script"]
+    assert out["proactive_script"] == ""
+    meta = out["proactive_meta"]
+    assert meta and meta["kind"] == "review"
+    assert meta["worker"] == "intradoc"
+    assert "staging ready" not in str(out)
     assert out["recommendation_cards"][0]["id"] == "appr_x"

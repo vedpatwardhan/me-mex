@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 from app.agents import job_runtime
 from app.agents.context_preprocessor import graph_candidates_for_supervisor
+from app.agents.conversation_utterance import (
+    UtteranceIntent,
+    astream_conversation_utterance,
+    astream_voice_conversation_reply,
+    build_conversation_turn,
+    conversation_prompt_inputs,
+)
 from app.agents.dispatch_materializer import materialize_dispatches
 from app.agents.job_affinity import resolve_job_dispatch
 from app.agents.session_plane import (
@@ -37,101 +43,35 @@ from app.agents.voice_dispatch import (
 from app.agents.worker_registry import worker_handler
 from app.config import settings
 from app.db import ToolContext, get_store
-from app.llm import get_chains
-from app.llm.chains import is_chains_overridden
-from app.prompts import load_prompt
-from app.services.llm_gateway import llm_gateway
 
 _log = logging.getLogger("memex.v2.voice")
 
+# Re-export for tests and legacy imports
+_conversation_prompt_inputs = conversation_prompt_inputs
+_astream_voice_conversation_reply = astream_voice_conversation_reply
 
-def _conversation_prompt_inputs(
+
+async def _stream_utterance(
     *,
-    text: str,
+    intent: UtteranceIntent,
+    user_message: str,
     briefing: dict[str, Any],
     project_scope: str,
-    user_fields: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    conversation_briefing = {
-        key: briefing.get(key)
-        for key in (
-            "project_scope_snippet",
-            "scope_complete",
-            "voice_phase",
-            "completed_worker_results",
-            "active_jobs",
-            "recent_jobs",
-            "pending_approval_count",
-            "scope_proposal_preview",
-        )
-        if briefing.get(key) not in (None, [], "")
-    }
-    briefing_note = json.dumps(conversation_briefing, ensure_ascii=False)[:4000]
-    scope = project_scope or ""
-    safe_user_fields = {
-        str(key): str(value)[:1200]
-        for key, value in (user_fields or {}).items()
-        if value is not None
-        and not (
-            (reference := resolve_source_reference("", {str(key): value})).url or reference.error
-        )
-    }
-    augmented = (
-        f"[session_briefing]{briefing_note}[/session_briefing]\n"
-        f"[user_provided_fields]{json.dumps(safe_user_fields, ensure_ascii=False)}"
-        "[/user_provided_fields]\n"
-        f"User: {text}\n"
-        "Respond naturally as voice Conversation only (no tools, no graph writes)."
+    user_fields: dict[str, Any] | None,
+    utterance_facts: dict[str, Any],
+    tokens: list[str],
+) -> AsyncIterator[dict[str, Any]]:
+    inp = build_conversation_turn(
+        intent=intent,
+        user_message=user_message,
+        briefing=briefing,
+        project_scope=project_scope,
+        user_fields=user_fields,
+        utterance_facts=utterance_facts,
     )
-    return {"text": augmented, "project_scope": scope}
-
-
-def _background_worker_acknowledgement(worker_kind: str, *, already_running: bool = False) -> str:
-    """Short, factual interim response; dispatch turns do not ask Conversation to speculate."""
-    if already_running:
-        return "That job is still running. I’ll share its result in the dock when it’s ready."
-    acknowledgements = {
-        "gist": "I’ll read the paper you shared and put a concise gist in the dock for review.",
-        "intradoc": "I’ll analyze the source and put the results in the dock for review.",
-        "project_scope": "I’ll prepare the scope proposal and put it in the dock for review.",
-        "link": "I’ll prepare placement options and put them in the dock for review.",
-        "reorg": "I’ll prepare a reorganization proposal for review in the dock.",
-        "retrieval": "I’ll check the graph and highlight relevant nodes.",
-    }
-    return acknowledgements.get(worker_kind, "I’ll work on that and share the result in the dock.")
-
-
-def _conversation_openai_messages(inp: dict[str, Any]) -> list[dict[str, Any]]:
-    system = load_prompt("conversation", project_scope=inp.get("project_scope") or "")
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": inp["text"]},
-    ]
-
-
-async def _astream_voice_conversation_reply(
-    inp: dict[str, Any],
-) -> AsyncIterator[str]:
-    """Stream conversation tokens (plane 1 TTS source)."""
-    if settings.CHAT_LLM_MODE != "live" or is_chains_overridden():
-        chains = get_chains()
-        reply = chains.conversation.invoke(inp)
-        if not isinstance(reply, str):
-            reply = str(reply)
-        step = max(1, min(32, len(reply) // 4 or 1))
-        for i in range(0, len(reply), step):
-            yield reply[i : i + step]
-        return
-
-    messages = _conversation_openai_messages(inp)
-    async for piece in llm_gateway.stream_chat_completion(
-        messages,
-        max_tokens=settings.VOICE_FOREGROUND_MAX_TOKENS,
-        enable_reasoning=False,
-        caller="Conversation",
-    ):
-        if piece:
-            yield piece
+    async for piece in astream_conversation_utterance(inp, intent=intent):
+        tokens.append(piece)
+        yield {"type": "token", "content": piece, "source": "conversation"}
 
 
 async def astream_conversation_voice(
@@ -192,10 +132,31 @@ async def astream_conversation_voice(
         context_json=routing_context,
     )
     worker_kind = decision.worker
-    if decision.source_error == "link_resolution":
-        reply = str(decision.content or "Please clarify which ROOT and destination node to link.")
-        for i in range(0, len(reply), 32):
-            yield {"type": "token", "content": reply[i : i + 32], "source": "conversation"}
+    scope = project.introduction or ""
+    user_fields = ctx_json.get("custom_fields") or {}
+
+    async def clarify_and_end(
+        *,
+        error_code: str,
+        detail: dict[str, Any] | None = None,
+        route: str,
+    ) -> AsyncIterator[dict[str, Any]]:
+        tokens: list[str] = []
+        async for ev in _stream_utterance(
+            intent=UtteranceIntent.CLARIFICATION,
+            user_message=effective_text or text,
+            briefing=briefing,
+            project_scope=scope,
+            user_fields=merged_fields,
+            utterance_facts={"error_code": error_code, "detail": detail or {}},
+            tokens=tokens,
+        ):
+            yield ev
+        if is_aborted(turn_id):
+            rollback_pending_turn(thread_id, turn_id)
+            yield {"type": "turn_aborted", "turn_id": turn_id}
+            return
+        reply = "".join(tokens)
         commit_turn_journal(
             thread_id,
             turn_id,
@@ -210,10 +171,19 @@ async def astream_conversation_voice(
             "graph_write": False,
             "dispatched": False,
             "worker_kind": "conversation",
-            "details": {"route": "link_clarification"},
+            "details": {"route": route},
             "jobs": job_runtime.list_jobs(thread_id),
         }
+
+    if decision.source_error == "link_resolution":
+        async for ev in clarify_and_end(
+            error_code="link_resolution",
+            detail={"message": str(decision.content or "")},
+            route="link_clarification",
+        ):
+            yield ev
         return
+
     if decision.intent == "status" and not briefing.get("worker_result_snippet"):
         briefing = build_session_briefing(
             project_id=project_id,
@@ -235,36 +205,22 @@ async def astream_conversation_voice(
         dispatch_allowed=dispatch,
     )
     if expanded.clarification:
-        reply = expanded.clarification
-        for i in range(0, len(reply), 32):
-            yield {"type": "token", "content": reply[i : i + 32], "source": "conversation"}
-        if is_aborted(turn_id):
-            rollback_pending_turn(thread_id, turn_id)
-            yield {"type": "turn_aborted", "turn_id": turn_id}
-            return
-        commit_turn_journal(
-            thread_id,
-            turn_id,
-            user_text=effective_text,
-            assistant_text=reply,
-            persisted_custom_fields=persisted_url_fields_for_checkpoint(fields),
-        )
-        yield {
-            "type": "turn_end",
-            "reply": reply,
-            "turn_id": turn_id,
-            "graph_write": False,
-            "dispatched": False,
-            "worker_kind": "conversation",
-            "details": {"route": "multi_source_clarification"},
-            "jobs": job_runtime.list_jobs(thread_id),
-        }
+        clar = expanded.clarification
+        detail = dict(clar.detail)
+        if clar.code == "supervisor_source_error" and detail.get("message"):
+            detail.setdefault("supervisor_message", detail.pop("message"))
+        async for ev in clarify_and_end(
+            error_code=clar.code,
+            detail=detail,
+            route="multi_source_clarification",
+        ):
+            yield ev
         return
 
     dispatch_decisions = expanded.decisions
     from app.agents.workers import job_control_worker
 
-    job_control_replies: list[str] = []
+    job_control_results: list[dict[str, Any]] = []
     last_job_control: dict[str, Any] = {}
     ctx = ToolContext(project_id=project_id, thread_id=thread_id, store=store)
     for sub in dispatch_decisions:
@@ -278,8 +234,7 @@ async def astream_conversation_voice(
                 "supervisor_decision": sub.model_dump(),
             },
         )
-        if result.get("reply"):
-            job_control_replies.append(str(result["reply"]))
+        job_control_results.append(result)
         if result.get("job_action"):
             last_job_control = result
 
@@ -364,52 +319,92 @@ async def astream_conversation_voice(
             plans.append((sub, plan, fn))
 
     tokens: list[str] = []
-    had_executable = dispatch_pending or bool(job_control_replies)
+    had_executable = dispatch_pending or bool(job_control_results)
 
-    def _stream_text(msg: str):
-        for i in range(0, len(msg), 32):
-            piece = msg[i : i + 32]
-            tokens.append(piece)
-            yield piece
-
-    if job_control_replies:
-        for piece in _stream_text(" ".join(job_control_replies)):
-            yield {"type": "token", "content": piece, "source": "conversation"}
+    for jc in job_control_results:
+        if jc.get("error"):
+            continue
+        async for ev in _stream_utterance(
+            intent=UtteranceIntent.JOB_CONTROL_RESULT,
+            user_message=effective_text or text,
+            briefing=briefing,
+            project_scope=scope,
+            user_fields=user_fields,
+            utterance_facts={
+                "job_action": jc.get("job_action"),
+                "worker": jc.get("worker"),
+                "job_id": jc.get("job_id"),
+                "job_status": jc.get("job_status"),
+            },
+            tokens=tokens,
+        ):
+            if is_aborted(turn_id):
+                break
+            yield ev
 
     if dispatch_pending:
+        primary_worker = background_decisions[0].worker if background_decisions else worker_kind
         if multi_count > 1:
-            reply_parts = (
-                f"I'll start {multi_count} background jobs for the sources you shared. "
-                "Watch the dock queue for progress."
-            )
+            intent = UtteranceIntent.MULTI_DISPATCH_INTERIM
+            facts = {"job_count": multi_count, "workers": [d.worker for d in background_decisions]}
         else:
-            primary_worker = background_decisions[0].worker if background_decisions else worker_kind
-            reply_parts = _background_worker_acknowledgement(
-                primary_worker,
-                already_running=already_running,
-            )
-        for piece in _stream_text(reply_parts):
-            yield {"type": "token", "content": piece, "source": "conversation"}
+            intent = UtteranceIntent.DISPATCH_INTERIM
+            facts = {
+                "worker_kind": primary_worker,
+                "already_running": already_running,
+            }
+        async for ev in _stream_utterance(
+            intent=intent,
+            user_message=effective_text or text,
+            briefing=briefing,
+            project_scope=scope,
+            user_fields=user_fields,
+            utterance_facts=facts,
+            tokens=tokens,
+        ):
+            if is_aborted(turn_id):
+                break
+            yield ev
     elif not had_executable:
         if decision.reply and conversation_only:
-            for piece in _stream_text(decision.reply):
+
+            def _stream_text(msg: str):
+                for i in range(0, len(msg), 32):
+                    piece = msg[i : i + 32]
+                    tokens.append(piece)
+                    yield piece
+
+            for piece in _stream_text(str(decision.reply)):
                 yield {"type": "token", "content": piece, "source": "conversation"}
         else:
-            inp = _conversation_prompt_inputs(
+            inp = conversation_prompt_inputs(
                 text=text,
                 briefing=briefing,
-                project_scope=project.introduction or "",
-                user_fields=ctx_json.get("custom_fields") or {},
+                project_scope=scope,
+                user_fields=user_fields,
             )
-            async for piece in _astream_voice_conversation_reply(inp):
+            async for piece in astream_voice_conversation_reply(inp):
                 if is_aborted(turn_id):
                     break
                 tokens.append(piece)
                 yield {"type": "token", "content": piece, "source": "conversation"}
 
     if had_executable and should_append_supervisor_reply(decision, had_executable_tasks=True):
-        for piece in _stream_text(f" {decision.reply}"):
-            yield {"type": "token", "content": piece, "source": "conversation"}
+        async for ev in _stream_utterance(
+            intent=UtteranceIntent.NORMAL_TURN,
+            user_message=(
+                f"{effective_text or text}\n"
+                f"(Supervisor added context for the user: {decision.reply})"
+            ),
+            briefing=briefing,
+            project_scope=scope,
+            user_fields=user_fields,
+            utterance_facts={"supervisor_supplement": True},
+            tokens=tokens,
+        ):
+            if is_aborted(turn_id):
+                break
+            yield ev
 
     reply = "".join(tokens)
 

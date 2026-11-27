@@ -171,7 +171,53 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
                     )
                 }
             )
+    decision = _escalate_scope_proposal_when_unset(text, project, decision)
     return decision
+
+
+def _looks_like_scope_dump(text: str) -> bool:
+    lower = text.lower()
+    hints = (
+        "warehouse",
+        "robot",
+        "grasp",
+        "sim-to-real",
+        "manipulation",
+        "project scope",
+        "research project",
+        "i want to study",
+        "my project",
+        "we will explore",
+        "over the next",
+        "pick-and-place",
+    )
+    return any(hint in lower for hint in hints)
+
+
+def _escalate_scope_proposal_when_unset(
+    text: str, project: Any, decision: WorkerRoute
+) -> WorkerRoute:
+    """P1: substantive scope dumps with no committed introduction → ProjectScopeWorker."""
+    if (getattr(project, "introduction", None) or "").strip():
+        return decision
+    if decision.dispatch_tasks:
+        return decision
+    if decision.worker not in {"conversation", "project_scope"}:
+        return decision
+    body = text.strip()
+    if len(body) < 40 and not _looks_like_scope_dump(body):
+        return decision
+    if decision.worker == "project_scope":
+        if decision.dispatch:
+            return decision
+        return decision.model_copy(update={"dispatch": True})
+    return decision.model_copy(
+        update={
+            "worker": "project_scope",
+            "intent": "scope_conversation",
+            "dispatch": True,
+        }
+    )
 
 
 def conversation_worker(
@@ -782,6 +828,7 @@ def job_control_worker(ctx: ToolContext, text: str, context: dict) -> dict:
         "job_id": str(job_id),
         "job_action": str(action),
         "job_status": job.get("status"),
+        "worker": worker,
         "graph_write": False,
     }
 

@@ -10,6 +10,11 @@ from typing import Any
 from app.agents import job_runtime
 from app.agents.briefing import SessionBriefing
 from app.agents.context_preprocessor import project_scope_complete
+from app.agents.conversation_utterance import (
+    UtteranceIntent,
+    build_conversation_turn,
+    invoke_conversation_utterance,
+)
 from app.agents.scope_proposal import load_scope_proposal
 from app.agents.session_events import publish_session_event
 from app.agents.workflow_agent import run_workflow_agent
@@ -267,6 +272,79 @@ def remove_job_record(thread_id: str, job_id: str) -> None:
         state["jobs"] = [job for job in (state.get("jobs") or []) if job.get("job_id") != job_id]
 
 
+def _observer_conversation_line(
+    *,
+    project_id: str,
+    thread_id: str,
+    intent: UtteranceIntent,
+    utterance_facts: dict[str, Any],
+    user_message: str = "",
+) -> str:
+    store = get_store()
+    project = store.get_project(project_id)
+    briefing = build_session_briefing(project_id=project_id, thread_id=thread_id)
+    inp = build_conversation_turn(
+        intent=intent,
+        user_message=user_message or "Status update for the user.",
+        briefing=briefing,
+        project_scope=project.introduction or "",
+        user_fields=None,
+        utterance_facts=utterance_facts,
+    )
+    return invoke_conversation_utterance(inp, intent=intent)
+
+
+def _gist_followup_utterance(
+    *,
+    project_id: str,
+    thread_id: str,
+    job: dict[str, Any],
+    worker_output: dict[str, Any],
+) -> str:
+    source_error = str(
+        worker_output.get("source_error")
+        or ("fetch_failed" if worker_output.get("error") else "")
+        or ""
+    ).strip()
+    facts: dict[str, Any] = {
+        "worker": "gist",
+        "job_id": job.get("job_id"),
+        "job_status": job.get("status"),
+        "gist_saved": bool(worker_output.get("gist_saved")),
+        "awaiting_approval": bool(
+            worker_output.get("approval_id") or job.get("status") == "awaiting_approval"
+        ),
+        "source_error": source_error or None,
+    }
+    return _observer_conversation_line(
+        project_id=project_id,
+        thread_id=thread_id,
+        intent=UtteranceIntent.GIST_FOLLOWUP,
+        utterance_facts=facts,
+    )
+
+
+def _proactive_utterance(
+    *,
+    project_id: str,
+    thread_id: str,
+    meta: dict[str, Any],
+) -> str:
+    kind = meta.get("kind")
+    if kind == "review":
+        intent = UtteranceIntent.PROACTIVE_REVIEW
+    elif kind == "complete":
+        intent = UtteranceIntent.PROACTIVE_COMPLETE
+    else:
+        return ""
+    return _observer_conversation_line(
+        project_id=project_id,
+        thread_id=thread_id,
+        intent=intent,
+        utterance_facts=meta,
+    )
+
+
 def observer_ingest_job(
     *,
     project_id: str,
@@ -287,7 +365,12 @@ def observer_ingest_job(
             or worker_output.get("error")
         )
     ):
-        gist_followup = _compose_gist_followup(job, worker_output)
+        gist_followup = _gist_followup_utterance(
+            project_id=project_id,
+            thread_id=thread_id,
+            job=job,
+            worker_output=worker_output,
+        )
     with _update_checkpoint(thread_id) as state:
         jobs: list[dict[str, Any]] = list(state.get("jobs") or [])
         jobs = [j for j in jobs if j.get("job_id") != jid]
@@ -327,9 +410,9 @@ def observer_ingest_job(
                 "text": gist_followup,
             },
         )
-    proactive = wa.get("proactive_script") or ""
+    proactive_meta = wa.get("proactive_meta")
     worker = job.get("worker") or job.get("kind") or ""
-    should_proactive = bool(proactive) and (
+    should_proactive = bool(proactive_meta) and (
         (
             job.get("status") == "awaiting_approval"
             and (worker_output.get("approval_id") or job.get("approval_id"))
@@ -338,6 +421,14 @@ def observer_ingest_job(
         or (job.get("status") == "done" and worker != "project_scope" and not gist_followup)
     )
     if should_proactive:
+        proactive = _proactive_utterance(
+            project_id=project_id,
+            thread_id=thread_id,
+            meta=proactive_meta or {},
+        )
+        state_proactive = proactive or ""
+        with _update_checkpoint(thread_id) as state:
+            state["proactive_script"] = state_proactive[:512]
         publish_session_event(
             thread_id,
             {
@@ -354,25 +445,6 @@ def observer_ingest_job(
                 "cards": wa.get("recommendation_cards") or [],
             },
         )
-
-
-def _compose_gist_followup(
-    job: dict[str, Any],
-    worker_output: dict[str, Any],
-) -> str:
-    """Give a short status acknowledgement; the complete gist lives in dock Review."""
-    source_error = str(
-        worker_output.get("source_error")
-        or ("The source could not be fetched or extracted." if worker_output.get("error") else "")
-        or ""
-    ).strip()
-    if source_error:
-        return "I couldn't prepare a reliable gist from that source. Please check the link or share a readable copy."
-    if worker_output.get("gist_saved") is True:
-        return "The gist is saved to the graph."
-    if worker_output.get("approval_id") or job.get("status") == "awaiting_approval":
-        return "The gist is ready in the dock for review. Approve it there to add it to the graph."
-    return "The gist is ready in the dock for review."
 
 
 def build_session_briefing(
