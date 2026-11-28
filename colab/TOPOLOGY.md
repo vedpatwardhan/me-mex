@@ -24,7 +24,6 @@ This document describes how **four remote capabilities** — chat LLM, **cross-e
               ┌───────────────────────────────────┐
               │  inference_gateway  :7860         │
               │  • GET/POST /v1/*  → proxy vLLM   │
-              │  • POST /v1/voice/speak (SSE)      │
               │  • POST /v1/decision/score (CPU)    │
               │  • POST /stt/* /tts/*  → speech   │
               └───────────┬─────────────┬─────────┘

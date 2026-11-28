@@ -26,6 +26,7 @@ except ImportError:  # pragma: no cover
 from voice_agent.audio_util import float32_to_pcm16, frame_to_mono_floats
 from voice_agent.speech_colab import speech_enabled, synthesize_wav, transcribe_wav
 from voice_agent.speech_text import speech_friendly
+from voice_agent.tts_pipeline import TtsPipeline, pipelined_tts_enabled
 from voice_agent.turn_bridge import (
     post_abort_turn,
     post_resume,
@@ -188,28 +189,27 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
     )
     _ensure_session_events_listener(room, session)
     async with session.turn_lock:
-        session.cancel_tts.clear()
-        audio_from_stream = False
+        use_pipeline = speech_enabled() and pipelined_tts_enabled()
+        tts_pipeline: TtsPipeline | None = None
+        if use_pipeline:
+            session.cancel_tts.clear()
+            tts_pipeline = TtsPipeline(
+                synthesize=synthesize_wav,
+                play_wav=_play_wav,
+                cancel_event=session.cancel_tts,
+                session=session,
+                room=room,
+            )
+            await tts_pipeline.start()
 
         async def on_chunk(chunk: dict[str, Any]) -> None:
-            nonlocal audio_from_stream
             if session.cancel_turn.is_set():
                 return
             await _publish_dock_event(room, chunk)
-            if chunk.get("type") == "audio" and speech_enabled():
-                if session.cancel_tts.is_set():
-                    return
-                raw = base64.b64decode(chunk.get("data") or "")
-                if raw:
-                    audio_from_stream = True
-                    try:
-                        await _play_wav(room, session, raw)
-                    except (OSError, ValueError):
-                        _log.exception("playback failed for streamed audio chunk")
-            elif chunk.get("type") == "token":
+            if tts_pipeline and chunk.get("type") == "token":
                 src = chunk.get("source")
                 if src in (None, "conversation"):
-                    session.cancel_tts.clear()
+                    tts_pipeline.feed_token(chunk.get("content") or "")
 
         try:
             reply, events, turn_end = await run_turn_with_reply(
@@ -221,6 +221,8 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
             )
         except httpx.HTTPError:
             _log.exception("voice_turn failed thread_id=%s", session.thread_id)
+            if tts_pipeline:
+                await tts_pipeline.cancel()
             return
         if session.cancel_turn.is_set():
             try:
@@ -249,10 +251,13 @@ async def _run_voice_turn(room: rtc.Room, session: RoomSession, text: str) -> No
                 session.thread_id,
                 len(reply.strip()),
             )
-        if reply.strip() and speech_enabled() and not audio_from_stream:
+        if reply.strip() and speech_enabled():
             try:
-                wav = await synthesize_wav(speech_friendly(reply))
-                await _play_wav(room, session, wav)
+                if tts_pipeline:
+                    await tts_pipeline.finish()
+                else:
+                    wav = await synthesize_wav(speech_friendly(reply))
+                    await _play_wav(room, session, wav)
             except httpx.HTTPError:
                 _log.exception("TTS failed")
         elif reply.strip():

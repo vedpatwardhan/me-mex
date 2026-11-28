@@ -12,7 +12,6 @@ from app.agents.conversation_utterance import (
     UtteranceIntent,
     astream_conversation_utterance,
     astream_voice_conversation_reply,
-    astream_voice_conversation_speak,
     build_conversation_turn,
     conversation_prompt_inputs,
 )
@@ -70,19 +69,9 @@ async def _stream_utterance(
         user_fields=user_fields,
         utterance_facts=utterance_facts,
     )
-    async for ev in astream_conversation_utterance(inp, intent=intent):
-        if ev.get("kind") == "token":
-            piece = str(ev.get("content") or "")
-            if piece:
-                tokens.append(piece)
-                yield {"type": "token", "content": piece, "source": "conversation"}
-        elif ev.get("kind") == "audio":
-            yield {
-                "type": "audio",
-                "format": ev.get("format") or "wav",
-                "data": ev.get("data"),
-                "source": "conversation",
-            }
+    async for piece in astream_conversation_utterance(inp, intent=intent):
+        tokens.append(piece)
+        yield {"type": "token", "content": piece, "source": "conversation"}
 
 
 async def astream_conversation_voice(
@@ -394,21 +383,11 @@ async def astream_conversation_voice(
                 project_scope=scope,
                 user_fields=user_fields,
             )
-            async for ev in astream_voice_conversation_speak(inp):
+            async for piece in astream_voice_conversation_reply(inp):
                 if is_aborted(turn_id):
                     break
-                if ev.get("kind") == "token":
-                    piece = str(ev.get("content") or "")
-                    if piece:
-                        tokens.append(piece)
-                        yield {"type": "token", "content": piece, "source": "conversation"}
-                elif ev.get("kind") == "audio":
-                    yield {
-                        "type": "audio",
-                        "format": ev.get("format") or "wav",
-                        "data": ev.get("data"),
-                        "source": "conversation",
-                    }
+                tokens.append(piece)
+                yield {"type": "token", "content": piece, "source": "conversation"}
 
     if had_executable and should_append_supervisor_reply(decision, had_executable_tasks=True):
         async for ev in _stream_utterance(

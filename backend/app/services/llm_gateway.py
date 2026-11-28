@@ -1,7 +1,7 @@
 import json
 import re
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from typing import Any, TypeVar
 
 import httpx
@@ -11,7 +11,6 @@ T = TypeVar("T", bound=BaseModel)
 
 import logging
 
-from app.colab_urls import colab_inference_base_url
 from app.config import settings
 from app.services.llm_tracer import llm_tracer
 
@@ -442,103 +441,6 @@ class LLMGateway:
                 max_tokens=completion_cap,
                 response_raw=full_response,
                 response_parsed=full_response,
-                status="SUCCESS",
-            )
-        except (httpx.HTTPError, ConnectionError, OSError) as e:
-            elapsed = time.perf_counter() - start_time
-            llm_tracer.log_call(
-                caller=caller,
-                model=self.model,
-                messages=messages,
-                duration_seconds=elapsed,
-                temperature=temperature,
-                max_tokens=completion_cap,
-                status="FAILED",
-                error=str(e),
-            )
-            raise
-
-    async def stream_voice_speak(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        temperature: float = 0.7,
-        max_tokens: int | None = None,
-        top_p: float = 0.95,
-        caller: str | None = None,
-    ) -> AsyncIterator[dict[str, Any]]:
-        """Stream interleaved token and audio events from Colab /v1/voice/speak."""
-        start_time = time.perf_counter()
-        completion_cap = (
-            max_tokens if max_tokens is not None else settings.LLM_COMPLETION_MAX_TOKENS
-        )
-        base = colab_inference_base_url().rstrip("/")
-        url = f"{base}/v1/voice/speak"
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": completion_cap,
-            "top_p": top_p,
-        }
-        headers = {
-            "ngrok-skip-browser-warning": "true",
-            "Bypass-Tunnel-Reminder": "true",
-            "User-Agent": "Me-Mex-Client",
-        }
-        collected_tokens: list[str] = []
-        try:
-            stream_timeout = max(60.0, float(settings.LLM_TIMEOUT))
-            async with (
-                httpx.AsyncClient(
-                    timeout=stream_timeout, headers=headers, trust_env=False
-                ) as client,
-                client.stream("POST", url, json=payload) as response,
-            ):
-                if response.status_code != 200:
-                    error_text = await response.aread()
-                    raise ConnectionError(
-                        f"voice/speak error {response.status_code}: "
-                        f"{error_text.decode('utf-8', errors='ignore')}"
-                    )
-
-                async for line in response.aiter_lines():
-                    line = line.strip()
-                    if not line or line == "data: [DONE]":
-                        continue
-                    if not line.startswith("data: "):
-                        continue
-                    try:
-                        event = json.loads(line[6:])
-                    except json.JSONDecodeError:
-                        continue
-                    etype = event.get("type")
-                    if etype == "token":
-                        content = strip_emojis(str(event.get("content") or ""))
-                        if content:
-                            collected_tokens.append(content)
-                            yield {"kind": "token", "content": content}
-                    elif etype == "audio":
-                        data = event.get("data")
-                        if data:
-                            yield {
-                                "kind": "audio",
-                                "format": event.get("format") or "wav",
-                                "data": data,
-                            }
-                    elif etype == "error":
-                        raise ConnectionError(str(event.get("message") or "voice/speak error"))
-
-            elapsed = time.perf_counter() - start_time
-            llm_tracer.log_call(
-                caller=caller,
-                model=self.model,
-                messages=messages,
-                duration_seconds=elapsed,
-                temperature=temperature,
-                max_tokens=completion_cap,
-                response_raw="".join(collected_tokens),
-                response_parsed="".join(collected_tokens),
                 status="SUCCESS",
             )
         except (httpx.HTTPError, ConnectionError, OSError) as e:
