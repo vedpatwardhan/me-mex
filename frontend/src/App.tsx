@@ -48,7 +48,6 @@ export const App: React.FC = () => {
           selectedNodeId={selectedNodeId}
           projectIntroduction={projectScope}
           onDockStreamEvent={dock.applyStreamEvent}
-          onVoiceSession={dock.setVoiceSession}
         />
         <GraphCanvas />
         <RightDrawer onGraphChange={() => void dock.refreshApprovals()} />

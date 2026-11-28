@@ -25,9 +25,6 @@ dependencies = [
     "networkx>=3.1",
     "rustworkx>=0.14.0",
     "fastmcp>=0.1.0",
-    "livekit>=0.17.0",
-    "livekit-agents>=0.12.0",
-    "livekit-plugins-silero>=1.8.12",
 ]
 
 [dependency-groups]
@@ -43,20 +40,19 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests/unit", "backend/tests/integration", "backend/tests/e2e", "voice_worker/tests"]
-pythonpath = ["backend", "voice_worker"]
+testpaths = ["backend/tests/unit", "backend/tests/integration", "backend/tests/e2e"]
+pythonpath = ["backend"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = "-n auto --dist=loadgroup -v --tb=short -m \"not vllm and not livekit and not slow\""
+addopts = "-n auto --dist=loadgroup -v --tb=short -m \"not vllm and not slow\""
 markers = [
     "vllm: requires live Colab vLLM + gateway decision/score",
     "mongodb: requires MongoDB",
     "slow: long-running intra-doc extract",
     "voice_plane: voice conversation and dispatch HTTP/SSE tests",
     "live_llm: supervisor/conversation checks against live chat (skip if CHAT_LLM_MODE != live)",
-    "livekit: LiveKit token/worker smokes (excluded from default pytest addopts)",
 ]
 
 [tool.ruff]

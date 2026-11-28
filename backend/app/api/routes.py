@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+import httpx
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.agents import job_runtime
@@ -26,11 +27,13 @@ from app.models import (
     TurnRevertRequest,
 )
 from app.services.checkpoints import JsonCheckpointStore
+from app.services.speech_client import ColabSpeechClient
 from app.tools import dock as dock_tools
 from app.tools import reorg as reorg_tools
 
 router = APIRouter(prefix="/api", tags=["api"])
 _checkpoints = JsonCheckpointStore()
+_speech_client = ColabSpeechClient()
 
 
 def _ts_iso(ts: float) -> str:
@@ -144,6 +147,22 @@ async def session_events(
             yield format_sse(event)
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@router.post("/voice/stt/transcribe")
+async def voice_stt_transcribe(audio: Annotated[UploadFile, File()]):
+    if not _speech_client.enabled():
+        raise HTTPException(503, "Speech service not configured (COLAB_INFERENCE_BASE_URL)")
+    data = await audio.read()
+    if not data:
+        raise HTTPException(400, "empty audio")
+    filename = audio.filename or "audio.webm"
+    try:
+        return await _speech_client.transcribe(data, filename=filename)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"STT upstream failed: {e}") from e
+    except RuntimeError as e:
+        raise HTTPException(503, str(e)) from e
 
 
 @router.post("/voice/conversation/stream")

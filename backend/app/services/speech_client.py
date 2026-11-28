@@ -25,8 +25,10 @@ class ColabSpeechClient:
     async def transcribe(self, audio: bytes, filename: str = "audio.wav") -> dict[str, Any]:
         if not self.enabled():
             raise RuntimeError("COLAB_INFERENCE_BASE_URL is not set")
+        lower = filename.lower()
+        mime = "audio/wav" if lower.endswith(".wav") else "audio/webm"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            files = {"audio": (filename, audio, "audio/wav")}
+            files = {"audio": (filename, audio, mime)}
             r = await client.post(f"{self.base_url}/stt/transcribe", files=files)
             r.raise_for_status()
             return r.json()

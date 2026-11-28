@@ -13,7 +13,6 @@ import {
   controlJob as controlJobRequest,
 } from '../services/dockStreamService';
 import type { JobAction } from '../services/dockStreamService';
-import type { VoiceSession } from '../services/voiceSession';
 import { reconcileQueueItems } from '../utils/dockQueueSort';
 import {
   applyStreamEvent,
@@ -32,7 +31,6 @@ export function useDockState(
 ) {
   const [streamState, setStreamState] = useState(emptyDockStreamState);
   const [projectScope, setProjectScope] = useState('');
-  const [voiceSession, setVoiceSession] = useState<VoiceSession | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<Set<string>>(() => new Set());
   const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(() => new Set());
 
@@ -166,26 +164,11 @@ export function useDockState(
     [threadId, reconcilePendingApprovals, applyStreamEventToState, beginTurn],
   );
 
-  const voiceCtx = useCallback(
-    (contextJson: Record<string, unknown>) => ({
-      active_project_id: String(contextJson.active_project_id || projectId),
-      muted: false,
-      custom_fields: (contextJson.custom_fields as Record<string, string>) || {},
-      selected_node_ids: (contextJson.selected_node_ids as string[]) || [],
-      thread_id: threadId,
-    }),
-    [projectId, threadId],
-  );
-
   const approve = useCallback(
     async (approvalId: string, contextJson: Record<string, unknown>) => {
       setPendingApprovals((current) => new Set(current).add(approvalId));
       let result: Record<string, unknown> | undefined;
       try {
-        if (voiceSession?.isReady()) {
-          await voiceSession.sendApproval(approvalId, 'approve', voiceCtx(contextJson));
-          return;
-        }
         result = await resumeApproval({
           thread_id: threadId,
           approval_id: approvalId,
@@ -226,27 +209,23 @@ export function useDockState(
         throw error;
       }
     },
-    [threadId, refreshApprovals, voiceSession, voiceCtx, onScopeCommitted, onGraphCommitted],
+    [threadId, refreshApprovals, onScopeCommitted, onGraphCommitted],
   );
 
   const dismiss = useCallback(
     async (approvalId: string, contextJson: Record<string, unknown>) => {
-      if (voiceSession?.isReady()) {
-        await voiceSession.sendApproval(approvalId, 'cancel', voiceCtx(contextJson));
-      } else {
-        await resumeApproval({
-          thread_id: threadId,
-          approval_id: approvalId,
-          action: 'dismiss',
-          context_json: contextJson,
-        });
-      }
+      await resumeApproval({
+        thread_id: threadId,
+        approval_id: approvalId,
+        action: 'dismiss',
+        context_json: contextJson,
+      });
       setStreamState((s) => ({
         ...s,
         items: s.items.filter((i) => i.id !== approvalId),
       }));
     },
-    [threadId, voiceSession, voiceCtx],
+    [threadId],
   );
 
   const runJobAction = useCallback(
@@ -318,7 +297,5 @@ export function useDockState(
     revertUserTurn,
     applyStreamEvent: applyStreamEventToState,
     beginTurn,
-    setVoiceSession,
-    voiceSession,
   };
 }

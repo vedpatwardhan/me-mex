@@ -3,9 +3,15 @@ import { LoaderCircle, Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
 
 import { SpeechSegmentIndicator } from './SpeechSegmentIndicator';
 import { useSpeechSegmentTimer } from '../hooks/useSpeechSegmentTimer';
-import type { VoiceContext } from '../services/voiceSession';
-import { VoiceSession } from '../services/voiceSession';
-import type { VoiceSessionState } from '../services/livekitService';
+import type { VoiceContext, VoiceSessionState } from '../services/voiceTypes';
+import {
+  abortVoiceTurn,
+  MicCaptureSession,
+  streamVoiceConversation,
+  subscribeSessionEvents,
+  transcribeAudio,
+  voiceContextToJson,
+} from '../services/voiceTurnClient';
 import {
   customFieldsForContext,
   INITIAL_CUSTOM_FIELDS,
@@ -21,7 +27,6 @@ type Props = {
   onMuteToggle?: (muted: boolean) => void;
   onContext?: (ctx: VoiceContext) => void;
   onDockStreamEvent?: (ev: Record<string, unknown>) => void;
-  onVoiceSession?: (session: VoiceSession | null) => void;
 };
 
 function statusMeta(
@@ -40,8 +45,8 @@ function statusMeta(
   }
   if (state === 'Thinking' && sessionConnecting) {
     return {
-      label: 'Connecting',
-      detail: 'Joining LiveKit room…',
+      label: 'Starting',
+      detail: 'Requesting microphone…',
       dot: 'bg-sky-400 animate-pulse',
       ring: 'border-sky-500/40 bg-sky-500/10',
     };
@@ -52,6 +57,14 @@ function statusMeta(
       detail: 'Assistant is working on your turn…',
       dot: 'bg-sky-400 animate-pulse',
       ring: 'border-sky-500/40 bg-sky-500/10',
+    };
+  }
+  if (state === 'Streaming') {
+    return {
+      label: 'Streaming',
+      detail: 'Assistant reply streaming to the dock…',
+      dot: 'bg-violet-400 animate-pulse',
+      ring: 'border-violet-500/40 bg-violet-500/10',
     };
   }
   if (state === 'Transcribing') {
@@ -68,14 +81,6 @@ function statusMeta(
       detail: 'Edit transcript, then send or discard',
       dot: 'bg-cyan-400',
       ring: 'border-cyan-500/40 bg-cyan-500/10',
-    };
-  }
-  if (state === 'Speaking') {
-    return {
-      label: 'Speaking',
-      detail: 'Playing assistant audio',
-      dot: 'bg-violet-400',
-      ring: 'border-violet-500/40 bg-violet-500/10',
     };
   }
   if (state === 'Awaiting approval') {
@@ -109,7 +114,6 @@ export const VoiceRail: React.FC<Props> = ({
   onMuteToggle,
   onContext,
   onDockStreamEvent,
-  onVoiceSession,
 }) => {
   const [muted, setMuted] = useState(true);
   const [state, setState] = useState<VoiceSessionState>('Muted');
@@ -118,7 +122,11 @@ export const VoiceRail: React.FC<Props> = ({
   customFieldsRef.current = customFields;
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [sttDraft, setSttDraft] = useState<string | null>(null);
-  const sessionRef = useRef<VoiceSession | null>(null);
+  const [sessionActive, setSessionActive] = useState(false);
+  const micRef = useRef<MicCaptureSession | null>(null);
+  const sessionEventsRef = useRef<ReturnType<typeof subscribeSessionEvents> | null>(null);
+  const turnAbortRef = useRef<AbortController | null>(null);
+  const activeTurnIdRef = useRef<string | null>(null);
   const pendingTurnFieldsRef = useRef<Record<string, string> | null>(null);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
@@ -169,37 +177,20 @@ export const VoiceRail: React.FC<Props> = ({
     [projectId, selectedNodeId, threadId],
   );
 
-  const handleDockStreamEvent = useCallback(
+  const emitDock = useCallback(
     (ev: Record<string, unknown>) => {
       onDockStreamEvent?.(ev);
+    },
+    [onDockStreamEvent],
+  );
+
+  const handleDockStreamEvent = useCallback(
+    (ev: Record<string, unknown>) => {
+      emitDock(ev);
       for (const event of flattenDockEvents(ev)) {
-        if (event.type === 'stt_pending') {
-          setVoiceStateRef.current('Transcribing');
-          continue;
-        }
-        if (event.type === 'stt_failed') {
-          const reason = String(event.reason || 'stt_error');
-          const message =
-            reason === 'no_speech'
-              ? 'No speech detected. Unmute and try again.'
-              : reason === 'speech_disabled'
-                ? 'Speech service is not configured on the worker.'
-                : 'Transcription failed. Check Colab / worker logs and try again.';
-          setSttDraft(null);
-          setVoiceError(message);
-          setVoiceStateRef.current('Muted');
-          continue;
-        }
-        if (event.type === 'stt_draft' && typeof event.text === 'string') {
-          setSttDraft(event.text);
-          setVoiceError(null);
-          setVoiceStateRef.current('Reviewing');
-          setMuted(true);
-          continue;
-        }
         if (event.type === 'turn_aborted') {
           setVoiceStateRef.current((current) =>
-            current === 'Processing' || current === 'Speaking' ? 'Reviewing' : 'Muted',
+            current === 'Processing' || current === 'Streaming' ? 'Reviewing' : 'Muted',
           );
           continue;
         }
@@ -212,22 +203,20 @@ export const VoiceRail: React.FC<Props> = ({
             );
             setCustomFields(INITIAL_CUSTOM_FIELDS);
             resetFieldsAfterTurnRef.current = true;
-            const nextContext: VoiceContext = {
-              active_project_id: projectId || '',
-              muted: mutedRef.current,
-              custom_fields: customFieldsForContext(pendingTurnFieldsRef.current, '', true),
-              selected_node_ids: selectedNodeId ? [selectedNodeId] : [],
-              thread_id: threadId,
-            };
-            onContext?.(nextContext);
-            sessionRef.current?.publishContextFireAndForget(nextContext);
+            onContext?.(contextForWorker(mutedRef.current));
           }
           setVoiceStateRef.current('Processing');
           continue;
         }
+        if (event.type === 'token') {
+          setVoiceStateRef.current((current) =>
+            current === 'Processing' ? 'Streaming' : current,
+          );
+          continue;
+        }
         if (event.type === 'turn_end') {
           setVoiceStateRef.current((current) => {
-            if (current === 'Processing' || current === 'Speaking') {
+            if (current === 'Processing' || current === 'Streaming') {
               return mutedRef.current ? 'Muted' : 'Listening';
             }
             return current;
@@ -238,134 +227,210 @@ export const VoiceRail: React.FC<Props> = ({
           if (flushCompleted) {
             resetFieldsAfterTurnRef.current = false;
             pendingTurnFieldsRef.current = null;
-            const nextContext = contextForWorker(muted);
-            onContext?.(nextContext);
-            sessionRef.current?.publishContextFireAndForget(nextContext);
+            onContext?.(contextForWorker(muted));
           }
+          turnAbortRef.current = null;
+          activeTurnIdRef.current = null;
           continue;
+        }
+        if (event.type === 'awaiting_approval') {
+          setVoiceStateRef.current('Awaiting approval');
         }
       }
     },
-    [onDockStreamEvent, onContext, muted, contextForWorker, projectId, selectedNodeId, threadId],
+    [emitDock, onContext, muted, contextForWorker],
   );
 
-  const ensureSession = () => {
-    if (!sessionRef.current) {
-      sessionRef.current = new VoiceSession(
-        (s) => setVoiceStateRef.current(s),
-        handleDockStreamEvent,
-      );
-      onVoiceSession?.(sessionRef.current);
-    } else if (handleDockStreamEvent) {
-      sessionRef.current.setDockEventHandler(handleDockStreamEvent);
-    }
-    return sessionRef.current;
-  };
+  const ensureSessionEvents = useCallback(() => {
+    if (!projectId || sessionEventsRef.current) return;
+    sessionEventsRef.current = subscribeSessionEvents(projectId, threadId, (ev) => {
+      handleDockStreamEvent(ev);
+    });
+  }, [projectId, threadId, handleDockStreamEvent]);
+
+  const runSttOnBlob = useCallback(
+    async (blob: Blob) => {
+      if (blob.size < 400) {
+        setVoiceError('No speech detected. Unmute and try again.');
+        setVoiceStateRef.current('Muted');
+        return;
+      }
+      emitDock({ type: 'stt_pending' });
+      setVoiceStateRef.current('Transcribing');
+      try {
+        const { text } = await transcribeAudio(blob);
+        if (!text) {
+          emitDock({ type: 'stt_failed', reason: 'no_speech' });
+          setVoiceError('No speech detected. Unmute and try again.');
+          setVoiceStateRef.current('Muted');
+          return;
+        }
+        setSttDraft(text);
+        setVoiceError(null);
+        setVoiceStateRef.current('Reviewing');
+        setMuted(true);
+      } catch (err) {
+        const raw = err instanceof Error ? err.message : 'stt_error';
+        const reason = raw === 'speech_disabled' ? 'speech_disabled' : 'stt_error';
+        emitDock({ type: 'stt_failed', reason });
+        const message =
+          reason === 'speech_disabled'
+            ? 'Speech service is not configured (Colab URL).'
+            : 'Transcription failed. Check backend / Colab and try again.';
+        setVoiceError(message);
+        setVoiceStateRef.current('Muted');
+      }
+    },
+    [emitDock],
+  );
+
+  const sendReviewedTurn = useCallback(
+    async (text: string) => {
+      commitOneShotCustomFields();
+      const ctx = contextWithCommittedFields(true);
+      onContext?.(ctx);
+      const contextJson = voiceContextToJson(ctx);
+      if (!projectIntroduction?.trim()) {
+        contextJson.force_project_scope = '1';
+      }
+      const controller = new AbortController();
+      turnAbortRef.current = controller;
+      setSttDraft(null);
+      setState('Processing');
+      setMuted(true);
+      try {
+        const { turnId } = await streamVoiceConversation({
+          text,
+          threadId,
+          contextJson,
+          onEvent: handleDockStreamEvent,
+          signal: controller.signal,
+        });
+        activeTurnIdRef.current = turnId;
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        const message = err instanceof Error ? err.message : 'Turn failed';
+        setVoiceError(message);
+        setState('Muted');
+      }
+    },
+    [
+      commitOneShotCustomFields,
+      contextWithCommittedFields,
+      onContext,
+      projectIntroduction,
+      threadId,
+      handleDockStreamEvent,
+    ],
+  );
 
   useEffect(() => {
-    sessionRef.current?.setDockEventHandler(handleDockStreamEvent);
-  }, [handleDockStreamEvent]);
+    return () => {
+      sessionEventsRef.current?.stop();
+      micRef.current?.dispose();
+      turnAbortRef.current?.abort();
+    };
+  }, []);
 
-  useEffect(() => {
-    const session = sessionRef.current;
-    if (!session?.isReady() || state === 'Thinking' || state === 'Processing') return;
-    session.publishContextFireAndForget(contextForWorker(muted));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- republish project/selection/mic
-  }, [projectId, selectedNodeId, threadId, muted]);
-
-  const roomReady = sessionRef.current?.isReady() ?? false;
-  const sessionLive =
-    state === 'Listening' ||
-    state === 'Speaking' ||
-    state === 'Processing' ||
-    state === 'Transcribing' ||
-    state === 'Reviewing' ||
-    state === 'Awaiting approval' ||
-    state === 'Muted';
-  const connected = roomReady && (sessionLive || connecting);
+  const connected = sessionActive;
   const live = connected && !muted && state === 'Listening';
   const status = statusMeta(state, live, connected, connecting);
-
-  useEffect(() => {
-    if (sessionRef.current?.isReady() && state === 'Thinking' && !connecting) {
-      setState('Muted');
-    }
-  }, [state, connecting]);
   const speechTimer = useSpeechSegmentTimer(live);
 
   const startSession = async () => {
     if (connecting) return;
     setConnecting(true);
-    const session = ensureSession();
-    const ctx = contextForWorker(false);
-    onContext?.(ctx);
     setVoiceError(null);
     try {
-      if (!session.isReady()) {
-        setState('Thinking');
-        setMuted(false);
-        await session.connect(`user-${projectId || 'me'}-${Date.now()}`);
-      }
-      if (!session.isReady()) {
-        throw new Error('Could not join LiveKit room');
-      }
-      const scopeCtx = !projectIntroduction?.trim()
-        ? {
-            ...ctx,
-            custom_fields: { ...ctx.custom_fields, force_project_scope: '1' },
-          }
-        : ctx;
-      session.setLiveContext(scopeCtx);
+      setState('Thinking');
+      ensureSessionEvents();
+      micRef.current = new MicCaptureSession();
+      await micRef.current.start();
+      setSessionActive(true);
       setState('Listening');
       setMuted(false);
       onMuteToggle?.(false);
-      session.publishContextFireAndForget({ ...scopeCtx, muted: false });
-      await session.setMicrophoneEnabled(true);
+      const ctx = contextForWorker(false);
+      if (!projectIntroduction?.trim()) {
+        ctx.custom_fields = { ...ctx.custom_fields, force_project_scope: '1' };
+      }
+      onContext?.(ctx);
     } catch (err) {
-      const raw = err instanceof Error ? err.message : 'Voice connection failed';
+      const raw = err instanceof Error ? err.message : 'Voice setup failed';
       const message =
         /permission denied/i.test(raw) || /NotAllowedError/i.test(raw)
-          ? 'Microphone blocked. On this Mac use http://127.0.0.1:3000 and allow mic when prompted. Phone browsers need HTTPS (or use the Mac browser for voice). Reset in Chrome: Site settings → Microphone.'
+          ? 'Microphone blocked. On this Mac use http://127.0.0.1:3000 and allow mic when prompted.'
           : raw;
       setVoiceError(message);
       setState('Muted');
       setMuted(true);
+      setSessionActive(false);
+      micRef.current?.dispose();
+      micRef.current = null;
       onMuteToggle?.(true);
-      void session.disconnect();
     } finally {
       setConnecting(false);
     }
   };
 
-  const setMicMuted = (micMuted: boolean) => {
-    const session = ensureSession();
-    if (!session.isReady()) return;
+  const setMicMuted = async (micMuted: boolean) => {
+    if (!sessionActive) return;
     const ctx = contextForWorker(micMuted);
     onContext?.(ctx);
     setVoiceError(null);
     setMuted(micMuted);
-    const endingUtterance = micMuted && !muted && session.isReady();
+    const endingUtterance = micMuted && !muted;
     setState(micMuted ? (endingUtterance ? 'Transcribing' : 'Muted') : 'Listening');
     onMuteToggle?.(micMuted);
-    void session.applyMicMuted(micMuted, ctx).catch((err) => {
-      const message = err instanceof Error ? err.message : 'Could not update mic';
-      setVoiceError(message);
-    });
+
+    if (endingUtterance && micRef.current) {
+      try {
+        const blob = await micRef.current.stop();
+        await runSttOnBlob(blob);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not capture audio';
+        setVoiceError(message);
+        setState('Muted');
+      }
+    } else if (!micMuted) {
+      try {
+        if (!micRef.current) micRef.current = new MicCaptureSession();
+        await micRef.current.start();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not open mic';
+        setVoiceError(message);
+        setMuted(true);
+        setState('Muted');
+      }
+    }
   };
 
   const endSession = () => {
-    const session = sessionRef.current;
     setVoiceError(null);
     pendingTurnFieldsRef.current = null;
     resetFieldsAfterTurnRef.current = false;
     submittedTurnStartedRef.current = false;
     setCustomFields(INITIAL_CUSTOM_FIELDS);
-    sessionRef.current = null;
-    onVoiceSession?.(null);
+    sessionEventsRef.current?.stop();
+    sessionEventsRef.current = null;
+    turnAbortRef.current?.abort();
+    turnAbortRef.current = null;
+    activeTurnIdRef.current = null;
+    micRef.current?.dispose();
+    micRef.current = null;
+    setSessionActive(false);
     setState('Muted');
     setMuted(true);
     onMuteToggle?.(true);
-    if (session) void session.disconnect();
+  };
+
+  const cancelTurn = () => {
+    const turnId = activeTurnIdRef.current;
+    turnAbortRef.current?.abort();
+    turnAbortRef.current = null;
+    if (turnId) void abortVoiceTurn(turnId, threadId);
+    emitDock({ type: 'turn_aborted', turn_id: turnId });
+    setState(muted ? 'Muted' : 'Listening');
   };
 
   return (
@@ -377,7 +442,7 @@ export const VoiceRail: React.FC<Props> = ({
           </span>
           <div>
             <h2 className="text-sm font-semibold tracking-tight">Voice rail</h2>
-            <p className="text-[11px] text-slate-500">LiveKit · same thread as graph</p>
+            <p className="text-[11px] text-slate-500">Colab STT · text replies in dock</p>
           </div>
         </div>
       </header>
@@ -430,16 +495,8 @@ export const VoiceRail: React.FC<Props> = ({
               type="button"
               className="flex-1 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white"
               onClick={() => {
-                const session = sessionRef.current;
-                if (!session?.isReady() || !sttDraft.trim()) return;
-                commitOneShotCustomFields();
-                const ctx = contextWithCommittedFields(true);
-                onContext?.(ctx);
-                void session.publishContext(ctx);
-                void session.sendAgentTurn(sttDraft.trim(), ctx);
-                setSttDraft(null);
-                setState('Processing');
-                setMuted(true);
+                if (!sttDraft.trim()) return;
+                void sendReviewedTurn(sttDraft.trim());
               }}
             >
               Send
@@ -464,18 +521,15 @@ export const VoiceRail: React.FC<Props> = ({
         live={live}
         state={state}
         onStart={() => void startSession()}
-        onToggleMute={() => setMicMuted(!muted)}
+        onToggleMute={() => void setMicMuted(!muted)}
         onEnd={endSession}
       />
 
-      {state === 'Speaking' || state === 'Processing' ? (
+      {state === 'Streaming' || state === 'Processing' ? (
         <button
           type="button"
           className="w-full rounded-lg border border-rose-600/50 px-3 py-2 text-xs font-medium text-rose-200"
-          onClick={() => {
-            void sessionRef.current?.sendCancelTurn('');
-            setMicMuted(false);
-          }}
+          onClick={cancelTurn}
         >
           Stop turn
         </button>
@@ -508,11 +562,7 @@ export const VoiceRail: React.FC<Props> = ({
           value={customFields}
           onChange={(e) => {
             setCustomFields(e.target.value);
-            const ctx = contextForWorker(muted);
-            onContext?.(ctx);
-            const s = ensureSession();
-            if (s.isReady() && state !== 'Thinking' && state !== 'Processing')
-              s.publishContextFireAndForget(ctx);
+            onContext?.(contextForWorker(muted));
           }}
           spellCheck={false}
         />
@@ -549,7 +599,7 @@ function MotionButtons({
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-900/30 transition hover:from-indigo-500 hover:to-violet-500 disabled:opacity-60"
       >
         <Mic className="h-4 w-4" />
-        {state === 'Thinking' || connecting ? 'Connecting…' : 'Start voice session'}
+        {state === 'Thinking' || connecting ? 'Starting…' : 'Start voice session'}
       </button>
     );
   }
@@ -558,7 +608,7 @@ function MotionButtons({
     <div className="flex flex-col gap-2">
       <button
         type="button"
-        disabled={connecting}
+        disabled={connecting || state === 'Processing' || state === 'Streaming'}
         onClick={onToggleMute}
         className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-60 ${
           live

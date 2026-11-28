@@ -117,14 +117,16 @@ async def astream_voice_conversation_reply(inp: dict[str, Any]) -> AsyncIterator
         enable_reasoning=False,
         caller="Conversation",
     ):
-        if piece:
-            pieces.append(piece)
-    reply = "".join(pieces)
+        if not piece:
+            continue
+        pieces.append(piece)
+        yield piece
     if _p1_onboarding_turn(inp):
-        reply = _ensure_p1_question_suffix(reply)
-    step = max(1, min(32, len(reply) // 4 or 1))
-    for i in range(0, len(reply), step):
-        yield reply[i : i + step]
+        reply = "".join(pieces)
+        if reply and "?" not in reply:
+            suffix = " What would you like to explore first?"
+            pieces.append(suffix)
+            yield suffix
 
 
 def _yield_chunks(text: str, width: int = 32) -> list[str]:

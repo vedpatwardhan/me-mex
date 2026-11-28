@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spin up Me-Mex local voice stack: LiveKit SFU, voice_worker process, FastAPI, Vite frontend.
+# Spin up Me-Mex local stack: FastAPI backend + Vite frontend (voice-in / text-out).
 # MongoDB is NOT started here — use your existing local instance (e.g. brew services).
 #
 # Usage:
@@ -7,7 +7,7 @@
 #   ./scripts/dev-stack.sh stop     # stop without starting
 #   ./scripts/dev-stack.sh restart  # stop then start
 #
-# Prerequisites: docker, uv, node/npm, backend/.env (COLAB_INFERENCE_BASE_URL, MONGO_URI).
+# Prerequisites: uv, node/npm, backend/.env (COLAB_INFERENCE_BASE_URL, MONGO_URI).
 
 set -euo pipefail
 
@@ -15,9 +15,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="${ROOT}/.dev-stack"
 LOG_DIR="${STATE_DIR}/logs"
 PID_FILE="${STATE_DIR}/pids.env"
-LIVEKIT_CONTAINER="${LIVEKIT_CONTAINER:-me-mex-livekit}"
 
-LIVEKIT_HTTP_PORT="${LIVEKIT_HTTP_PORT:-7880}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 
@@ -51,7 +49,7 @@ kill_pidfile() {
   # shellcheck disable=SC1090
   source "${PID_FILE}"
   local key pid
-  for key in backend voice_worker frontend; do
+  for key in backend frontend; do
     pid="${!key:-}"
     if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
       log "Stopping ${key} (pid ${pid})"
@@ -60,13 +58,6 @@ kill_pidfile() {
     fi
   done
   rm -f "${PID_FILE}"
-}
-
-stop_livekit_docker() {
-  if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${LIVEKIT_CONTAINER}"; then
-    log "Stopping LiveKit container ${LIVEKIT_CONTAINER}"
-    docker rm -f "${LIVEKIT_CONTAINER}" >/dev/null 2>&1 || true
-  fi
 }
 
 warn_mongo_docker() {
@@ -83,34 +74,6 @@ check_mongo() {
   fi
 }
 
-start_livekit_docker() {
-  if port_in_use "${LIVEKIT_HTTP_PORT}"; then
-    log "Port ${LIVEKIT_HTTP_PORT} already in use — assuming LiveKit SFU is running"
-    return 0
-  fi
-  if ! command -v docker >/dev/null 2>&1; then
-    log "ERROR: docker not found; required for LiveKit SFU"
-    exit 1
-  fi
-  stop_livekit_docker
-  # Advertise loopback ICE to the host browser (default bridge IP 172.17.x is not reachable).
-  log "Starting LiveKit SFU (docker) on ws://127.0.0.1:${LIVEKIT_HTTP_PORT}"
-  docker run -d --name "${LIVEKIT_CONTAINER}" \
-    -p "${LIVEKIT_HTTP_PORT}:7880" -p 7881:7881 -p 7882:7882/udp \
-    -e LIVEKIT_KEYS="devkey: secret" \
-    livekit/livekit-server --dev --node-ip 127.0.0.1 >/dev/null
-
-  local i
-  for i in $(seq 1 30); do
-    if port_in_use "${LIVEKIT_HTTP_PORT}"; then
-      return 0
-    fi
-    sleep 0.5
-  done
-  log "ERROR: LiveKit did not bind port ${LIVEKIT_HTTP_PORT} in time (see: docker logs ${LIVEKIT_CONTAINER})"
-  exit 1
-}
-
 start_backend() {
   if port_in_use "${BACKEND_PORT}"; then
     log "ERROR: port ${BACKEND_PORT} in use — run: ./scripts/dev-stack.sh stop"
@@ -124,24 +87,6 @@ start_backend() {
   ) >>"${LOG_DIR}/backend.log" 2>&1 &
   echo "backend=$!" >"${PID_FILE}"
   log "Backend http://127.0.0.1:${BACKEND_PORT} (log: ${LOG_DIR}/backend.log)"
-}
-
-start_voice_worker() {
-  load_backend_env
-  export ME_MEX_BACKEND_URL="${ME_MEX_BACKEND_URL:-http://127.0.0.1:${BACKEND_PORT}}"
-  export LIVEKIT_URL="${LIVEKIT_URL:-ws://127.0.0.1:${LIVEKIT_HTTP_PORT}}"
-  export LIVEKIT_API_KEY="${LIVEKIT_API_KEY:-devkey}"
-  export LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:-secret}"
-  if [[ -z "${COLAB_INFERENCE_BASE_URL:-}" ]]; then
-    log "WARN: COLAB_INFERENCE_BASE_URL unset — voice STT/TTS will fail until Colab gateway is reachable"
-  fi
-  (
-    cd "${ROOT}"
-    export PYTHONPATH="${ROOT}/backend:${ROOT}/voice_worker${PYTHONPATH:+:${PYTHONPATH}}"
-    exec uv run python -m voice_agent.worker dev
-  ) >>"${LOG_DIR}/voice_worker.log" 2>&1 &
-  echo "voice_worker=$!" >>"${PID_FILE}"
-  log "LiveKit voice worker (log: ${LOG_DIR}/voice_worker.log)"
 }
 
 start_frontend() {
@@ -176,12 +121,10 @@ wait_for_backend() {
 shutdown_all() {
   log "Shutting down…"
   kill_pidfile
-  stop_livekit_docker
 }
 
 cmd_stop() {
   kill_pidfile
-  stop_livekit_docker
   log "Stopped."
 }
 
@@ -190,21 +133,21 @@ cmd_start() {
   load_backend_env
   check_mongo
   kill_pidfile
-  stop_livekit_docker
 
-  start_livekit_docker
+  if [[ -z "${COLAB_INFERENCE_BASE_URL:-}" ]]; then
+    log "WARN: COLAB_INFERENCE_BASE_URL unset — voice STT / LLM will fail until Colab gateway is reachable"
+  fi
+
   start_backend
   wait_for_backend
-  start_voice_worker
   start_frontend
 
   trap shutdown_all INT TERM
 
   log ""
-  log "Ready for voice E2E:"
-  log "  App:     http://127.0.0.1:${FRONTEND_PORT}"
-  log "  API:     http://127.0.0.1:${BACKEND_PORT}/docs"
-  log "  LiveKit: ${LIVEKIT_URL:-ws://localhost:${LIVEKIT_HTTP_PORT}}"
+  log "Ready:"
+  log "  App:  http://127.0.0.1:${FRONTEND_PORT}"
+  log "  API:  http://127.0.0.1:${BACKEND_PORT}/docs"
   log ""
   log "Tail logs: tail -f ${LOG_DIR}/*.log"
   log "Press Ctrl+C to stop all services."

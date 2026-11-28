@@ -54,10 +54,6 @@ class Settings:
     def colab_vllm_api_base(self) -> str:
         return colab_vllm_api_base()
 
-    # Local LiveKit (Phase 2 voice)
-    LIVEKIT_URL: str = os.getenv("LIVEKIT_URL", "ws://127.0.0.1:7880")
-    LIVEKIT_API_KEY: str = os.getenv("LIVEKIT_API_KEY", "devkey")
-    LIVEKIT_API_SECRET: str = os.getenv("LIVEKIT_API_SECRET", "secret")
     LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "mistralai/Ministral-3-8B-Reasoning-2512")
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "180.0"))
     # stub | live — chat completions from worker agents (pytest: backend/.env.test)
