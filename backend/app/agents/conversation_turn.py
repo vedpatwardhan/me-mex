@@ -1,4 +1,4 @@
-"""Plane 1 conversation stream + optional async dispatch."""
+"""Dock turn stream: reviewed text in via POST; SSE tokens out; optional async worker dispatch."""
 
 from __future__ import annotations
 
@@ -11,12 +11,15 @@ from app.agents.context_preprocessor import graph_candidates_for_supervisor
 from app.agents.conversation_utterance import (
     UtteranceIntent,
     astream_conversation_utterance,
-    astream_voice_conversation_reply,
+    astream_dock_conversation_reply,
     build_conversation_turn,
+    build_multi_utterance_turn,
     conversation_prompt_inputs,
+    segments_coalesce_compatible,
 )
 from app.agents.dispatch_materializer import materialize_dispatches
 from app.agents.job_affinity import resolve_job_dispatch
+from app.agents.routing_payload import needs_full_graph_candidates
 from app.agents.session_plane import (
     build_routing_memory,
     build_session_briefing,
@@ -25,7 +28,12 @@ from app.agents.session_plane import (
     record_routing_source,
 )
 from app.agents.source_reference import resolve_source_reference
-from app.agents.supervisor_plan_contract import should_append_supervisor_reply
+from app.agents.supervisor_plan_contract import plan_incomplete, should_append_supervisor_reply
+from app.agents.turn_dispatch import (
+    is_dock_turn,
+    needs_foreground_dispatch,
+    resolve_turn_route_async,
+)
 from app.agents.turn_journal import (
     append_turn_effect,
     begin_turn_journal,
@@ -35,20 +43,15 @@ from app.agents.turn_journal import (
     rollback_pending_turn,
     set_pending_user_text,
 )
-from app.agents.voice_dispatch import (
-    is_voice_turn,
-    needs_voice_dispatch,
-    resolve_voice_route_async,
-)
 from app.agents.worker_registry import worker_handler
 from app.config import settings
 from app.db import ToolContext, get_store
 
-_log = logging.getLogger("memex.v2.voice")
+_log = logging.getLogger("memex.v2.dock_turn")
 
 # Re-export for tests and legacy imports
 _conversation_prompt_inputs = conversation_prompt_inputs
-_astream_voice_conversation_reply = astream_voice_conversation_reply
+_astream_dock_conversation_reply = astream_dock_conversation_reply
 
 
 async def _stream_utterance(
@@ -74,7 +77,7 @@ async def _stream_utterance(
         yield {"type": "token", "content": piece, "source": "conversation"}
 
 
-async def astream_conversation_voice(
+async def astream_conversation_turn(
     *,
     project_id: str,
     thread_id: str,
@@ -82,16 +85,16 @@ async def astream_conversation_voice(
     context_json: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     ctx_json = dict(context_json or {})
-    voice = is_voice_turn(ctx_json)
+    dock_turn = is_dock_turn(ctx_json)
     turn_id = str(ctx_json.get("turn_id") or new_turn_id())
     begin_turn_journal(thread_id, turn_id)
     set_pending_user_text(thread_id, turn_id, text)
     yield {"type": "turn_meta", "turn_id": turn_id, "text": (text or "")[:8000]}
     _log.info(
-        "conversation_stream thread_id=%s project_id=%s voice_turn=%s text_len=%d",
+        "conversation_stream thread_id=%s project_id=%s dock_turn=%s text_len=%d",
         thread_id,
         project_id,
-        voice,
+        dock_turn,
         len(text or ""),
     )
     store = get_store()
@@ -104,10 +107,11 @@ async def astream_conversation_voice(
         thread_id,
         ctx_json.get("custom_fields") if isinstance(ctx_json.get("custom_fields"), dict) else {},
     )
+    graph_cap = 80 if needs_full_graph_candidates(ctx_json) else 15
     routing_context = {
         **ctx_json,
         "custom_fields": merged_fields,
-        "graph_candidates": graph_candidates_for_supervisor(store, project_id),
+        "graph_candidates": graph_candidates_for_supervisor(store, project_id, limit=graph_cap),
         "routing_memory": build_routing_memory(thread_id),
         "session_state": {
             "active_jobs": [
@@ -124,7 +128,7 @@ async def astream_conversation_voice(
         },
     }
 
-    decision, effective_text, scope_blocked = await resolve_voice_route_async(
+    decision, effective_text, scope_blocked = await resolve_turn_route_async(
         store=store,
         project_id=project_id,
         thread_id=thread_id,
@@ -190,9 +194,9 @@ async def astream_conversation_voice(
             thread_id=thread_id,
             include_worker_result=True,
         )
-    dispatch = needs_voice_dispatch(
+    dispatch = needs_foreground_dispatch(
         decision,
-        voice_turn=voice,
+        dock_turn=dock_turn,
         scope_blocked=scope_blocked,
     )
     fields = routing_context.get("custom_fields") or {}
@@ -244,12 +248,12 @@ async def astream_conversation_voice(
         if sub.worker != "job_control"
         and sub.intent != "job_control"
         and not (sub.worker == "conversation" and sub.intent in {"status", "conversation"})
-        and needs_voice_dispatch(sub, voice_turn=voice, scope_blocked=scope_blocked)
+        and needs_foreground_dispatch(sub, dock_turn=dock_turn, scope_blocked=scope_blocked)
     ]
     conversation_only = (
         all(
             sub.worker == "conversation"
-            and not needs_voice_dispatch(sub, voice_turn=voice, scope_blocked=scope_blocked)
+            and not needs_foreground_dispatch(sub, dock_turn=dock_turn, scope_blocked=scope_blocked)
             for sub in dispatch_decisions
         )
         and not background_decisions
@@ -262,7 +266,9 @@ async def astream_conversation_voice(
 
     for sub in background_decisions:
         sub_kind = sub.worker
-        sub_dispatch = needs_voice_dispatch(sub, voice_turn=voice, scope_blocked=scope_blocked)
+        sub_dispatch = needs_foreground_dispatch(
+            sub, dock_turn=dock_turn, scope_blocked=scope_blocked
+        )
         if sub_dispatch and sub_kind in {"gist", "intradoc"}:
             selected_roots = [
                 node_id
@@ -320,62 +326,110 @@ async def astream_conversation_voice(
 
     tokens: list[str] = []
     had_executable = dispatch_pending or bool(job_control_results)
+    user_message = effective_text or text
 
-    for jc in job_control_results:
-        if jc.get("error"):
-            continue
-        async for ev in _stream_utterance(
-            intent=UtteranceIntent.JOB_CONTROL_RESULT,
-            user_message=effective_text or text,
+    async def _stream_text_chunks(msg: str) -> AsyncIterator[dict[str, Any]]:
+        for i in range(0, len(msg), 32):
+            piece = msg[i : i + 32]
+            tokens.append(piece)
+            yield {"type": "token", "content": piece, "source": "conversation"}
+
+    async def _stream_coalesced_foreground(
+        segments: list[tuple[UtteranceIntent, dict[str, Any]]],
+    ) -> AsyncIterator[dict[str, Any]]:
+        supplement = should_append_supervisor_reply(decision, had_executable_tasks=True)
+        supervisor_context = str(decision.reply) if supplement and decision.reply else None
+        if supplement:
+            segments = [
+                *segments,
+                (UtteranceIntent.NORMAL_TURN, {"supervisor_supplement": True}),
+            ]
+        intents = [s[0] for s in segments]
+        if not segments_coalesce_compatible(intents):
+            for intent, facts in segments:
+                async for ev in _stream_utterance(
+                    intent=intent,
+                    user_message=user_message,
+                    briefing=briefing,
+                    project_scope=scope,
+                    user_fields=user_fields,
+                    utterance_facts=facts,
+                    tokens=tokens,
+                ):
+                    if is_aborted(turn_id):
+                        return
+                    yield ev
+            return
+
+        inp = build_multi_utterance_turn(
+            user_message=user_message,
             briefing=briefing,
             project_scope=scope,
             user_fields=user_fields,
-            utterance_facts={
-                "job_action": jc.get("job_action"),
-                "worker": jc.get("worker"),
-                "job_id": jc.get("job_id"),
-                "job_status": jc.get("job_status"),
-            },
-            tokens=tokens,
-        ):
+            segments=segments,
+            supervisor_context=supervisor_context,
+        )
+        guard_intent = next(
+            (
+                i
+                for i in intents
+                if i
+                in (
+                    UtteranceIntent.DISPATCH_INTERIM,
+                    UtteranceIntent.MULTI_DISPATCH_INTERIM,
+                )
+            ),
+            segments[-1][0],
+        )
+        async for piece in astream_conversation_utterance(inp, intent=guard_intent):
             if is_aborted(turn_id):
-                break
-            yield ev
+                return
+            tokens.append(piece)
+            yield {"type": "token", "content": piece, "source": "conversation"}
+
+    foreground_segments: list[tuple[UtteranceIntent, dict[str, Any]]] = []
+    for jc in job_control_results:
+        if jc.get("error"):
+            continue
+        foreground_segments.append(
+            (
+                UtteranceIntent.JOB_CONTROL_RESULT,
+                {
+                    "job_action": jc.get("job_action"),
+                    "worker": jc.get("worker"),
+                    "job_id": jc.get("job_id"),
+                    "job_status": jc.get("job_status"),
+                },
+            )
+        )
 
     if dispatch_pending:
         primary_worker = background_decisions[0].worker if background_decisions else worker_kind
         if multi_count > 1:
-            intent = UtteranceIntent.MULTI_DISPATCH_INTERIM
-            facts = {"job_count": multi_count, "workers": [d.worker for d in background_decisions]}
+            dispatch_intent = UtteranceIntent.MULTI_DISPATCH_INTERIM
+            dispatch_facts = {
+                "job_count": multi_count,
+                "workers": [d.worker for d in background_decisions],
+            }
         else:
-            intent = UtteranceIntent.DISPATCH_INTERIM
-            facts = {
+            dispatch_intent = UtteranceIntent.DISPATCH_INTERIM
+            dispatch_facts = {
                 "worker_kind": primary_worker,
                 "already_running": already_running,
             }
-        async for ev in _stream_utterance(
-            intent=intent,
-            user_message=effective_text or text,
-            briefing=briefing,
-            project_scope=scope,
-            user_fields=user_fields,
-            utterance_facts=facts,
-            tokens=tokens,
-        ):
+        foreground_segments.append((dispatch_intent, dispatch_facts))
+
+    if had_executable and foreground_segments:
+        async for ev in _stream_coalesced_foreground(foreground_segments):
             if is_aborted(turn_id):
                 break
             yield ev
     elif not had_executable:
-        if decision.reply and conversation_only:
-
-            def _stream_text(msg: str):
-                for i in range(0, len(msg), 32):
-                    piece = msg[i : i + 32]
-                    tokens.append(piece)
-                    yield piece
-
-            for piece in _stream_text(str(decision.reply)):
-                yield {"type": "token", "content": piece, "source": "conversation"}
+        if decision.reply and conversation_only and not plan_incomplete(decision, routing_context):
+            async for ev in _stream_text_chunks(str(decision.reply)):
+                if is_aborted(turn_id):
+                    break
+                yield ev
         else:
             inp = conversation_prompt_inputs(
                 text=text,
@@ -383,24 +437,18 @@ async def astream_conversation_voice(
                 project_scope=scope,
                 user_fields=user_fields,
             )
-            async for piece in astream_voice_conversation_reply(inp):
+            async for piece in astream_dock_conversation_reply(inp):
                 if is_aborted(turn_id):
                     break
                 tokens.append(piece)
                 yield {"type": "token", "content": piece, "source": "conversation"}
-
-    if had_executable and should_append_supervisor_reply(decision, had_executable_tasks=True):
-        async for ev in _stream_utterance(
-            intent=UtteranceIntent.NORMAL_TURN,
-            user_message=(
-                f"{effective_text or text}\n"
-                f"(Supervisor added context for the user: {decision.reply})"
-            ),
-            briefing=briefing,
-            project_scope=scope,
-            user_fields=user_fields,
-            utterance_facts={"supervisor_supplement": True},
-            tokens=tokens,
+    elif (
+        had_executable
+        and should_append_supervisor_reply(decision, had_executable_tasks=True)
+        and not foreground_segments
+    ):
+        async for ev in _stream_coalesced_foreground(
+            [(UtteranceIntent.NORMAL_TURN, {"supervisor_supplement": True})]
         ):
             if is_aborted(turn_id):
                 break
@@ -420,7 +468,7 @@ async def astream_conversation_voice(
         for sub, plan, fn in plans:
             ctx_json_dispatch = {
                 **routing_context,
-                "voice_dispatch": True,
+                "foreground_dispatch": True,
                 "supervisor_decision": sub.model_dump(),
                 "turn_id": turn_id,
             }
@@ -447,7 +495,7 @@ async def astream_conversation_voice(
                 )
                 yield {"type": "custom", "job": job, "source": "dispatch"}
                 _log.info(
-                    "voice_dispatch job_id=%s worker=%s thread_id=%s",
+                    "foreground_dispatch job_id=%s worker=%s thread_id=%s",
                     jid,
                     sub.worker,
                     thread_id,
@@ -475,9 +523,9 @@ async def astream_conversation_voice(
             approval_id = aid
             break
     details = {
-        "worker": "conversation_voice",
+        "worker": "conversation_turn",
         "route": worker_kind,
-        "max_tokens_policy": settings.VOICE_FOREGROUND_MAX_TOKENS,
+        "max_tokens_policy": settings.DOCK_STREAM_MAX_TOKENS,
         "turn_id": turn_id,
     }
     if approval_id:

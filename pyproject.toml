@@ -51,7 +51,7 @@ markers = [
     "vllm: requires live Colab vLLM + gateway decision/score",
     "mongodb: requires MongoDB",
     "slow: long-running intra-doc extract",
-    "voice_plane: voice conversation and dispatch HTTP/SSE tests",
+    "dock_turn_plane: voice conversation and dispatch HTTP/SSE tests",
     "live_llm: supervisor/conversation checks against live chat (skip if CHAT_LLM_MODE != live)",
 ]
 

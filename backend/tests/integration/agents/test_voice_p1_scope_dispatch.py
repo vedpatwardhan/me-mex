@@ -4,17 +4,17 @@ from uuid import uuid4
 import pytest
 from tests.sse_util import iter_sse_data
 
-pytestmark = pytest.mark.voice_plane
+pytestmark = pytest.mark.dock_turn_plane
 
 
 def test_empty_scope_dispatches_project_scope_job(client, empty_project, mock_vllm_chat):
     ctx = {
-        "voice_turn": True,
+        "dock_turn": True,
         "active_project_id": empty_project.id,
         "project_id": empty_project.id,
     }
     r = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "Robotics manipulation and sim-to-real for warehouse picking.",
             "thread_id": "voice-p1",
@@ -30,13 +30,13 @@ def test_empty_scope_dispatches_project_scope_job(client, empty_project, mock_vl
     time.sleep(2.0)
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_substantive_scope_turn_creates_approval_without_define_scope_command(
     client, empty_project
 ):
     thread_id = f"voice-scope-first-turn-{uuid4().hex}"
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": (
                 "My project studies recursive self-improvement in AI, including how systems "
@@ -44,7 +44,7 @@ def test_substantive_scope_turn_creates_approval_without_define_scope_command(
             ),
             "thread_id": thread_id,
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": empty_project.id,
                 "project_id": empty_project.id,
             },

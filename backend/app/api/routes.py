@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.agents import job_runtime
-from app.agents.conversation_voice import astream_conversation_voice
+from app.agents.conversation_turn import astream_conversation_turn
 from app.agents.graph import (
     astream_agent_turn,
     get_compiled_graph,
@@ -165,15 +165,15 @@ async def voice_stt_transcribe(audio: Annotated[UploadFile, File()]):
         raise HTTPException(503, str(e)) from e
 
 
-@router.post("/voice/conversation/stream")
-async def voice_conversation_stream(body: AgentTurnRequest):
+@router.post("/conversation/turn/stream")
+async def conversation_turn_stream(body: AgentTurnRequest):
     project_id = body.context_json.get("active_project_id") or body.context_json.get("project_id")
     if not project_id:
         raise HTTPException(400, "active_project_id required in context_json")
-    ctx = {**body.context_json, "voice_turn": True}
+    ctx = {**body.context_json, "dock_turn": True}
 
     async def gen():
-        async for chunk in astream_conversation_voice(
+        async for chunk in astream_conversation_turn(
             project_id=project_id,
             thread_id=body.thread_id,
             text=body.text,
@@ -184,6 +184,12 @@ async def voice_conversation_stream(body: AgentTurnRequest):
             yield f"data: {json.dumps(chunk)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@router.post("/voice/conversation/stream")
+async def legacy_voice_conversation_stream(body: AgentTurnRequest):
+    """Deprecated alias; use POST /conversation/turn/stream."""
+    return await conversation_turn_stream(body)
 
 
 @router.post("/agent/turn/stream")
@@ -320,8 +326,8 @@ def agent_resume(body: AgentResumeRequest):
         raise HTTPException(400, str(e)) from e
 
 
-@router.post("/voice/conversation/abort")
-def voice_conversation_abort(body: TurnAbortRequest):
+@router.post("/conversation/turn/abort")
+def conversation_turn_abort(body: TurnAbortRequest):
     register_abort(body.turn_id)
     return {"status": "aborted", "turn_id": body.turn_id}
 

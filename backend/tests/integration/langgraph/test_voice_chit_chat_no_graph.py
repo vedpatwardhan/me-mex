@@ -2,10 +2,10 @@ import pytest
 from tests.sse_util import iter_sse_data
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_chit_chat_no_dispatch(client, voice_context_json, mock_vllm_chat):
     r = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "hello there",
             "thread_id": "voice-chit",

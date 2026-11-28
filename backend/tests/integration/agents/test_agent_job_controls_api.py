@@ -5,7 +5,7 @@ from app.agents import job_runtime, session_plane
 from app.services.checkpoints import JsonCheckpointStore
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_job_control_api_pauses_resumes_cancels_and_deletes(
     client, project, tmpdir_checkpoint, monkeypatch
 ):
@@ -53,7 +53,7 @@ def test_job_control_api_pauses_resumes_cancels_and_deletes(
     assert client.get("/api/agent/jobs", params=params).json()["items"] == []
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_job_list_does_not_requeue_approved_jobs(client, project):
     thread_id = "job-list-approved"
     approved = {

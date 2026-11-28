@@ -12,12 +12,12 @@ from app.tools import gist
 from langchain_core.runnables import RunnableLambda
 from tests.sse_util import iter_sse_data
 
-pytestmark = pytest.mark.voice_plane
+pytestmark = pytest.mark.dock_turn_plane
 
 
-def test_voice_conversation_stream(client, project, voice_context_json, mock_vllm_chat):
+def test_conversation_turn_stream(client, project, voice_context_json, mock_vllm_chat):
     r = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "hello",
             "thread_id": "voice-stream",
@@ -38,7 +38,7 @@ def test_voice_conversation_stream(client, project, voice_context_json, mock_vll
     assert joined == end.get("reply")
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_supervisor_reply_avoids_a_second_sequential_conversation_call(
     client, project_scoped, monkeypatch
 ):
@@ -66,12 +66,12 @@ def test_supervisor_reply_avoids_a_second_sequential_conversation_call(
         )
     )
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "What is this project about?",
             "thread_id": "voice-supervisor-reply",
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project_scoped.id,
                 "project_id": project_scoped.id,
                 "custom_fields": {},
@@ -85,7 +85,7 @@ def test_supervisor_reply_avoids_a_second_sequential_conversation_call(
     assert conversation_called is False
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_conversation_turn_does_not_park_background_jobs(
     client, project_scoped, mock_vllm_chat, monkeypatch
 ):
@@ -94,12 +94,12 @@ def test_conversation_turn_does_not_park_background_jobs(
     parked = []
     monkeypatch.setattr(job_runtime, "park_active_jobs", lambda thread_id: parked.append(thread_id))
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "While that paper is being read, let's talk about what I should focus on.",
             "thread_id": "voice-background-chat",
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project_scoped.id,
                 "project_id": project_scoped.id,
                 "custom_fields": {"paper": "https://arxiv.org/pdf/2605.11550"},
@@ -114,11 +114,11 @@ def test_conversation_turn_does_not_park_background_jobs(
     assert parked == []
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_gist_for_another_source_leaves_running_intradoc_job_running(
     client, project_scoped, monkeypatch
 ):
-    from app.agents import conversation_voice, job_runtime
+    from app.agents import conversation_turn, job_runtime
 
     thread_id = "voice-independent-jobs"
     existing = {
@@ -149,15 +149,15 @@ def test_gist_for_another_source_leaves_running_intradoc_job_running(
         finished.set()
         return {"reply": "Gist ready.", "graph_write": False}
 
-    monkeypatch.setattr(conversation_voice, "worker_handler", lambda _worker: gist_stub)
+    monkeypatch.setattr(conversation_turn, "worker_handler", lambda _worker: gist_stub)
     set_chains_override(replace(base, supervisor=RunnableLambda(route)))
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "Give me a broad overview of this other paper.\npaper=https://example.test/second.pdf",
             "thread_id": thread_id,
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project_scoped.id,
                 "custom_fields": {"paper": "https://example.test/second.pdf"},
             },
@@ -172,11 +172,11 @@ def test_gist_for_another_source_leaves_running_intradoc_job_running(
     assert job_runtime.get_job(existing["job_id"])["status"] == "running"
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_multi_paper_mixed_workers_dispatches_three_jobs_despite_supervisor_pin(
     client, project_scoped, monkeypatch
 ):
-    from app.agents import conversation_voice, job_runtime
+    from app.agents import conversation_turn, job_runtime
 
     thread_id = "voice-multi-paper-mixed"
     job_runtime._by_thread.pop(thread_id, None)
@@ -193,7 +193,7 @@ def test_multi_paper_mixed_workers_dispatches_three_jobs_despite_supervisor_pin(
 
         return _run
 
-    monkeypatch.setattr(conversation_voice, "worker_handler", worker_stub)
+    monkeypatch.setattr(conversation_turn, "worker_handler", worker_stub)
     base = get_chains()
     set_chains_override(
         replace(
@@ -213,12 +213,12 @@ def test_multi_paper_mixed_workers_dispatches_three_jobs_despite_supervisor_pin(
         "detailed understanding of the third paper."
     )
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": text,
             "thread_id": thread_id,
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project_scoped.id,
                 "custom_fields": {
                     "paper1": "https://arxiv.org/pdf/2605.11550",
@@ -241,7 +241,7 @@ def test_multi_paper_mixed_workers_dispatches_three_jobs_despite_supervisor_pin(
     assert "background" in reply
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_malformed_supervisor_output_falls_back_to_spoken_conversation(client, project_scoped):
     from app.agents import job_runtime
 
@@ -277,12 +277,12 @@ def test_malformed_supervisor_output_falls_back_to_spoken_conversation(client, p
         )
     )
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "What do you think about this idea generally?",
             "thread_id": thread_id,
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project_scoped.id,
                 "project_id": project_scoped.id,
                 "custom_fields": {"paper": "https://arxiv.org/pdf/2605.11550"},
@@ -303,7 +303,7 @@ def test_malformed_supervisor_output_falls_back_to_spoken_conversation(client, p
     assert active_jobs[0]["job_id"] == "job-in-progress"
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_scope_completion_acknowledgement_stays_in_conversation(client, store, project_scoped):
     from app.agents import job_runtime
 
@@ -338,12 +338,12 @@ def test_scope_completion_acknowledgement_stays_in_conversation(client, store, p
         )
     )
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "The project scope is done; what is next?",
             "thread_id": thread_id,
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project_scoped.id,
                 "project_id": project_scoped.id,
                 "custom_fields": {},
@@ -361,7 +361,7 @@ def test_scope_completion_acknowledgement_stays_in_conversation(client, store, p
     assert all(job["job_id"] != completed_scope_job["job_id"] for job in end["jobs"])
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_post_scope_next_steps_ignores_supervisor_scope_review_reply(
     client,
     store,
@@ -398,12 +398,12 @@ def test_post_scope_next_steps_ignores_supervisor_scope_review_reply(
         )
     )
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "I'd like to proceed with the next steps, what's next.",
             "thread_id": "voice-post-scope-next-fix",
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project_scoped.id,
                 "project_id": project_scoped.id,
                 "custom_fields": {},
@@ -420,8 +420,8 @@ def test_post_scope_next_steps_ignores_supervisor_scope_review_reply(
     assert conversation_called[0].get("project_scope")
 
 
-@pytest.mark.voice_plane
-def test_voice_job_control_cancels_selected_job_without_dispatching_new_work(
+@pytest.mark.dock_turn_plane
+def test_dock_turn_job_control_cancels_selected_job_without_dispatching_new_work(
     client, project_scoped, tmpdir_checkpoint, monkeypatch
 ):
     from app.agents import job_runtime, session_plane
@@ -468,12 +468,12 @@ def test_voice_job_control_cancels_selected_job_without_dispatching_new_work(
     )
 
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "Abort the redundant gist job for the first paper.",
             "thread_id": thread_id,
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project_scoped.id,
                 "project_id": project_scoped.id,
                 "custom_fields": {},
@@ -493,8 +493,8 @@ def test_voice_job_control_cancels_selected_job_without_dispatching_new_work(
     assert "worker=job_control" in load_prompt("worker_route")
 
 
-@pytest.mark.voice_plane
-def test_voice_status_check_does_not_pause_misrouted_job_control(
+@pytest.mark.dock_turn_plane
+def test_dock_turn_status_check_does_not_pause_misrouted_job_control(
     client, project_scoped, tmpdir_checkpoint, monkeypatch
 ):
     from app.agents import job_runtime, session_plane
@@ -538,14 +538,14 @@ def test_voice_status_check_does_not_pause_misrouted_job_control(
     )
 
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": (
                 "What is the status of the job for the third paper gist? Just a status check."
             ),
             "thread_id": thread_id,
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project_scoped.id,
                 "project_id": project_scoped.id,
                 "custom_fields": {},
@@ -560,8 +560,8 @@ def test_voice_status_check_does_not_pause_misrouted_job_control(
     assert "pause" not in (end.get("reply") or "").lower()
 
 
-@pytest.mark.voice_plane
-def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
+@pytest.mark.dock_turn_plane
+def test_dock_turn_link_resolves_named_nodes_and_commits_the_requested_edge(
     client, store, project_scoped, tmpdir_checkpoint, monkeypatch
 ):
     thread_id = "voice-link-targets"
@@ -617,12 +617,12 @@ def test_voice_link_resolves_named_nodes_and_commits_the_requested_edge(
     )
 
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "Connect it with the Genesis node.",
             "thread_id": thread_id,
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project_scoped.id,
                 "project_id": project_scoped.id,
                 "custom_fields": {},

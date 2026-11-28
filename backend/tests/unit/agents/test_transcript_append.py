@@ -4,7 +4,7 @@ from app.models import Node, NodeKind, new_id
 from app.services.checkpoints import JsonCheckpointStore
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_transcript_append(tmpdir_checkpoint, monkeypatch):
     monkeypatch.setattr(session_plane, "_checkpoint", JsonCheckpointStore(str(tmpdir_checkpoint)))
     session_plane.append_transcript_turn("thr", role="user", text="hi")
@@ -12,7 +12,7 @@ def test_transcript_append(tmpdir_checkpoint, monkeypatch):
     assert state["transcript"][-1]["text"] == "hi"
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_routing_memory_is_bounded_and_includes_committed_graph_nodes(
     store, project, tmpdir_checkpoint, monkeypatch
 ):

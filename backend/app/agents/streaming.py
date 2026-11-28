@@ -9,7 +9,7 @@ from typing import Any
 def event_to_dock_payload(
     ev: dict[str, Any],
     *,
-    voice_turn: bool = False,
+    dock_turn: bool = False,
 ) -> dict[str, Any] | None:
     kind = ev.get("event") or ""
     data = ev.get("data") or {}
@@ -41,7 +41,7 @@ def event_to_dock_payload(
                             "detail": out.get("reply"),
                         }
                     elif out.get("reply"):
-                        if voice_turn:
+                        if dock_turn:
                             payload["type"] = "worker_progress"
                             payload["content"] = out.get("reply")
                         else:

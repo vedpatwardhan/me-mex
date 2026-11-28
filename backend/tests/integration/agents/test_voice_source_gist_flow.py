@@ -22,14 +22,14 @@ def _conversation_for_voice_gist(inp):
     return "Okay."
 
 
-def test_voice_source_gist_holds_then_creates_reviewable_root_proposal(
+def test_dock_turn_source_gist_holds_then_creates_reviewable_root_proposal(
     client, store, project_scoped, voice_context_json, monkeypatch
 ):
     events = []
     followup_ready = threading.Event()
 
     base = get_chains()
-    monkeypatch.setattr("app.agents.conversation_voice.settings.CHAT_LLM_MODE", "live")
+    monkeypatch.setattr("app.agents.conversation_turn.settings.CHAT_LLM_MODE", "live")
     set_chains_override(
         replace(
             base,
@@ -75,7 +75,7 @@ def test_voice_source_gist_holds_then_creates_reviewable_root_proposal(
     }
     thread_id = "voice-source-gist-flow"
     response = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "Give me a short summary of this paper.",
             "thread_id": thread_id,

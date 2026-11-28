@@ -8,9 +8,9 @@ from typing import Any
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from app.agents.authoritative_routes import authoritative_worker_route
 from app.agents.context_preprocessor import apply_custom_fields_to_text
 from app.agents.dispatch_materializer import ordered_field_references
+from app.agents.routing_payload import slim_routing_context
 from app.agents.source_reference import resolve_source_reference
 from app.agents.supervisor_plan_contract import (
     repair_job_control_targets,
@@ -52,8 +52,6 @@ def _scorer_node(store: Store, node_id: str) -> ScorerNode:
 
 def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
     fields = context.get("custom_fields") or {}
-    if pre := authoritative_worker_route(text, fields, project, context=context):
-        return pre
     intro = (project.introduction or "").strip()
     routing_context = {
         **context,
@@ -68,15 +66,17 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
         focus = ((context.get("routing_memory") or {}).get("focus_root") or {}).get("id")
         if focus:
             routing_context["pinned_root_id"] = str(focus)
+    planning_contract = {
+        "url_field_count": url_field_count,
+        "multi_url_requires_dispatch_tasks": url_field_count >= 2,
+    }
+    routing_context["planning_contract"] = planning_contract
     payload = json.dumps(
         {
             "text": text,
-            "context": routing_context,
+            "context": slim_routing_context(routing_context),
             "routing_binding_hints": hints,
-            "planning_contract": {
-                "url_field_count": url_field_count,
-                "multi_url_requires_dispatch_tasks": url_field_count >= 2,
-            },
+            "planning_contract": planning_contract,
         },
         ensure_ascii=False,
     )
@@ -171,53 +171,7 @@ def route_intent(text: str, context: dict, project: Any) -> WorkerRoute:
                     )
                 }
             )
-    decision = _escalate_scope_proposal_when_unset(text, project, decision)
     return decision
-
-
-def _looks_like_scope_dump(text: str) -> bool:
-    lower = text.lower()
-    hints = (
-        "warehouse",
-        "robot",
-        "grasp",
-        "sim-to-real",
-        "manipulation",
-        "project scope",
-        "research project",
-        "i want to study",
-        "my project",
-        "we will explore",
-        "over the next",
-        "pick-and-place",
-    )
-    return any(hint in lower for hint in hints)
-
-
-def _escalate_scope_proposal_when_unset(
-    text: str, project: Any, decision: WorkerRoute
-) -> WorkerRoute:
-    """P1: substantive scope dumps with no committed introduction → ProjectScopeWorker."""
-    if (getattr(project, "introduction", None) or "").strip():
-        return decision
-    if decision.dispatch_tasks:
-        return decision
-    if decision.worker not in {"conversation", "project_scope"}:
-        return decision
-    body = text.strip()
-    if len(body) < 40 and not _looks_like_scope_dump(body):
-        return decision
-    if decision.worker == "project_scope":
-        if decision.dispatch:
-            return decision
-        return decision.model_copy(update={"dispatch": True})
-    return decision.model_copy(
-        update={
-            "worker": "project_scope",
-            "intent": "scope_conversation",
-            "dispatch": True,
-        }
-    )
 
 
 def conversation_worker(
@@ -869,7 +823,7 @@ def project_scope_worker(ctx: ToolContext, text: str, context: dict | None = Non
         }
 
     update_scope_proposal(ctx.thread_id, proposed)
-    if fields.get("force_scope_commit") and not context.get("voice_dispatch"):
+    if fields.get("force_scope_commit") and not context.get("turn_dispatch"):
         _job_checkpoint(context)
         project.update_project_scope(ctx, introduction=proposed)
         return {

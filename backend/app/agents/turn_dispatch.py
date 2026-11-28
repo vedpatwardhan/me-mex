@@ -1,4 +1,4 @@
-"""Voice dispatch policy (04 §12.11, plan phase 0)."""
+"""Dock-turn dispatch policy: foreground worker dispatch when dock_turn is set."""
 
 from __future__ import annotations
 
@@ -9,22 +9,22 @@ from app.errors import NotFoundError
 from app.llm.schemas import WorkerRoute
 
 
-def is_voice_turn(context_json: dict[str, Any] | None) -> bool:
+def is_dock_turn(context_json: dict[str, Any] | None) -> bool:
     if not context_json:
         return False
-    if context_json.get("voice_turn") is True:
+    if context_json.get("dock_turn") is True:
         return True
-    return str(context_json.get("voice_turn", "")).lower() in ("1", "true", "yes")
+    return str(context_json.get("dock_turn", "")).lower() in ("1", "true", "yes")
 
 
-def needs_voice_dispatch(
+def needs_foreground_dispatch(
     decision: WorkerRoute,
     *,
-    voice_turn: bool,
+    dock_turn: bool,
     scope_blocked: bool = False,
 ) -> bool:
     return bool(
-        voice_turn and not scope_blocked and decision.dispatch and decision.worker != "conversation"
+        dock_turn and not scope_blocked and decision.dispatch and decision.worker != "conversation"
     )
 
 
@@ -240,7 +240,7 @@ def normalize_link_decision(
     )
 
 
-def resolve_voice_route(
+def resolve_turn_route(
     *,
     store,
     project_id: str,
@@ -254,13 +254,15 @@ def resolve_voice_route(
         graph_candidates_for_supervisor,
         prioritize_project_scope_until_complete,
     )
+    from app.agents.routing_payload import needs_full_graph_candidates
     from app.agents.workers import route_intent
 
     project = store.get_project(project_id)
     effective = apply_custom_fields_to_text(text, context_json or {})
     routing_context = dict(context_json or {})
+    cap = 80 if needs_full_graph_candidates(routing_context) else 15
     candidates = routing_context.get("graph_candidates") or graph_candidates_for_supervisor(
-        store, project_id
+        store, project_id, limit=cap
     )
     memory = routing_context.get("routing_memory") or {}
     current_source = memory.get("current_source") or {}
@@ -313,6 +315,6 @@ def resolve_voice_route(
     return decision, effective, scope_blocked
 
 
-async def resolve_voice_route_async(**kwargs):
+async def resolve_turn_route_async(**kwargs):
     """Run synchronous routing and its HTTP-backed Supervisor off the event loop."""
-    return await asyncio.to_thread(resolve_voice_route, **kwargs)
+    return await asyncio.to_thread(resolve_turn_route, **kwargs)

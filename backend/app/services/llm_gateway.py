@@ -80,6 +80,7 @@ class LLMGateway:
             trust_env=False,
             limits=limits,
         )
+        self._last_usage: dict[str, Any] | None = None
 
     def prepare_reasoning_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Ensures the reasoning system prompt with [THINK] tags is present in message history."""
@@ -175,6 +176,8 @@ class LLMGateway:
             payload["stream"] = True
             collected_chunks: list[str] = []
             collected_reasoning: list[str] = []
+            self._last_usage = None
+            finish_reason: str | None = None
 
             with self.client.stream("POST", url, json=payload) as resp:
                 if resp.status_code != 200:
@@ -191,10 +194,16 @@ class LLMGateway:
                         data_str = line[6:]
                         try:
                             chunk = json.loads(data_str)
+                            if chunk.get("usage"):
+                                self._last_usage = chunk["usage"]
                             choices = chunk.get("choices", [])
                             if not choices:
                                 continue
-                            delta = choices[0].get("delta", {})
+                            choice0 = choices[0]
+                            fr = choice0.get("finish_reason")
+                            if fr:
+                                finish_reason = fr
+                            delta = choice0.get("delta", {})
                             c_piece = delta.get("content")
                             if c_piece:
                                 collected_chunks.append(c_piece)
@@ -228,6 +237,7 @@ class LLMGateway:
 
             elapsed = time.perf_counter() - start_time
             if trace:
+                usage = self._last_usage or {}
                 llm_tracer.log_call(
                     caller=caller,
                     model=self.model,
@@ -238,6 +248,9 @@ class LLMGateway:
                     response_raw=raw_content,
                     response_parsed=final_text,
                     status="SUCCESS",
+                    prompt_tokens=usage.get("prompt_tokens"),
+                    completion_tokens=usage.get("completion_tokens"),
+                    finish_reason=finish_reason,
                 )
 
             return final_text
@@ -305,6 +318,7 @@ class LLMGateway:
                 else:
                     validated_model = response_model.model_validate_json(raw_res)
                 elapsed = time.perf_counter() - start_time
+                usage = self._last_usage or {}
                 llm_tracer.log_call(
                     caller=caller,
                     model=self.model,
@@ -317,6 +331,8 @@ class LLMGateway:
                     response_model_name=response_model.__name__,
                     attempts=attempt,
                     status="SUCCESS",
+                    prompt_tokens=usage.get("prompt_tokens"),
+                    completion_tokens=usage.get("completion_tokens"),
                 )
                 return validated_model
             except (ValueError, ConnectionError, httpx.HTTPError, json.JSONDecodeError) as e:
@@ -398,6 +414,8 @@ class LLMGateway:
         }
 
         collected_tokens = []
+        last_usage: dict[str, Any] | None = None
+        finish_reason: str | None = None
         try:
             stream_timeout = max(60.0, float(settings.LLM_TIMEOUT))
             async with (
@@ -420,7 +438,14 @@ class LLMGateway:
                         data_str = line[6:]
                         try:
                             chunk = json.loads(data_str)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            if chunk.get("usage"):
+                                last_usage = chunk["usage"]
+                            choices = chunk.get("choices") or [{}]
+                            choice0 = choices[0]
+                            fr = choice0.get("finish_reason")
+                            if fr:
+                                finish_reason = fr
+                            delta = choice0.get("delta", {})
                             content = delta.get("content", "")
                             if content:
                                 sanitized = strip_emojis(content)
@@ -442,6 +467,9 @@ class LLMGateway:
                 response_raw=full_response,
                 response_parsed=full_response,
                 status="SUCCESS",
+                prompt_tokens=(last_usage or {}).get("prompt_tokens"),
+                completion_tokens=(last_usage or {}).get("completion_tokens"),
+                finish_reason=finish_reason,
             )
         except (httpx.HTTPError, ConnectionError, OSError) as e:
             elapsed = time.perf_counter() - start_time

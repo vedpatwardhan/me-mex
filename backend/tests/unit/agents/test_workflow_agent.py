@@ -2,7 +2,7 @@ import pytest
 from app.agents.workflow_agent import run_workflow_agent
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_workflow_agent_proactive_on_approval():
     out = run_workflow_agent(
         job={"job_id": "j1", "worker": "intradoc", "status": "awaiting_approval", "label": "read"},

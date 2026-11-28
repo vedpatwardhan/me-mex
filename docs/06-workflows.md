@@ -1,5 +1,7 @@
 # User workflows
 
+> **Transport:** HTTP dock turn (STT + `POST /api/conversation/turn/stream`). See [2811_changelog.md](./2811_changelog.md).
+
 > **Canon:** [00-vision-and-principles.md](./00-vision-and-principles.md) §6. **Agents & tools:** [04-agent-orchestration.md](./04-agent-orchestration.md). **Dock UX:** [02-user-experience.md](./02-user-experience.md) §4.
 
 This document is the **end-to-end user journey**—what you do in the UI, when voice starts, and how **recommendations** relate to agent work. **Nothing in the dock auto-runs a graph write.**

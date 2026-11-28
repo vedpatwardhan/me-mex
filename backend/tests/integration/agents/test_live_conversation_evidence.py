@@ -2,11 +2,11 @@ import pytest
 
 pytestmark = [pytest.mark.live_llm, pytest.mark.xdist_group(name="live_llm")]
 
-from app.agents.conversation_voice import (
-    _astream_voice_conversation_reply,
+from app.agents.conversation_turn import (
+    _astream_dock_conversation_reply,
     _conversation_prompt_inputs,
 )
-from app.agents.voice_dispatch import normalize_link_decision
+from app.agents.turn_dispatch import normalize_link_decision
 from app.agents.workers import route_intent
 from app.config import settings
 from app.models import Project
@@ -37,7 +37,7 @@ async def test_live_conversation_defers_source_claims_until_gist_is_complete():
         project_scope="Research project about recursive self-improvement.",
     )
     parts: list[str] = []
-    async for part in _astream_voice_conversation_reply(inputs):
+    async for part in _astream_dock_conversation_reply(inputs):
         parts.append(part)
     answer = "".join(parts).strip().lower()
 
@@ -80,7 +80,7 @@ async def test_live_empty_scope_conversation_guides_user_to_define_scope():
         project_scope="",
     )
     parts: list[str] = []
-    async for part in _astream_voice_conversation_reply(inputs):
+    async for part in _astream_dock_conversation_reply(inputs):
         parts.append(part)
     answer = "".join(parts).strip().lower()
 

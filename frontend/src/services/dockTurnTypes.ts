@@ -9,7 +9,7 @@ export type VoiceSessionState =
   | 'Streaming'
   | 'Awaiting approval';
 
-export type VoiceContext = {
+export type DockTurnContext = {
   active_project_id: string;
   muted: boolean;
   custom_fields: Record<string, string>;

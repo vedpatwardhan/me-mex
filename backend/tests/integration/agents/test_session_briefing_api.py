@@ -1,7 +1,7 @@
 import pytest
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_session_briefing_api(client, project):
     r = client.get(
         "/api/agent/session/briefing",

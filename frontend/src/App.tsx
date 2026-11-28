@@ -3,7 +3,7 @@ import { useMemexStore } from './store/useMemexStore';
 import { Navbar } from './components/Navbar';
 import { GraphCanvas } from './components/GraphCanvas';
 import { RecommendationsDock } from './components/RecommendationsDock';
-import { VoiceRail } from './components/VoiceRail';
+import { CaptureRail } from './components/CaptureRail';
 import { RightDrawer } from './components/RightDrawer';
 import { useDockState } from './hooks/useDockState';
 
@@ -43,7 +43,7 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#090d16] text-slate-100 font-sans">
       <Navbar />
       <div className="flex flex-1 overflow-hidden relative">
-        <VoiceRail
+        <CaptureRail
           projectId={activeProjectId}
           selectedNodeId={selectedNodeId}
           projectIntroduction={projectScope}

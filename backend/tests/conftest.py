@@ -142,7 +142,7 @@ def project(store):
 @pytest.fixture
 def voice_context_json(project):
     return {
-        "voice_turn": True,
+        "dock_turn": True,
         "active_project_id": project.id,
         "project_id": project.id,
         "custom_fields": {},

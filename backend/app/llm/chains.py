@@ -86,27 +86,34 @@ def _concepts_from_consolidated(
 # --- Live chains (prompt | LangChain Runnable → vLLM) ---
 
 
-def _live_supervisor() -> Runnable:
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                load_prompt(
-                    "worker_route",
-                    project_scope="{project_scope}",
-                ),
-            ),
-            ("human", "{payload}"),
-        ]
-    )
+def _supervisor_system_prompt(inp: dict) -> str:
+    scope = inp.get("project_scope") or ""
+    core = load_prompt("worker_route_core", project_scope=scope)
+    try:
+        payload = json.loads(inp.get("payload") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    contract = payload.get("planning_contract") or {}
+    url_count = int(contract.get("url_field_count") or 0)
+    if contract.get("multi_url_requires_dispatch_tasks") or url_count >= 2:
+        core = core + "\n\n" + load_prompt("worker_route_multi")
+    return core
 
+
+def _live_supervisor() -> Runnable:
     def _run(inp: dict) -> WorkerRoute:
         max_tokens = int(inp.get("supervisor_max_tokens") or 512)
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", _supervisor_system_prompt(inp)),
+                ("human", "{payload}"),
+            ]
+        )
         chain = prompt | structured_llm(
             WorkerRoute,
             caller="Supervisor.classify",
             max_tokens=max_tokens,
-            max_retries=3,
+            max_retries=2,
         )
         return chain.invoke(inp)
 

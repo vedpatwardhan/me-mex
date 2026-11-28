@@ -3,7 +3,7 @@ import { LoaderCircle, Mic, MicOff, PhoneOff, Radio } from 'lucide-react';
 
 import { SpeechSegmentIndicator } from './SpeechSegmentIndicator';
 import { useSpeechSegmentTimer } from '../hooks/useSpeechSegmentTimer';
-import type { VoiceContext, VoiceSessionState } from '../services/voiceTypes';
+import type { DockTurnContext, VoiceSessionState } from '../services/dockTurnTypes';
 import {
   abortVoiceTurn,
   MicCaptureSession,
@@ -11,7 +11,7 @@ import {
   subscribeSessionEvents,
   transcribeAudio,
   voiceContextToJson,
-} from '../services/voiceTurnClient';
+} from '../services/dockTurnClient';
 import {
   customFieldsForContext,
   INITIAL_CUSTOM_FIELDS,
@@ -25,7 +25,7 @@ type Props = {
   selectedNodeId?: string | null;
   projectIntroduction?: string;
   onMuteToggle?: (muted: boolean) => void;
-  onContext?: (ctx: VoiceContext) => void;
+  onContext?: (ctx: DockTurnContext) => void;
   onDockStreamEvent?: (ev: Record<string, unknown>) => void;
 };
 
@@ -107,7 +107,7 @@ function statusMeta(
   };
 }
 
-export const VoiceRail: React.FC<Props> = ({
+export const CaptureRail: React.FC<Props> = ({
   projectId,
   selectedNodeId,
   projectIntroduction,
@@ -143,7 +143,7 @@ export const VoiceRail: React.FC<Props> = ({
     [projectId],
   );
 
-  const contextForWorker = useCallback((micMuted = muted): VoiceContext => {
+  const contextForWorker = useCallback((micMuted = muted): DockTurnContext => {
     return {
       active_project_id: projectId || '',
       muted: micMuted,
@@ -167,7 +167,7 @@ export const VoiceRail: React.FC<Props> = ({
   }, []);
 
   const contextWithCommittedFields = useCallback(
-    (micMuted: boolean): VoiceContext => ({
+    (micMuted: boolean): DockTurnContext => ({
       active_project_id: projectId || '',
       muted: micMuted,
       custom_fields: customFieldsForContext(pendingTurnFieldsRef.current, '', true),

@@ -4,7 +4,7 @@ from app.db import ToolContext
 from app.tools import dock as dock_tools
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_build_session_briefing(store, project, tmpdir_checkpoint, monkeypatch):
     from app.agents import session_plane
 
@@ -24,7 +24,7 @@ def test_build_session_briefing(store, project, tmpdir_checkpoint, monkeypatch):
     assert b["pending_approval_count"] >= 1
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_resolved_scope_approval_is_not_briefed_as_active_job(
     store, project, tmpdir_checkpoint, monkeypatch
 ):
@@ -65,7 +65,7 @@ def test_resolved_scope_approval_is_not_briefed_as_active_job(
     assert job_runtime.get_job(job["job_id"])["status"] == "resolved"
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_briefing_separates_active_job_status_from_completed_source_evidence(
     store, project, tmpdir_checkpoint, monkeypatch
 ):

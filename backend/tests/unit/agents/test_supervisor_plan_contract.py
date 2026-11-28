@@ -110,15 +110,14 @@ def test_structural_multi_url_fallback_builds_three_tasks():
 
 def test_supervisor_max_tokens_scales_with_url_fields():
     assert supervisor_max_tokens({}) == 512
-    assert (
-        supervisor_max_tokens(
-            {
-                "custom_fields": {
-                    "a": "https://a",
-                    "b": "https://b",
-                    "c": "https://c",
-                }
+    multi = supervisor_max_tokens(
+        {
+            "custom_fields": {
+                "a": "https://a",
+                "b": "https://b",
+                "c": "https://c",
             }
-        )
-        >= 512
+        }
     )
+    assert multi >= 1024
+    assert multi <= 2048

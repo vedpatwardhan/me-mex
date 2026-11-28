@@ -2,10 +2,10 @@ import pytest
 from tests.sse_util import iter_sse_data
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_w9_voice_summary_path(client, project, voice_context_json, mock_vllm_chat):
     r = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "Summarize this link without writing the graph",
             "thread_id": "w9-voice",

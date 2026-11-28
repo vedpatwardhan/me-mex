@@ -1,8 +1,9 @@
 import pytest
 from app.agents.conversation_utterance import (
     UtteranceIntent,
-    astream_voice_conversation_reply,
+    astream_dock_conversation_reply,
     build_conversation_turn,
+    build_multi_utterance_turn,
     conversation_prompt_inputs,
 )
 from app.config import settings
@@ -18,12 +19,35 @@ async def test_astream_live_yields_tokens_before_full_reply():
         "project_scope": "Research project.",
     }
     parts: list[str] = []
-    async for piece in astream_voice_conversation_reply(inp):
+    async for piece in astream_dock_conversation_reply(inp):
         parts.append(piece)
     reply = "".join(parts).strip()
     assert parts
     assert reply
     assert len(reply.split()) <= 25
+
+
+def test_multi_utterance_turn_coalesces_segments():
+    inp = build_multi_utterance_turn(
+        user_message="Summarize and pause the job.",
+        briefing={"active_jobs": [{"job_id": "j1"}], "scope_complete": True},
+        project_scope="Research.",
+        user_fields={"paper": "https://arxiv.org/pdf/1"},
+        segments=[
+            (
+                UtteranceIntent.JOB_CONTROL_RESULT,
+                {"job_action": "pause", "job_id": "j1"},
+            ),
+            (
+                UtteranceIntent.DISPATCH_INTERIM,
+                {"worker_kind": "gist", "already_running": False},
+            ),
+        ],
+    )
+    assert "utterance_segments" in inp["text"]
+    assert "job_control_result" in inp["text"]
+    assert "dispatch_interim" in inp["text"]
+    assert "arxiv" not in inp["text"]
 
 
 def test_dispatch_interim_prompt_excludes_source_urls():

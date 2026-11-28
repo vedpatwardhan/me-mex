@@ -6,7 +6,7 @@ from app.agents.worker_registry import worker_handler
 from app.db import ToolContext
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_background_worker_lifecycle(store, project):
     ctx = ToolContext(project_id=project.id, thread_id="bg-t", store=store)
     fn = worker_handler("retrieval")

@@ -1,4 +1,4 @@
-"""Shared Conversation LLM utterance builder for voice and observer paths."""
+"""Shared Conversation LLM utterance builder for dock turns and observer paths."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def conversation_prompt_inputs(
         for key in (
             "project_scope_snippet",
             "scope_complete",
-            "voice_phase",
+            "dock_phase",
             "completed_worker_results",
             "active_jobs",
             "recent_jobs",
@@ -63,7 +63,7 @@ def conversation_prompt_inputs(
         f"[user_provided_fields]{json.dumps(safe_user_fields, ensure_ascii=False)}"
         "[/user_provided_fields]\n"
         f"User: {text}\n"
-        "Respond naturally as voice Conversation only (no tools, no graph writes)."
+        "Respond naturally as dock Conversation only (no tools, no graph writes)."
     )
     if briefing.get("scope_complete") is False and not (project_scope or "").strip():
         augmented += (
@@ -95,8 +95,8 @@ def _ensure_p1_question_suffix(reply: str) -> str:
     return f"{text} What would you like to explore first?"
 
 
-async def astream_voice_conversation_reply(inp: dict[str, Any]) -> AsyncIterator[str]:
-    """Stream conversation tokens (plane 1 TTS source)."""
+async def astream_dock_conversation_reply(inp: dict[str, Any]) -> AsyncIterator[str]:
+    """Stream conversation tokens to the dock SSE text stream."""
     if settings.CHAT_LLM_MODE != "live" or is_chains_overridden():
         chains = get_chains()
         reply = chains.conversation.invoke(inp)
@@ -113,7 +113,7 @@ async def astream_voice_conversation_reply(inp: dict[str, Any]) -> AsyncIterator
     pieces: list[str] = []
     async for piece in llm_gateway.stream_chat_completion(
         messages,
-        max_tokens=settings.VOICE_FOREGROUND_MAX_TOKENS,
+        max_tokens=settings.DOCK_STREAM_MAX_TOKENS,
         enable_reasoning=False,
         caller="Conversation",
     ):
@@ -149,7 +149,7 @@ def strip_source_fields_for_intent(
     intent: UtteranceIntent,
     user_fields: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """For dispatch/clarification intents, drop fields at conversation_voice layer too."""
+    """For dispatch/clarification intents, drop fields at conversation_turn layer too."""
     if intent in {
         UtteranceIntent.DISPATCH_INTERIM,
         UtteranceIntent.MULTI_DISPATCH_INTERIM,
@@ -185,6 +185,66 @@ def build_conversation_turn(
     return base
 
 
+def segments_coalesce_compatible(intents: list[UtteranceIntent]) -> bool:
+    if len(intents) <= 1:
+        return True
+    return UtteranceIntent.CLARIFICATION not in intents
+
+
+def build_multi_utterance_turn(
+    *,
+    user_message: str,
+    briefing: dict[str, Any],
+    project_scope: str,
+    user_fields: dict[str, Any] | None = None,
+    segments: list[tuple[UtteranceIntent, dict[str, Any]]],
+    supervisor_context: str | None = None,
+) -> dict[str, Any]:
+    """One Conversation LLM call for multiple ordered foreground intents on a dock turn."""
+    if len(segments) == 1:
+        intent, facts = segments[0]
+        msg = user_message
+        if supervisor_context and facts.get("supervisor_supplement"):
+            msg = f"{user_message}\n(Supervisor added context for the user: {supervisor_context})"
+        return build_conversation_turn(
+            intent=intent,
+            user_message=msg,
+            briefing=briefing,
+            project_scope=project_scope,
+            user_fields=user_fields,
+            utterance_facts=facts,
+        )
+
+    strip_dispatch = any(
+        i in (UtteranceIntent.DISPATCH_INTERIM, UtteranceIntent.MULTI_DISPATCH_INTERIM)
+        for i, _ in segments
+    )
+    safe_fields = {} if strip_dispatch else (user_fields or {})
+    base = conversation_prompt_inputs(
+        text=user_message,
+        briefing=briefing,
+        project_scope=project_scope,
+        user_fields=safe_fields,
+    )
+    ordered = [
+        {"utterance_intent": intent.value, "utterance_facts": facts} for intent, facts in segments
+    ]
+    if supervisor_context:
+        ordered.append(
+            {
+                "utterance_intent": "supervisor_context",
+                "utterance_facts": {"text": supervisor_context[:1200]},
+            }
+        )
+    meta = json.dumps({"utterance_segments": ordered}, ensure_ascii=False)[:4000]
+    base["text"] = (
+        f"[utterance_context]{meta}[/utterance_context]\n"
+        f"{base['text']}\n"
+        "Cover each utterance_segment in order in one spoken reply."
+    )
+    return base
+
+
 def _dispatch_violates_evidence_boundary(reply: str) -> bool:
     text = (reply or "").strip()
     if not text:
@@ -203,18 +263,18 @@ async def astream_conversation_utterance(
         UtteranceIntent.MULTI_DISPATCH_INTERIM,
     )
     if not dispatch_guard:
-        async for piece in astream_voice_conversation_reply(inp):
+        async for piece in astream_dock_conversation_reply(inp):
             yield piece
         return
 
     pieces: list[str] = []
-    async for piece in astream_voice_conversation_reply(inp):
+    async for piece in astream_dock_conversation_reply(inp):
         pieces.append(piece)
     text = "".join(pieces).strip()
     if _dispatch_violates_evidence_boundary(text):
         import logging
 
-        logging.getLogger("memex.v2.voice").warning(
+        logging.getLogger("memex.v2.dock_turn").warning(
             "dispatch utterance failed evidence lint; retrying once"
         )
         retry_inp = dict(inp)
@@ -223,7 +283,7 @@ async def astream_conversation_utterance(
             "Acknowledge the task and dock only.[/reminder]"
         )
         pieces = []
-        async for piece in astream_voice_conversation_reply(retry_inp):
+        async for piece in astream_dock_conversation_reply(retry_inp):
             pieces.append(piece)
         text = "".join(pieces).strip()
         if _dispatch_violates_evidence_boundary(text):
@@ -245,7 +305,7 @@ def invoke_conversation_utterance(
         return str(reply or "").strip()
 
     messages = _conversation_openai_messages(inp)
-    budget = max_tokens or settings.VOICE_FOREGROUND_MAX_TOKENS
+    budget = max_tokens or settings.DOCK_STREAM_MAX_TOKENS
     reply = llm_gateway.generate_chat_completion(
         messages,
         max_tokens=budget,

@@ -1,23 +1,21 @@
-import os
-import json
-import time
-import inspect
 import datetime
+import inspect
+import json
+import os
 import threading
-from pathlib import Path
-from typing import List, Dict, Any, Optional
+import time
 from contextvars import ContextVar
+from pathlib import Path
+from typing import Any
 
 # Context variable to track active trace session per request / async task
-_current_session_id: ContextVar[Optional[str]] = ContextVar(
-    "current_session_id", default=None
-)
+_current_session_id: ContextVar[str | None] = ContextVar("current_session_id", default=None)
 _current_step_counter: ContextVar[int] = ContextVar("current_step_counter", default=0)
 
 # Process-wide sequence counter and lock per session for thread-safe monotonic numbering
 _session_step_lock = threading.Lock()
-_session_step_counters: Dict[str, int] = {}
-_latest_active_session_id: Optional[str] = None
+_session_step_counters: dict[str, int] = {}
+_latest_active_session_id: str | None = None
 
 BASE_TRACE_DIR = Path(
     os.getenv(
@@ -41,9 +39,7 @@ class LLMTracer:
         """Starts a new trace session and resets step counter for the current context."""
         global _latest_active_session_id
         timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_id = (
-            f"{session_prefix}_{timestamp_str}_{int(time.time() * 1000) % 10000:04d}"
-        )
+        session_id = f"{session_prefix}_{timestamp_str}_{int(time.time() * 1000) % 10000:04d}"
         _current_session_id.set(session_id)
         _current_step_counter.set(0)
         with _session_step_lock:
@@ -63,7 +59,7 @@ class LLMTracer:
                 sid = self.start_session("default")
         return sid
 
-    def _resolve_caller(self, caller: Optional[str]) -> str:
+    def _resolve_caller(self, caller: str | None) -> str:
         """Fallback to inspect call stack if caller was not explicitly provided."""
         if caller:
             return caller
@@ -82,26 +78,29 @@ class LLMTracer:
                 if cls_name:
                     return f"{cls_name}.{fn}"
                 return f"{file_name}:{fn}"
-        except Exception:
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
             pass
 
         return "unknown_caller"
 
     def log_call(
         self,
-        caller: Optional[str],
+        caller: str | None,
         model: str,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         duration_seconds: float,
         temperature: float,
         max_tokens: int,
-        response_raw: Optional[str] = None,
-        response_parsed: Optional[Any] = None,
-        response_model_name: Optional[str] = None,
+        response_raw: str | None = None,
+        response_parsed: Any | None = None,
+        response_model_name: str | None = None,
         attempts: int = 1,
         status: str = "SUCCESS",
-        error: Optional[str] = None,
-    ) -> Optional[Path]:
+        error: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        finish_reason: str | None = None,
+    ) -> Path | None:
         """
         Writes a full-payload trace JSON file and appends an entry to index.jsonl.
         Guaranteed fail-safe: disk I/O errors never raise to the caller.
@@ -150,6 +149,16 @@ class LLMTracer:
                 },
                 "error": error,
             }
+            if prompt_tokens is not None or completion_tokens is not None or finish_reason:
+                trace_data["usage"] = {
+                    k: v
+                    for k, v in {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "finish_reason": finish_reason,
+                    }.items()
+                    if v is not None
+                }
 
             with open(trace_path, "w", encoding="utf-8") as f:
                 json.dump(trace_data, f, indent=2, default=str)
@@ -170,7 +179,7 @@ class LLMTracer:
                 f.write(json.dumps(index_entry) + "\n")
 
             return trace_path
-        except Exception as e:
+        except OSError as e:
             # Completely fail-safe: never disrupt main application logic
             print(f"[LLMTracer Warning] Failed to log trace: {e}")
             return None

@@ -1,6 +1,8 @@
 # Me-Mex (v2)
 
-**Me-Mex** is a voice-first **external memory** for research: a MongoDB knowledge graph, LangGraph agents, and human-in-the-loop approvals—so you can gist papers, deep-read into concepts, link ROOTs to hubs, and reorganize topology **without** silent auto-ingest.
+> **Dock turn transport:** [docs/2811_changelog.md](./docs/2811_changelog.md) (HTTP STT + turn stream; not LiveKit).
+
+**Me-Mex** is a dock-first **external memory** for research: a MongoDB knowledge graph, LangGraph agents, and human-in-the-loop approvals—so you can gist papers, deep-read into concepts, link ROOTs to hubs, and reorganize topology **without** silent auto-ingest.
 
 The monolithic v1 stack (orchestrator ingest, `/api/chat`) is preserved only on git tag **`v1`** — see [docs/01-v1-baseline.md](./docs/01-v1-baseline.md).
 
@@ -182,7 +184,7 @@ Set in gitignored `backend/.env`: `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_AP
 
 6. **Frontend** — `cd frontend && npm install && npm run dev` (`VITE_API_BASE_URL=http://127.0.0.1:8000`).
 
-**Voice path:** browser ↔ local LiveKit ↔ `voice_agent` worker ↔ Colab STT/TTS + backend `/api/voice/conversation/stream` (and optional worker dispatch).
+**Voice path:** browser ↔ local LiveKit ↔ `voice_agent` worker ↔ Colab STT/TTS + backend `/api/conversation/turn/stream` (and optional worker dispatch).
 
 **Verify:** `curl http://localhost:8000/api/livekit/token -X POST -H 'Content-Type: application/json' -d '{"room":"me-mex","identity":"dev"}'`
 
@@ -193,8 +195,8 @@ Set in gitignored `backend/.env`: `LIVEKIT_URL=ws://localhost:7880`, `LIVEKIT_AP
 | Check | Where |
 |-------|--------|
 | `STT utterance (Xs, …)` with X ≥ ~2 and sensible text | `.dev-stack/logs/voice_worker.log` |
-| `voice_turn reply_len=…` and no `voice_turn failed` / `TTS failed` | `voice_worker.log` |
-| `POST /api/voice/conversation/stream` with no trailing ASGI `ERROR` | `backend.log` |
+| `dock_turn reply_len=…` and no `dock_turn failed` / `TTS failed` | `voice_worker.log` |
+| `POST /api/conversation/turn/stream` with no trailing ASGI `ERROR` | `backend.log` |
 | `POST /stt/transcribe` 200 | Colab `speech.log` / `gateway.log` |
 | `POST /v1/chat/completions` 200 | Colab `gateway.log` / `vllm.log` |
 | `POST /tts/synthesize` 200 (if TTS enabled) | Colab `speech.log` / `gateway.log` |

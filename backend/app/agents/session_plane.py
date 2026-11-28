@@ -551,7 +551,7 @@ def build_session_briefing(
     briefing: SessionBriefing = {
         "project_scope_snippet": scope,
         "scope_complete": complete,
-        "voice_phase": "research" if complete else "p1_scope_onboarding",
+        "dock_phase": "research" if complete else "p1_scope_onboarding",
         "active_jobs": active_jobs,
         "recent_jobs": recent_jobs,
         "active_job_affinity": active_job_affinity[-3:],

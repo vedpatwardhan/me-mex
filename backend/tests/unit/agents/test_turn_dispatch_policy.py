@@ -2,15 +2,15 @@ import asyncio
 import threading
 
 import pytest
-from app.agents.voice_dispatch import (
-    needs_voice_dispatch,
+from app.agents.turn_dispatch import (
+    needs_foreground_dispatch,
     normalize_link_decision,
-    resolve_voice_route_async,
+    resolve_turn_route_async,
 )
 from app.llm.schemas import WorkerRoute
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 @pytest.mark.parametrize(
     "decision,voice,expected",
     [
@@ -20,20 +20,20 @@ from app.llm.schemas import WorkerRoute
         (WorkerRoute(worker="conversation", intent="conversation", dispatch=False), False, False),
     ],
 )
-def test_needs_voice_dispatch(decision, voice, expected):
-    assert needs_voice_dispatch(decision, voice_turn=voice) is expected
+def test_needs_foreground_dispatch(decision, voice, expected):
+    assert needs_foreground_dispatch(decision, dock_turn=voice) is expected
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_project_scope_dispatch_comes_from_supervisor_decision():
     proposal = WorkerRoute(worker="project_scope", intent="scope_save", dispatch=True)
     conversation = WorkerRoute(worker="project_scope", intent="scope_conversation", dispatch=False)
-    assert needs_voice_dispatch(proposal, voice_turn=True) is True
-    assert needs_voice_dispatch(conversation, voice_turn=True) is False
-    assert needs_voice_dispatch(proposal, voice_turn=False) is False
+    assert needs_foreground_dispatch(proposal, dock_turn=True) is True
+    assert needs_foreground_dispatch(conversation, dock_turn=True) is False
+    assert needs_foreground_dispatch(proposal, dock_turn=False) is False
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_link_normalization_uses_current_root_and_removes_reversed_root_target():
     decision = WorkerRoute(
         worker="link",
@@ -61,7 +61,7 @@ def test_link_normalization_uses_current_root_and_removes_reversed_root_target()
     assert resolved.target_ids == ["genesis"]
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_link_normalization_clarifies_when_multiple_roots_have_no_current_source():
     decision = WorkerRoute(
         worker="link",
@@ -87,7 +87,7 @@ def test_link_normalization_clarifies_when_multiple_roots_have_no_current_source
     assert "Paper B" in (resolved.content or "")
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_link_does_not_fall_back_to_an_older_root_for_unrooted_current_source():
     decision = WorkerRoute(
         worker="link",
@@ -121,7 +121,7 @@ def test_link_does_not_fall_back_to_an_older_root_for_unrooted_current_source():
     assert "does not have a ROOT" in (resolved.content or "")
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_link_explicit_dawn_while_other_gist_unrooted_current_source():
     """E2E mirror: supervisor swap while gist for another paper is in flight."""
     decision = WorkerRoute(
@@ -163,7 +163,7 @@ def test_link_explicit_dawn_while_other_gist_unrooted_current_source():
     assert resolved.target_ids == ["genesis_global"]
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_link_utterance_title_match_single_root():
     decision = WorkerRoute(
         worker="link",
@@ -206,10 +206,10 @@ def test_link_utterance_title_match_single_root():
     assert resolved.target_ids == ["genesis_global"]
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 @pytest.mark.asyncio
-async def test_voice_supervisor_call_does_not_block_event_loop(monkeypatch):
-    from app.agents import voice_dispatch
+async def test_dock_turn_supervisor_call_does_not_block_event_loop(monkeypatch):
+    from app.agents import turn_dispatch
 
     started = threading.Event()
     release = threading.Event()
@@ -223,8 +223,8 @@ async def test_voice_supervisor_call_does_not_block_event_loop(monkeypatch):
             False,
         )
 
-    monkeypatch.setattr(voice_dispatch, "resolve_voice_route", slow_route)
-    task = asyncio.create_task(resolve_voice_route_async())
+    monkeypatch.setattr(turn_dispatch, "resolve_turn_route", slow_route)
+    task = asyncio.create_task(resolve_turn_route_async())
     assert await asyncio.to_thread(started.wait, 1)
 
     heartbeat = asyncio.Event()

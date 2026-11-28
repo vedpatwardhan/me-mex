@@ -147,7 +147,7 @@ class PendingApproval(BaseModel):
 
 
 class AgentTurnRequest(BaseModel):
-    """Agent turn envelope; use ``context_json.voice_turn`` for plane-1 voice (see ``/api/voice/conversation/stream``)."""
+    """Agent turn envelope; use ``context_json.dock_turn`` for plane-1 voice (see ``/api/conversation/turn/stream``)."""
 
     text: str
     thread_id: str

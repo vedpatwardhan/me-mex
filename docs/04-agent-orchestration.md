@@ -1,5 +1,7 @@
 # Agent orchestration
 
+> **Transport canon (2025-11):** Browser mic → HTTP STT → reviewed text → `POST /api/conversation/turn/stream` → SSE tokens out. See [2811_changelog.md](./2811_changelog.md). Sections below that describe LiveKit/STT→TTS are **legacy** unless marked otherwise.
+
 > **Canon:** [00-vision-and-principles.md](./00-vision-and-principles.md) §5–6, §8. **Graph rules:** [03-graph-and-memory.md](./03-graph-and-memory.md).
 
 **Voice:** plane 1 **Conversation** (dialogue only, no tools) on LiveKit; **WorkflowObserver** + **WorkflowAgent** for jobs and dock cards; **LangGraph workers** on dispatch only ([§2](#2-topology)). **LangGraph** orchestrates worker agents (LLM + decision model) and **deterministic tools** (Mongo, staging, dock). Conversation does **not** mutate Mongo—workers do, after HITL where required. **Gist**, **intra-doc**, **link/place**, and **reorg** are **separate** agent paths—not a v1 monolithic ingest.
@@ -99,7 +101,7 @@ Read this before [§12](#12-langgraph--langchain-runtime-interactive-agent).
 | [`backend/app/agents/graph.py`](../backend/app/agents/graph.py) | `build_graph`, `astream_agent_turn`, `_workflow_observer` |
 | [`backend/app/agents/workers.py`](../backend/app/agents/workers.py) | Worker bodies, `route_intent`, `conversation_worker` (REST) |
 | [`backend/app/agents/job_runtime.py`](../backend/app/agents/job_runtime.py) | Background intradoc, job park/resume |
-| [`voice_worker/voice_agent/worker.py`](../voice_worker/voice_agent/worker.py) | LiveKit room → `POST /api/voice/conversation/stream` (`voice_turn`) |
+| [`voice_worker/voice_agent/worker.py`](../voice_worker/voice_agent/worker.py) | LiveKit room → `POST /api/conversation/turn/stream` (`dock_turn`) |
 
 **Target vs today:** voice should **not** route spoken replies through a single synchronous `_worker_node`; see [§12.13](#1213-spec-vs-implementation).
 
@@ -127,7 +129,7 @@ Every turn (voice or REST):
 - **`route_intent`** calls the Supervisor chain ([§8](#8-supervisor-routing-intent--agent)) to pick the worker kind; P1 **scope_blocked** forces `conversation` until introduction is set (see §7).
 - Project introduction is injected into worker/supervisor prompts at invoke time—not inside this node.
 
-The module [`context_preprocessor.py`](../backend/app/agents/context_preprocessor.py) is shared with the voice path (`resolve_voice_route`). See [02-user-experience.md](./02-user-experience.md).
+The module [`context_preprocessor.py`](../backend/app/agents/context_preprocessor.py) is shared with the voice path (`resolve_turn_route`). See [02-user-experience.md](./02-user-experience.md).
 
 ---
 
@@ -477,7 +479,7 @@ Prefer **dynamic `interrupt()`** for HITL only—not for parking background work
 
 ```
 voice: STT → Conversation(stream, session_briefing from Observer) → TTS → dock transcript
-       └─ optional dispatch(thread_id, worker_kind, context_json.voice_turn=true)
+       └─ optional dispatch(thread_id, worker_kind, context_json.dock_turn=true)
             → LangGraph workers (async) → Observer → WorkflowAgent → dock cards
             → proactive Convo one-liner + TTS on done / awaiting_approval
 Observer: always jobs + briefing; runs without a foreground graph step on chit-chat turns
@@ -490,10 +492,10 @@ Barge-in → cancel foreground TTS/stream only; debounce proactive TTS per job_i
 
 ### 12.11 Conversation-first voice (normative)
 
-1. **LiveKit path:** STT → **Conversation endpoint** (contract TBD: backend stream or Colab hop) with `context_json.voice_turn = true`.
+1. **LiveKit path:** STT → **Conversation endpoint** (contract TBD: backend stream or Colab hop) with `context_json.dock_turn = true`.
 2. **Dialogue only:** Conversation has **no tools** on voice — no `fetch`, `open_passages`, or retrieval. Facts → **dispatch** plane 3 ([§8](#8-supervisor-routing-intent--agent)).
 3. **Interim contract:** For an information task dispatched in the current turn, Convo acknowledges that the supplied source is being processed and makes no source-specific claims until worker output is available. While `jobs[].status == running`, it can continue normal conversation and accurately use briefing/`jobs` for status questions.
-4. **Token budget:** Conversation uses low `max_tokens` (`VOICE_FOREGROUND_MAX_TOKENS`, default **220** on voice stream).
+4. **Token budget:** Conversation uses low `max_tokens` (`DOCK_STREAM_MAX_TOKENS`, default **220** on voice stream).
 5. **No duplicate drafts:** Conversation does **not** restate long scope dumps or worker drafts; full prose lives in dock Review / jobs / graph. Prefer brief acks; user asks to expand.
 6. **TTS orthography:** Spoken replies use full words (**for example**, not `e.g.`); voice worker may normalize text before synthesis.
 7. **Phase from briefing:** incomplete scope → P1 onboarding copy; running intra-doc → offer status; pending approvals → short reminder (not full staging JSON aloud).
@@ -533,7 +535,7 @@ Honest gap table — engineering backlog after this spec:
 
 | Behavior | Spec (this doc) | Code on `main` today |
 |----------|-----------------|----------------------|
-| Conversation outside LangGraph on voice | Yes (plane 1) | Partial — `/api/voice/conversation/stream`; full graph on REST `/api/agent/turn/stream` |
+| Conversation outside LangGraph on voice | Yes (plane 1) | Partial — `/api/conversation/turn/stream`; full graph on REST `/api/agent/turn/stream` |
 | Conversation tools on voice | **None** | `conversation_worker` may call LLM only; routing still sync worker |
 | WorkflowObserver always feeds briefing | Yes | Observer runs only after `_worker_node` |
 | WorkflowAgent dock cards | Yes (small LLM) | Not present — workers call `enqueue_pending_approval` directly |
@@ -542,4 +544,4 @@ Honest gap table — engineering backlog after this spec:
 | Streamed tokens to TTS from Conversation | Yes | Voice stream streams Conversation; REST harness may still sync workers |
 | Proactive job-complete TTS | Always (§12.12) | Partial — Observer generates proactive/gist follow-up via Conversation |
 | `session_briefing` on Conversation | Yes | Partial — embedded in voice stream prompts |
-| `context_json.voice_turn` | Specified | Not honored in router |
+| `context_json.dock_turn` | Specified | Not honored in router |

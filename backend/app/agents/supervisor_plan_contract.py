@@ -76,11 +76,18 @@ def plan_incomplete(decision: WorkerRoute, context: dict[str, Any] | None) -> bo
 
 
 def supervisor_completion_floor() -> int:
-    """Minimum completion budget for WorkerRoute JSON (higher on small models)."""
+    """Minimum completion budget for WorkerRoute JSON."""
+    explicit = int(getattr(settings, "SUPERVISOR_COMPLETION_FLOOR", 0) or 0)
+    if explicit > 0:
+        return explicit
     name = (settings.LLM_MODEL_NAME or "").lower()
     if "3-3b" in name or "3b" in name:
-        return 2048
-    return 768
+        return 768
+    return 512
+
+
+def supervisor_completion_cap() -> int:
+    return int(getattr(settings, "SUPERVISOR_COMPLETION_MAX_TOKENS", 2048) or 2048)
 
 
 def repair_job_control_targets(
@@ -107,8 +114,11 @@ def supervisor_max_tokens(context: dict[str, Any] | None) -> int:
     scale = max(url_count, job_count, len((context or {}).get("custom_fields") or {}))
     if scale < 2:
         return 512
-    scaled = min(2048, max(768, 160 * scale))
-    return max(scaled, supervisor_completion_floor())
+    scaled = min(supervisor_completion_cap(), max(768, 160 * scale))
+    floor = supervisor_completion_floor()
+    if scale >= 2:
+        floor = max(floor, 1024)
+    return min(supervisor_completion_cap(), max(scaled, floor))
 
 
 def structural_multi_url_dispatch_fallback(

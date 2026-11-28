@@ -8,8 +8,8 @@ from langchain_core.runnables import RunnableLambda
 from tests.sse_util import iter_sse_data
 
 
-@pytest.mark.voice_plane
-def test_voice_dispatch_retrieval(client, project, voice_context_json, mock_vllm_chat):
+@pytest.mark.dock_turn_plane
+def test_turn_dispatch_retrieval(client, project, voice_context_json, mock_vllm_chat):
     base = get_chains()
     set_chains_override(
         replace(
@@ -24,7 +24,7 @@ def test_voice_dispatch_retrieval(client, project, voice_context_json, mock_vllm
         )
     )
     r = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "What relates to grasping?",
             "thread_id": "voice-dispatch",

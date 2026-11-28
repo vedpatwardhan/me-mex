@@ -2,7 +2,7 @@ import pytest
 from app.agents.briefing import SessionBriefing
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_session_briefing_keys():
     b: SessionBriefing = {
         "project_scope_snippet": "x",

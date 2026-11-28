@@ -3,7 +3,7 @@
  * Replaces the former LiveKit voice_worker bridge.
  */
 
-import type { VoiceContext } from './voiceTypes';
+import type { DockTurnContext } from './dockTurnTypes';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
@@ -131,14 +131,14 @@ export async function streamVoiceConversation(
   opts: StreamVoiceConversationOptions,
 ): Promise<{ turnId: string; turnEnd?: Record<string, unknown> }> {
   const turnId = opts.turnId || `turn_${Date.now().toString(36)}`;
-  const context_json = { ...opts.contextJson, voice_turn: true, turn_id: turnId };
+  const context_json = { ...opts.contextJson, dock_turn: true, turn_id: turnId };
   opts.onEvent({
     type: 'turn_start',
     text: opts.text.slice(0, 8000),
     turn_id: turnId,
   });
 
-  const res = await fetch(`${API_BASE}/api/voice/conversation/stream`, {
+  const res = await fetch(`${API_BASE}/api/conversation/turn/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -149,7 +149,7 @@ export async function streamVoiceConversation(
     signal: opts.signal,
   });
   if (!res.ok) {
-    throw new Error(`voice stream failed: ${res.status}`);
+    throw new Error(`dock turn stream failed: ${res.status}`);
   }
 
   let turnEnd: Record<string, unknown> | undefined;
@@ -167,13 +167,13 @@ export async function streamVoiceConversation(
     opts.signal,
   );
   if (sawToken) {
-    /* streaming state handled by VoiceRail */
+    /* streaming state handled by CaptureRail */
   }
   return { turnId, turnEnd };
 }
 
 export async function abortVoiceTurn(turnId: string, threadId: string): Promise<void> {
-  await fetch(`${API_BASE}/api/voice/conversation/abort`, {
+  await fetch(`${API_BASE}/api/conversation/turn/abort`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ turn_id: turnId, thread_id: threadId }),
@@ -225,7 +225,7 @@ export function subscribeSessionEvents(
   };
 }
 
-export function voiceContextToJson(ctx: VoiceContext): Record<string, unknown> {
+export function voiceContextToJson(ctx: DockTurnContext): Record<string, unknown> {
   return {
     active_project_id: ctx.active_project_id,
     muted: ctx.muted,

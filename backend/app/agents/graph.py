@@ -18,7 +18,7 @@ from app.agents.context_preprocessor import (
     prioritize_project_scope_until_complete,
 )
 from app.agents.jobs import job_from_worker_turn
-from app.agents.voice_dispatch import normalize_link_decision
+from app.agents.turn_dispatch import normalize_link_decision
 from app.db import ToolContext, get_store
 from app.services.checkpoints import JsonCheckpointStore
 
@@ -527,9 +527,9 @@ async def astream_agent_turn(
 ):
     """Yield dock SSE payloads from astream_events v3."""
     from app.agents.streaming import event_to_dock_payload
-    from app.agents.voice_dispatch import is_voice_turn
+    from app.agents.turn_dispatch import is_dock_turn
 
-    voice = is_voice_turn(context_json)
+    voice = is_dock_turn(context_json)
     graph = get_compiled_graph()
     state: AgentState = {
         "text": text,
@@ -541,7 +541,7 @@ async def astream_agent_turn(
     config = {"configurable": {"thread_id": thread_id}}
     event_iter = await graph.astream_events(state, config=config, version="v3")
     async for ev in event_iter:
-        payload = event_to_dock_payload(ev, voice_turn=voice)
+        payload = event_to_dock_payload(ev, dock_turn=voice)
         if payload:
             yield payload
     snap = await graph.aget_state(config)

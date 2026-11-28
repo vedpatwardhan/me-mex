@@ -2,15 +2,15 @@ import pytest
 from tests.sse_util import iter_sse_data
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_chitchat_empty_scope_no_scope_dispatch(client, empty_project, mock_vllm_chat):
     ctx = {
-        "voice_turn": True,
+        "dock_turn": True,
         "active_project_id": empty_project.id,
         "project_id": empty_project.id,
     }
     r = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "how's your day",
             "thread_id": "voice-p1-chit",

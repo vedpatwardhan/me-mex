@@ -5,10 +5,10 @@ from app.llm import AgentChains, get_chains, set_chains_override
 from langchain_core.runnables import RunnableLambda
 from tests.sse_util import iter_sse_data
 
-pytestmark = pytest.mark.voice_plane
+pytestmark = pytest.mark.dock_turn_plane
 
 
-def test_voice_conversation_stream_passes_custom_fields_to_llm(client, project):
+def test_conversation_turn_stream_passes_custom_fields_to_llm(client, project):
     captured: list[dict] = []
     base = get_chains()
 
@@ -34,12 +34,12 @@ def test_voice_conversation_stream_passes_custom_fields_to_llm(client, project):
     )
 
     r = client.post(
-        "/api/voice/conversation/stream",
+        "/api/conversation/turn/stream",
         json={
             "text": "what is my name?",
             "thread_id": "voice-fields",
             "context_json": {
-                "voice_turn": True,
+                "dock_turn": True,
                 "active_project_id": project.id,
                 "custom_fields": {"name": "Ved"},
             },
@@ -53,7 +53,7 @@ def test_voice_conversation_stream_passes_custom_fields_to_llm(client, project):
     assert '"name": "Ved"' in human
 
 
-@pytest.mark.voice_plane
+@pytest.mark.dock_turn_plane
 def test_rest_conversation_worker_passes_custom_fields(client, project, mock_vllm_chat):
     from app.llm import AgentChains, get_chains, set_chains_override
     from langchain_core.runnables import RunnableLambda

@@ -1,5 +1,7 @@
 # Demo runbook — workflow smoke (any research domain)
 
+> **Dock turn:** Mic → STT → review → Send on `POST /api/conversation/turn/stream` ([2811_changelog.md](./2811_changelog.md)).
+
 > **Purpose:** Manual checklist to confirm Me-Mex v2 **workflows** work for **your** demo topic—not robotics graph seeding. Robotics notes in the repo are **routing/eval fixtures** only ([00 §2.5](./00-vision-and-principles.md#25-reference-artifacts-robotics-exemplar)).
 >
 > **Spec mapping:** workflows [06](./06-workflows.md); UX [02](./02-user-experience.md); automated gates [11](./11-testing.md).
@@ -86,19 +88,19 @@ tail -f me-mex/.dev-stack/logs/backend.log me-mex/.dev-stack/logs/voice_worker.l
 
 | Signal | Where to look |
 |--------|----------------|
-| Voice conversation plane | `backend.log`: `conversation_stream thread_id=` · `voice_dispatch job_id=` |
+| Voice conversation plane | `backend.log`: `conversation_stream thread_id=` · `turn_dispatch job_id=` |
 | Background jobs | `backend.log`: `job_start` · `job_status` |
 | Reranker hops | `backend.log`: `decision_hop_ms=` · `scenario=placement\|reorg_neighbor\|retrieval_expand` |
 | HITL approve/dismiss | `backend.log`: `hitl action=` |
-| Agent voice path | `voice_worker.log`: `voice_turn thread_id=` · `VAD utterance` · `STT utterance` |
+| Agent voice path | `voice_worker.log`: `dock_turn thread_id=` · `VAD utterance` · `STT utterance` |
 | Live decision dataset | `backend/logs/decision_traces/<project_id>/<date>.jsonl` (append on scorer + placement/reorg approve) |
 | Extract / slow LLM | `backend/logs/llm_traces/` |
 
 Quick greps (another terminal):
 
 ```bash
-rg 'conversation_stream|voice_dispatch|decision_hop_ms|hitl action|job_status' me-mex/.dev-stack/logs/backend.log
-rg 'voice_turn|STT utterance|voice_turn failed' me-mex/.dev-stack/logs/voice_worker.log
+rg 'conversation_stream|turn_dispatch|decision_hop_ms|hitl action|job_status' me-mex/.dev-stack/logs/backend.log
+rg 'dock_turn|STT utterance|dock_turn failed' me-mex/.dev-stack/logs/voice_worker.log
 ```
 
 Set `DECISION_TRACE_ENABLED=false` in `backend/.env` to skip JSONL append during a noisy session.
@@ -146,7 +148,7 @@ Use a **fresh project** name like `Demo — <your topic>` so the graph stays eas
 - **STT review:** after mute, edit draft in the voice rail before Send (unless `VOICE_AUTO_SEND_TURNS=1`).
 - **Revert:** each user bubble in the dock turn thread can roll back that turn and later ones; job history lists all runs.
 
-**Logs:** `voice_worker.log` → `STT utterance`, `voice_turn reply_len=…` (no `voice_turn failed`); on **long replies** expect several `TTS playback start` lines per turn when `VOICE_TTS_PIPELINED=true` (first sentence may play before `turn_end`); `backend.log` → `POST /api/voice/conversation/stream` with streaming conversation tokens and optional `dispatch job_id=…` (including `project_scope` jobs on P1); proactive TTS mainly on `awaiting_approval` dock nudges (not “Finished {STT label}” on scope) — no trailing ASGI `ERROR`.
+**Logs:** `voice_worker.log` → `STT utterance`, `dock_turn reply_len=…` (no `dock_turn failed`); on **long replies** expect several `TTS playback start` lines per turn when `VOICE_TTS_PIPELINED=true` (first sentence may play before `turn_end`); `backend.log` → `POST /api/conversation/turn/stream` with streaming conversation tokens and optional `dispatch job_id=…` (including `project_scope` jobs on P1); proactive TTS mainly on `awaiting_approval` dock nudges (not “Finished {STT label}” on scope) — no trailing ASGI `ERROR`.
 
 **Workflow:** [06 P1](./06-workflows.md#p1--first-voice-project-scope-before-research)
 
@@ -330,7 +332,7 @@ If REST works but voice fails, focus debugging on LiveKit + `voice_worker.log` b
 
 You have validated **workflow + voice + HITL** for a general research project. Reasonable next engineering tracks (see `reports/HANDOFF_2.md` §9):
 
-1. **Phase 2 harden:** LiveKit room smoke pytest; expand `voice_worker/tests/test_voice_bridge_workflow.py` for any §8 FAIL rows.
+1. **Phase 2 harden:** LiveKit room smoke pytest; expand `voice_worker/tests/test_dock_turn_bridge_workflow.py` for any §8 FAIL rows.
 2. **Skip:** Bulk markdown import (Phase 3)—deferred; grow the graph via voice/workflows only.
 3. **Phase 4 remainder:** canvas legend, dock done-strip / tool trace UI when the demo narrative is stable ([09 §Phase 4](./09-phasing.md#phase-4--live-traces-reranker-refresh-polish)).
 

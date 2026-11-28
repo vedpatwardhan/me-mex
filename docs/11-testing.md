@@ -1,5 +1,7 @@
 # Testing and CI
 
+> **Dock turn transport:** [2811_changelog.md](./2811_changelog.md) — no `livekit` marker; HTTP/SSE tests for `POST /api/conversation/turn/stream`.
+
 > **Canon:** [06-workflows.md](./06-workflows.md), [04-agent-orchestration.md](./04-agent-orchestration.md), [09-phasing.md](./09-phasing.md). **Goal:** Every **deterministic tool**, **worker agent**, **feature**, and **user workflow** has explicit **unit**, **integration**, and (where applicable) **end-to-end** coverage before a phase exit.
 
 v1 pytest suites live on git tag **`v1`** only. On `main`, `backend/tests/{unit,integration,e2e}` target composable tools and workflows—no orchestrator monolith gates.
@@ -112,19 +114,19 @@ me-mex/
 
 ### 3.5 Voice three-plane ([04 §12.11–12.13](./04-agent-orchestration.md))
 
-Marker **`voice_plane`** (default CI; HTTP/SSE only, no LiveKit room).
+Marker **`dock_turn_plane`** (default CI; HTTP/SSE only, no LiveKit room).
 
 | Contract | Test module |
 |----------|-------------|
-| Conversation no tools on voice | `test_voice_conversation_stream.py` |
-| Async dispatch off hot path | `test_voice_dispatch_enqueued.py` |
-| Dispatched source jobs use Conversation interim acks (no source URLs in prompt; no speculative paper claims in reply); normal Conversation receives only completed source results and no source-URL fields | `test_voice_source_gist_flow.py`, `test_conversation_voice_stream.py`, `test_session_briefing.py` |
-| Chit-chat skips worker | `test_voice_chit_chat_no_graph.py` |
+| Conversation no tools on voice | `test_conversation_turn_stream.py` |
+| Async dispatch off hot path | `test_turn_dispatch_enqueued.py` |
+| Dispatched source jobs use Conversation interim acks (no source URLs in prompt; no speculative paper claims in reply); normal Conversation receives only completed source results and no source-URL fields | `test_dock_turn_source_gist_flow.py`, `test_conversation_turn_stream.py`, `test_session_briefing.py` |
+| Chit-chat skips worker | `test_dock_turn_chit_chat_no_graph.py` |
 | Briefing API | `test_session_briefing_api.py` |
-| Worker reply not hot-path TTS | `test_streaming_voice_filter.py` |
-| Background source gist is acknowledged, then becomes a brief follow-up plus Review/Approve ROOT proposal | `test_voice_source_gist_flow.py`, `test_session_plane_gist_followup.py` |
+| Worker reply not hot-path TTS | `test_streaming_dock_turn_filter.py` |
+| Background source gist is acknowledged, then becomes a brief follow-up plus Review/Approve ROOT proposal | `test_dock_turn_source_gist_flow.py`, `test_session_plane_gist_followup.py` |
 | WorkflowAgent metadata | `test_workflow_agent.py` |
-| §12.13 surface | `test_voice_spec_invariants.py` |
+| §12.13 surface | `test_dock_turn_spec_invariants.py` |
 | W9 voice path | `test_workflow_w9_voice_summary.py` |
 
 ---
