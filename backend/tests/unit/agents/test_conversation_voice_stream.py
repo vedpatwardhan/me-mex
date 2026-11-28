@@ -2,11 +2,27 @@ import pytest
 from app.agents.conversation_utterance import (
     UtteranceIntent,
     astream_voice_conversation_reply,
+    astream_voice_conversation_speak,
     build_conversation_turn,
     conversation_prompt_inputs,
 )
 from app.config import settings
 from app.prompts import load_prompt
+
+
+@pytest.mark.asyncio
+async def test_astream_speak_mock_emits_token_events():
+    if settings.CHAT_LLM_MODE == "live":
+        pytest.skip("needs mock CHAT_LLM_MODE")
+    inp = {
+        "text": "User: hello\nRespond naturally.",
+        "project_scope": "Research project.",
+    }
+    kinds: list[str] = []
+    async for ev in astream_voice_conversation_speak(inp):
+        kinds.append(str(ev.get("kind")))
+    assert kinds
+    assert all(k == "token" for k in kinds)
 
 
 @pytest.mark.asyncio

@@ -95,8 +95,13 @@ def _ensure_p1_question_suffix(reply: str) -> str:
     return f"{text} What would you like to explore first?"
 
 
-async def astream_voice_conversation_reply(inp: dict[str, Any]) -> AsyncIterator[str]:
-    """Stream conversation tokens (plane 1 TTS source)."""
+def _chunk_mock_reply(reply: str) -> list[str]:
+    step = max(1, min(32, len(reply) // 4 or 1))
+    return [reply[i : i + step] for i in range(0, len(reply), step)]
+
+
+async def astream_voice_conversation_speak(inp: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+    """Stream conversation tokens and optional Colab TTS audio (plane 1)."""
     if settings.CHAT_LLM_MODE != "live" or is_chains_overridden():
         chains = get_chains()
         reply = chains.conversation.invoke(inp)
@@ -104,27 +109,38 @@ async def astream_voice_conversation_reply(inp: dict[str, Any]) -> AsyncIterator
             reply = str(reply)
         if _p1_onboarding_turn(inp):
             reply = _ensure_p1_question_suffix(reply)
-        step = max(1, min(32, len(reply) // 4 or 1))
-        for i in range(0, len(reply), step):
-            yield reply[i : i + step]
+        for piece in _chunk_mock_reply(reply):
+            yield {"kind": "token", "content": piece}
         return
 
     messages = _conversation_openai_messages(inp)
     pieces: list[str] = []
-    async for piece in llm_gateway.stream_chat_completion(
+    async for ev in llm_gateway.stream_voice_speak(
         messages,
         max_tokens=settings.VOICE_FOREGROUND_MAX_TOKENS,
-        enable_reasoning=False,
         caller="Conversation",
     ):
-        if piece:
-            pieces.append(piece)
+        if ev.get("kind") == "token":
+            pieces.append(str(ev.get("content") or ""))
+        yield ev
+
     reply = "".join(pieces)
     if _p1_onboarding_turn(inp):
-        reply = _ensure_p1_question_suffix(reply)
-    step = max(1, min(32, len(reply) // 4 or 1))
-    for i in range(0, len(reply), step):
-        yield reply[i : i + step]
+        patched = _ensure_p1_question_suffix(reply)
+        if patched != reply:
+            extra = patched[len(reply) :]
+            if extra:
+                for piece in _chunk_mock_reply(extra):
+                    yield {"kind": "token", "content": piece}
+
+
+async def astream_voice_conversation_reply(inp: dict[str, Any]) -> AsyncIterator[str]:
+    """Stream conversation tokens only (mock / tests)."""
+    async for ev in astream_voice_conversation_speak(inp):
+        if ev.get("kind") == "token":
+            content = str(ev.get("content") or "")
+            if content:
+                yield content
 
 
 def _yield_chunks(text: str, width: int = 32) -> list[str]:
@@ -190,25 +206,32 @@ def _dispatch_violates_evidence_boundary(reply: str) -> bool:
     return any(p.search(text) for p in _FORBIDDEN_DISPATCH_PATTERNS)
 
 
+async def _collect_voice_speak(inp: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+    events: list[dict[str, Any]] = []
+    tokens: list[str] = []
+    async for ev in astream_voice_conversation_speak(inp):
+        events.append(ev)
+        if ev.get("kind") == "token":
+            tokens.append(str(ev.get("content") or ""))
+    return events, "".join(tokens).strip()
+
+
 async def astream_conversation_utterance(
     inp: dict[str, Any],
     *,
     intent: UtteranceIntent,
-) -> AsyncIterator[str]:
+) -> AsyncIterator[dict[str, Any]]:
     """Stream a Conversation reply; apply dispatch evidence lint for interim intents."""
     dispatch_guard = intent in (
         UtteranceIntent.DISPATCH_INTERIM,
         UtteranceIntent.MULTI_DISPATCH_INTERIM,
     )
     if not dispatch_guard:
-        async for piece in astream_voice_conversation_reply(inp):
-            yield piece
+        async for ev in astream_voice_conversation_speak(inp):
+            yield ev
         return
 
-    pieces: list[str] = []
-    async for piece in astream_voice_conversation_reply(inp):
-        pieces.append(piece)
-    text = "".join(pieces).strip()
+    events, text = await _collect_voice_speak(inp)
     if _dispatch_violates_evidence_boundary(text):
         import logging
 
@@ -220,14 +243,14 @@ async def astream_conversation_utterance(
             inp["text"] + "\n[reminder]Do not mention URLs, hosts, or paper content. "
             "Acknowledge the task and dock only.[/reminder]"
         )
-        pieces = []
-        async for piece in astream_voice_conversation_reply(retry_inp):
-            pieces.append(piece)
-        text = "".join(pieces).strip()
+        events, text = await _collect_voice_speak(retry_inp)
         if _dispatch_violates_evidence_boundary(text):
-            text = EMERGENCY_FALLBACK
-    for chunk in _yield_chunks(text):
-        yield chunk
+            events = [
+                {"kind": "token", "content": chunk} for chunk in _yield_chunks(EMERGENCY_FALLBACK)
+            ]
+
+    for ev in events:
+        yield ev
 
 
 def invoke_conversation_utterance(
